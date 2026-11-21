@@ -1,3 +1,4 @@
+import { signalDedupKey } from '@/lib/signalLibrary';
 import {readFishLibrary} from '@/lib/fish/libraryLoadQueue';
 import { reserveInstantAdmission } from '@/lib/fish/instantAdmission';
 import { readInstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
@@ -12,7 +13,8 @@ import { loadPreEntryLibraryV4 } from '@/lib/fish/preEntryMonitorV4Store';
 import { loadPreEntryLibraryV5 } from '@/lib/fish/preEntryMonitorV5Store';
 import { loadPreEntryLibraryV6, loadPreEntryWorkspaceDraft, savePreEntryWorkspaceDraft, discardPublishedWorkspaceDraft, savePreEntryLibraryV6 as savePreEntryLibrary, savePreEntryTableClears } from '@/lib/fish/preEntryMonitorV6Store';
 import { withPreEntryTableClears } from '@/lib/fish/preEntryTableClears';
-import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
+import { readActiveInstantRecordIds } from '@/lib/fish/instantCampaignStore';
+import { readAutomaticPreEntryCheckpoint, readOpenAdmissionCheckpoints } from '@/lib/fish/preEntryPersistence';
 import {projectPreEntryBatch} from '@/lib/fish/preEntryArchiveClient';
 import { usesSignalTimeGate, PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
 import { qualitySignalTime } from '@/lib/fish/qualityAdmissionTime';
@@ -31,6 +33,12 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const [automaticError, setAutomaticError] = useState('');
   const [error, setError] = useState(''), [progress, setProgress] = useState<QualityProgress | null>(null);
   const [reload, setReload] = useState(0);
+  const [preview, setPreview] = useState<PreEntryLibrary>();
+  const [instantReady, setInstantReady] = useState(false);
+  const [instantLoadError, setInstantLoadError] = useState('');
+  const [missingCheckpoint, setMissingCheckpoint] = useState<string>();
+  const [libraryOwner, setLibraryOwner] = useState(owner);
+  const instantReadyRef = useRef(false);
   const current = useRef(library), runner = useRef(run);
   const unconfirmedAdmissions = useRef(new Map<string, PreEntryRound>());
   const lanes = useRef<{ manual: ScreeningLane; automatic: ScreeningLane }>({ manual: {}, automatic: {} });
@@ -50,15 +58,55 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const commit = useCallback((value: PreEntryLibrary) => { current.current = value; setLibrary(value); }, []);
   useEffect(() => {
     const generation = ++epoch.current;
-    unconfirmedAdmissions.current.clear();
+    unconfirmedAdmissions.current.clear(); setMissingCheckpoint(undefined); setLibraryOwner(owner);
     readyRef.current = false; setReady(false); setRunning(false); setAutomaticRunning(false); setAutomaticError(''); setProgress(null); setError('');
     tableClearLock.current=false;savingDraft.current=false;setSavingWorkspaceDraft(false);commit(emptyPreEntryLibrary());
+    setPreview(undefined); setInstantReady(false); setInstantLoadError(''); instantReadyRef.current = false;
+    let reading = false, retryPositions: ReturnType<typeof setTimeout>;
+    const restorePositions = async () => {
+      if (!owner || !workspaceMode || typeof indexedDB === 'undefined' || reading || instantReadyRef.current || readyRef.current) return;
+      reading = true; clearTimeout(retryPositions);
+      try {
+        const ids = await readActiveInstantRecordIds(owner);
+        const active = await readOpenAdmissionCheckpoints(owner, ids);
+        if (epoch.current !== generation || readyRef.current) return;
+        if (active.records.length) commit(mergePreEntryLibraries(current.current, active));
+        instantReadyRef.current = true; setInstantReady(true); setInstantLoadError('');
+      } catch (cause) {
+        if (epoch.current === generation && !readyRef.current) {
+          setInstantLoadError(cause instanceof Error ? cause.message : '即时持仓记录读取失败');
+          retryPositions = setTimeout(restorePositions, 30_000);
+        }
+      } finally { reading = false; }
+    };
+    void restorePositions();
+    window.addEventListener('focus', restorePositions);
+    window.addEventListener('online', restorePositions);
+    const flush = () => { if (readyRef.current) void persistence.save(current.current).catch(() => undefined); };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      for (const lane of Object.values(lanes.current)) {
+        lane.controller?.abort();
+        clearTimeout(lane.timer);
+      }
+      lanes.current = { manual: {}, automatic: {} };
+      flush(); epoch.current = generation + 1; clearTimeout(retryPositions);
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('focus', restorePositions);
+      window.removeEventListener('online', restorePositions);
+    };
+  }, [owner, commit, persistence, workspaceMode]);
+
+  useEffect(() => {
     if (!enabled) return;
-    let loaded = false;
+    const generation = epoch.current;
+    let active = true;
+    const valid = () => active && epoch.current === generation;
+    readyRef.current = false; setReady(false); setError('');
     void readFishLibrary(owner, 'screening', async () => {
-      if (epoch.current !== generation) return;
+      if (!valid()) return;
       const newLibrary = await loadPreEntryLibraryV6(owner, preview => {
-        if (epoch.current === generation) commit(preview);
+        if (valid()) setPreview(preview);
       }, reload > 0);
       const v5 = await loadPreEntryLibraryV5(owner);
       const v4 = await loadPreEntryLibraryV4(owner);
@@ -78,7 +126,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       // Once v6 has its own settings, a still-open older page cannot replace
       // them merely by saving its older schema with a later timestamp.
       if (newLibrary.settings) value.settings = newLibrary.settings;
-      if (epoch.current !== generation) return;
+      if (!valid()) return;
       persistence.seed(drafts ? mergePreEntryLibraries(newLibrary,drafts) : newLibrary);
       // An interrupted page has no live task. Keep its frozen conditions and cursor for explicit resume.
       const at = Date.now();
@@ -87,38 +135,44 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
         recordedRounds.add(record.roundId);
         if (preEntryRecordPending(record)) pendingRounds.add(record.roundId);
       }
+      // Only interrupted history needs a synthetic pause. A live task owns its cursor.
+      const live = current.current;
+      const hotRounds = live.rounds.filter(isAutomaticPreEntryRound);
+      const hotIds = new Set(hotRounds.map(round => round.id));
       const recovered = { ...value, rounds: value.rounds.map(r => {
+        if (hotIds.has(r.id)) return r;
         if (r.state !== 'complete' && recordedRounds.has(r.id) && !pendingRounds.has(r.id)) {
           return { ...r, state: 'complete' as const, updatedAt: at };
         }
         return r.state === 'running' ? { ...r, state: 'paused' as const, updatedAt: at } : r;
       }),
-        records: value.records.map(r => r.status === 'scanning' ? { ...r, status: 'paused' as const, updatedAt: at } : r) };
-      commit(recovered); loaded = true; readyRef.current = true; setReady(true);
+        records: value.records.map(r => r.status === 'scanning' && !hotIds.has(r.roundId) ? { ...r, status: 'paused' as const, updatedAt: at } : r) };
+      const combined = hotIds.size ? mergePreEntryLibraries(recovered, {
+        version: 1, rounds: hotRounds, records: live.records.filter(record => hotIds.has(record.roundId)),
+      }) : recovered;
+      commit(combined); setMissingCheckpoint(undefined); setPreview(undefined); setInstantLoadError(''); readyRef.current = true; setReady(true);
       if (draft?.rounds.length) {
         const savedInV6 = new Set(newLibrary.rounds.filter(round => round.workspaceSaved).map(round => round.id));
         const duplicates = draft.rounds.filter(round => round.workspaceDraft && round.state === 'complete' && savedInV6.has(round.id)).map(round => round.id);
         if (duplicates.length) void discardPublishedWorkspaceDraft(owner,duplicates).catch(()=>undefined);
       }
-    }).catch(reason => { if (epoch.current === generation) setError(reason instanceof Error ? reason.message : '读取买前监测库失败'); });
-    const flush = () => { if (loaded) void persistence.save(current.current).catch(() => undefined); };
-    window.addEventListener('pagehide', flush);
-    return () => {
-      for (const lane of Object.values(lanes.current)) {
-        lane.controller?.abort();
-        clearTimeout(lane.timer);
-      }
-      lanes.current = { manual: {}, automatic: {} };
-      flush(); epoch.current = generation + 1;
-      window.removeEventListener('pagehide', flush);
-    };
+    }).catch(reason => { if (valid()) setError(reason instanceof Error ? reason.message : '读取买前监测库失败'); });
+    return () => { active = false; };
   }, [owner, enabled, reload, commit, persistence, workspaceMode]);
+
+  const persistAdmission = useCallback(async (record: PreEntryRecord, completed: PreEntryRound, reserve: boolean) => {
+    const occupied = reserve && completed.instantTrading && owner && !await reserveInstantAdmission(owner, record, completed);
+    const result = occupied
+      ? { ...record, status: 'unmatched' as const, matchedAt: undefined, detail: '该标的已有持仓，本次信号跳过开仓' } : record;
+    await savePreEntryLibrary(owner, { version: 1, rounds: [completed], records: [result] }, true);
+    return result;
+  }, [owner]);
 
   const execute = useCallback(async (round: PreEntryRound, study: FishQualityStudy, onMatch?: (match: AutomaticScreeningMatch) => void) => {
     const automatic = isAutomaticPreEntryRound(round);
     const lane = automatic ? lanes.current.automatic : lanes.current.manual;
     const reportError = automatic ? setAutomaticError : setError;
-    if (!readyRef.current || lane.controller || !automatic && (tableClearLock.current || savingDraft.current)) return;
+    if (!(readyRef.current || round.instantTrading && instantReadyRef.current) || lane.controller || !automatic && (tableClearLock.current || savingDraft.current)) return;
     const generation = epoch.current, aborter = new AbortController(); lane.controller = aborter;
     let finish!: () => void;
     const finished = new Promise<void>(resolve => { finish = resolve; }); lane.execution = finished;
@@ -146,25 +200,16 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     };
     let matchCheckpoint: Promise<boolean> | undefined, admittedRound: PreEntryRound | undefined;
     const checkpointMatch = (record: PreEntryRecord, completed: PreEntryRound): Promise<boolean> => (async () => {
-      if (round.instantTrading && owner && !await reserveInstantAdmission(owner, record, completed)) {
-        const skipped = { ...record, status: 'unmatched' as const, matchedAt: undefined, detail: '该标的已有持仓，本次信号跳过开仓' };
-        await savePreEntryLibrary(owner, { version: 1, rounds: [completed], records: [skipped] }, true);
-        if (live()) {
-          commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === completed.id ? completed : r), records: current.current.records.map(r => r.id === record.id ? skipped : r) });
-          unconfirmedAdmissions.current.delete(completed.id);
-        }
-        return true;
+      const saved = await persistAdmission(record, completed, true);
+      if (live()) {
+        commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === completed.id ? completed : r),
+          records: current.current.records.map(r => r.id === record.id ? saved : r) });
+        unconfirmedAdmissions.current.delete(completed.id);
+        setAutomaticError('');
+        if (saved.status === 'matched') onMatch?.({ record: saved, round: completed });
       }
-      return savePreEntryLibrary(owner, { version: 1, rounds: [completed], records: [record] }, true).then(() => {
-        if (live()) {
-          commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === completed.id ? completed : r) });
-          unconfirmedAdmissions.current.delete(completed.id);
-          setAutomaticError('');
-          onMatch?.({ record, round: completed });
-        }
-        void projectCompleted([record]).catch(() => undefined);
-        return true;
-      });
+      void projectCompleted([saved]).catch(() => undefined);
+      return true;
     })().catch(() => false);
     const save = async () => {
       try {
@@ -248,18 +293,39 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       if (lane.execution === finished) lane.execution = undefined;
       finish();
     }
-  }, [commit, persistence, owner]);
+  }, [commit, persistence, owner, persistAdmission]);
   const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false, onMatch?: (match: AutomaticScreeningMatch) => void, automaticSettings?: PreEntrySettings, instantTrading?: true, liveCapturedAt?: number) => {
     const settings = automaticSettings ?? current.current.settings;
     const lane = automaticId ? lanes.current.automatic : lanes.current.manual;
     const reportError = automaticId ? setAutomaticError : setError;
-    if (!readyRef.current || lane.controller || !automaticId && (tableClearLock.current || savingDraft.current)) return;
+    const canStart = () => readyRef.current || !!(automaticId && instantTrading && instantReadyRef.current);
+    if (!canStart() || lane.controller || !automaticId && (tableClearLock.current || savingDraft.current)) return;
     if (automaticId) {
-      if (owner && recover) {
+      if (owner && (recover || !readyRef.current)) {
         const generation = epoch.current;
-        const saved = await readAutomaticPreEntryCheckpoint(owner, automaticId);
-        if (generation !== epoch.current || !readyRef.current || lane.controller) return;
-        if (saved) commit(mergePreEntryLibraries(current.current, saved));
+        let saved: PreEntryLibrary | undefined;
+        try { saved = await readAutomaticPreEntryCheckpoint(owner, automaticId, !readyRef.current); }
+        catch (cause) {
+          if (epoch.current === generation) {
+            setMissingCheckpoint(automaticId);
+            setAutomaticError(cause instanceof Error ? cause.message : '自动筛选进度读取失败');
+          }
+          return;
+        }
+        if (generation !== epoch.current || !canStart() || lane.controller) return;
+        if (saved && !readyRef.current) {
+          const original = saved.records[0]?.sample?.source, queued = qualityRunSamples(study)[0]?.source;
+          if (!saved.rounds[0]?.instantTrading || !original || !queued || signalDedupKey(original) !== signalDedupKey(queued)) {
+            setMissingCheckpoint(automaticId); return;
+          }
+        }
+        if (saved) {
+          commit(mergePreEntryLibraries(current.current, saved));
+          setMissingCheckpoint(previous => previous === automaticId ? undefined : previous);
+        }
+        if (!saved && recover && !readyRef.current && !current.current.rounds.some(round => round.id === automaticId)) {
+          setMissingCheckpoint(automaticId); return;
+        }
       }
       const existing = current.current.rounds.find(round => round.id === automaticId);
       if (existing) {
@@ -272,12 +338,13 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
             const frozen = unconfirmedAdmissions.current.get(existing.id) ?? existing;
             const completed: PreEntryRound = { ...frozen,
               state: 'complete', updatedAt: Math.max(existing.updatedAt, record.updatedAt) };
-            await savePreEntryLibrary(owner, { version: 1, rounds: [completed], records: [record] }, true);
+            const saved = await persistAdmission(record, completed, existing.state !== 'complete' || unconfirmedAdmissions.current.has(existing.id));
             if (generation === epoch.current) {
-              commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === completed.id ? completed : r) });
+              commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === completed.id ? completed : r),
+                records: current.current.records.map(r => r.id === record.id ? saved : r) });
               unconfirmedAdmissions.current.delete(completed.id);
               setAutomaticError('');
-              onMatch({ record, round: completed });
+              if (saved.status === 'matched') onMatch({ record: saved, round: completed });
             }
           } catch (reason) {
             if (generation === epoch.current) setAutomaticError(reason instanceof Error ? reason.message : '入选结果尚未保存');
@@ -315,7 +382,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     // The screening engine reads its frozen round and records, never the research history.
     // Do not duplicate hundreds of MB of unrelated results when starting a task.
     await execute(round, newQualityStudy(study.startedAt), onMatch);
-  }, [execute, commit, owner, workspaceMode]);
+  }, [execute, commit, owner, workspaceMode, persistAdmission]);
   const resume = useCallback(async (roundId: string, study: FishQualityStudy) => {
     const round = current.current.rounds.find(r => r.id === roundId);
     if (round) await execute(round, newQualityStudy(study.startedAt));
@@ -369,10 +436,11 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const next={...mergePreEntryLibraries(current.current,historical),settings:current.current.settings};
     try{await persistence.save(next);if(epoch.current!==generation)return false;commit({...mergePreEntryLibraries(current.current,next),settings:current.current.settings});return true;}catch{return false;}
   },[commit,persistence]);
+  const displayLibrary = useMemo(() => preview ? mergePreEntryLibraries(preview, library) : library, [preview, library]);
   const savedLibrary = useMemo(() => {
-    const draftIds = new Set(library.rounds.filter(round => round.workspaceDraft).map(round => round.id));
-    return !draftIds.size ? library : {...library,rounds:library.rounds.filter(round => !draftIds.has(round.id)),records:library.records.filter(record => !draftIds.has(record.roundId))};
-  },[library]);
+    const draftIds = new Set(displayLibrary.rounds.filter(round => round.workspaceDraft).map(round => round.id));
+    return !draftIds.size ? displayLibrary : {...displayLibrary,rounds:displayLibrary.rounds.filter(round => !draftIds.has(round.id)),records:displayLibrary.records.filter(record => !draftIds.has(record.roundId))};
+  },[displayLibrary]);
   const saveWorkspaceScreening = useCallback(async () => {
     if (!readyRef.current || savingDraft.current) return false;
     const completed = current.current.rounds.filter(round => round.workspaceDraft && round.state === 'complete');
@@ -395,7 +463,10 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       if (generation === epoch.current) {savingDraft.current=false;setSavingWorkspaceDraft(false);}
     }
   },[commit,owner]);
-  return { library, savedLibrary, saveWorkspaceScreening, savingWorkspaceDraft, ready, running, automaticRunning, automaticError, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
+  const sameOwner = libraryOwner === owner;
+  return { library: sameOwner ? displayLibrary : emptyPreEntryLibrary(), automaticLibrary: sameOwner ? library : emptyPreEntryLibrary(),
+    instantReady: sameOwner && (instantReady || ready), instantLoadError, missingCheckpoint,
+    savedLibrary: sameOwner ? savedLibrary : emptyPreEntryLibrary(), saveWorkspaceScreening, savingWorkspaceDraft, ready: sameOwner && ready, running, automaticRunning, automaticError, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
     startAutomatic: (id: string, study: FishQualityStudy, recover: boolean, onMatch?: (match: AutomaticScreeningMatch) => void, settings?: PreEntrySettings, instantTrading?: true, liveCapturedAt?: number) =>
       start(study, newPreEntryHours((settings ?? current.current.settings)?.hours), id, recover, onMatch, settings, instantTrading, liveCapturedAt),
     pauseAutomatic: () => lanes.current.automatic.controller?.abort(),

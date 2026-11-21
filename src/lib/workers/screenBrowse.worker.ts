@@ -1,12 +1,10 @@
-import {readPreEntryReadModel,readPreEntryTableClears} from '../fish/preEntryPersistence';
-import {screenBrowse} from '../fish/screenBrowse';
-import type {LibraryDirectoryEdits} from '../fish/libraryDirectoryEdits';
+import {indexExistingScreenSnapshot} from '../fish/preEntryPersistence';
 
-// Read the already validated account view independently of the restore queue.
-self.onmessage=async(event:MessageEvent<{owner:string;edits?:LibraryDirectoryEdits}>)=>{
+self.onmessage=async(event:MessageEvent<{owner:string}>)=>{
   try{
-    const {owner,edits}=event.data;
-    const library=await readPreEntryReadModel(owner);
-    self.postMessage(library?screenBrowse(library,await readPreEntryTableClears(owner),edits):null);
-  }catch{self.postMessage(null);}
+    await indexExistingScreenSnapshot(event.data.owner);
+    self.postMessage({ok:true});
+  }catch(error){
+    self.postMessage({ok:false,message:error instanceof Error?error.message:'本机目录读取失败'});
+  }
 };

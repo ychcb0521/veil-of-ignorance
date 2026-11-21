@@ -1,4 +1,7 @@
 import { emptyPreEntryLibrary, isAutomaticPreEntryRound, mergePreEntryLibraries, preEntryRecordPending, type PreEntryLibrary, type PreEntryRecord, type PreEntryRound } from './preEntryMonitor';
+import {screenBrowse} from './screenBrowse';
+import type {BrowseGroup,BrowseRow} from './libraryBrowse';
+import type {LibraryDirectoryEdits} from './libraryDirectoryEdits';
 import { serializeAccountBlobChunks } from '../accountBlobCodec';
 import {restorePreEntryRecord,projectPreEntryRecord,projectPreEntryRecords} from './preEntryArchive';
 import { mergePreEntryTableClears, validPreEntryTableClears, withPreEntryTableClears, type PreEntryTableClears } from './preEntryTableClears';
@@ -11,6 +14,63 @@ const clearKey = (owner?: string) => `table-clears:${keyOf(owner)}`;
 const metaKey = (owner?: string) => `incremental:${keyOf(owner)}:meta`;
 const rowPrefix = (owner?: string) => `incremental:${keyOf(owner)}:record:`;
 const viewKey=(owner?:string)=>`read-model:${keyOf(owner)}`;
+const browseKey=(owner?:string)=>'browse-v1:'+JSON.stringify(owner??null)+':';
+export interface LocalScreenCatalog {id:string;groups:BrowseGroup[];edits?:LibraryDirectoryEdits}
+interface LocalScreenHeader extends LocalScreenCatalog {meta:string}
+
+function storeScreenIndex(store:IDBObjectStore,owner:string|undefined,library:PreEntryLibrary,meta:string){
+  const prefix=browseKey(owner),snapshot=screenBrowse(library,{});
+  store.delete(IDBKeyRange.bound(prefix,prefix+'\uffff'));
+  const header:LocalScreenHeader={id:crypto.randomUUID(),groups:snapshot?.groups??[],edits:library.directoryEdits,meta};
+  store.put(header,prefix+'header');
+  for(const [key,rows] of Object.entries(snapshot?.pages??{}))store.put(rows,prefix+'page:'+key);
+}
+
+/** Explicit compatibility action for accounts with a verified pre-index local snapshot. */
+export async function indexExistingScreenSnapshot(owner:string):Promise<void>{
+  const db=await open();
+  try{await new Promise<void>((resolve,reject)=>{
+    const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE);
+    const view=store.get(viewKey(owner)),metadata=store.get(metaKey(owner));
+    let indexed=false;
+    metadata.onsuccess=()=>{
+      const cached=view.result,meta=JSON.stringify(metadata.result??null);
+      if(!validReadModel(cached)||!cached.complete||cached.meta!==meta)return;
+      storeScreenIndex(store,owner,cached.library,meta); indexed=true;
+    };
+    tx.oncomplete=()=>indexed?resolve():reject(Error('本机没有可核验的完整 v6 快照'));
+    tx.onerror=tx.onabort=()=>reject(tx.error??Error('本机筛选目录建立失败'));
+  });}finally{db.close();}
+}
+
+async function readScreenBrowsePart(owner:string, page?:{catalogId:string;key:string}):Promise<LocalScreenCatalog|BrowseRow[]|undefined>{
+  const db=await open();
+  try{return await new Promise((resolve,reject)=>{
+    const tx=db.transaction(STORE,'readonly'),store=tx.objectStore(STORE),prefix=browseKey(owner);
+    const manifest=store.get(prefix+'header'),meta=store.get(metaKey(owner));
+    let value:LocalScreenCatalog|BrowseRow[]|undefined;
+    meta.onsuccess=()=>{
+      const header=manifest.result as LocalScreenHeader|undefined;
+      if(!header||header.meta!==JSON.stringify(meta.result??null))return;
+      if(!page){value={id:header.id,groups:header.groups,edits:header.edits};return;}
+      if(page.catalogId!==header.id||!header.groups.some(group=>group.pages.includes(page.key)))return;
+      const body=store.get(prefix+'page:'+page.key),clears=store.get(clearKey(owner));
+      clears.onsuccess=()=>{
+        if(!Array.isArray(body.result))return;
+        const marks=clears.result??{};
+        value=(body.result as BrowseRow[]).map(row=>marks[row[3]]&&!row[2].endsWith('组合表已清除')?[row[0],row[1],row[2]+' · 组合表已清除',row[3]]:row);
+      };
+    };
+    tx.oncomplete=()=>resolve(value);
+    tx.onerror=tx.onabort=()=>reject(tx.error??Error('本机筛选目录读取失败'));
+  });}finally{db.close();}
+}
+export const readScreenCatalog=(owner:string)=>readScreenBrowsePart(owner) as Promise<LocalScreenCatalog|undefined>;
+export async function readScreenPage(owner:string,catalogId:string,key:string){
+  const rows=await readScreenBrowsePart(owner,{catalogId,key});
+  if(!Array.isArray(rows))throw Error('本机筛选目录已更新，请重新读取');
+  return rows;
+}
 interface ReadModel {version:1;complete:boolean;library:PreEntryLibrary;generation?:string;meta?:string}
 export interface PreEntryCacheRevision {generation?:string;meta:string}
 const validReadModel=(value:unknown):value is ReadModel=>{const v=value as ReadModel;return v?.version===1&&typeof v.complete==='boolean'&&validPreEntryLibrary(v.library);};
@@ -18,8 +78,39 @@ export function validPreEntryLibrary(value: unknown): value is PreEntryLibrary {
   const data = value as PreEntryLibrary;
   return data?.version === 1 && Array.isArray(data.rounds) && Array.isArray(data.records);
 }
+/** Read open positions' canonical admissions without materializing the history or its display cache. */
+export async function readOpenAdmissionCheckpoints(owner: string, recordIds: readonly string[]): Promise<PreEntryLibrary> {
+  const result = emptyPreEntryLibrary();
+  if (!recordIds.length) return result;
+  const db = await open();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly'), store = tx.objectStore(STORE);
+      const meta = store.get(metaKey(owner));
+      meta.onsuccess = () => {
+        const rounds = new Map((validPreEntryLibrary(meta.result) ? meta.result.rounds : [])
+          .filter(round => isAutomaticPreEntryRound(round) && round.state === 'complete').map(round => [round.id, round]));
+        for (const id of new Set(recordIds)) {
+          const row = store.get(rowPrefix(owner) + id);
+          row.onsuccess = () => {
+            const record: PreEntryRecord | undefined = row.result;
+            const round = record && rounds.get(record.roundId);
+            if (!round || record?.id !== id || record.status !== 'matched' || !(record.matchedAt! > 0)) return;
+            result.rounds.push(round);
+            result.records.push(record);
+          };
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? Error('即时持仓记录读取失败'));
+    });
+    if (result.records.length !== new Set(recordIds).size) throw Error('有持仓的原始入选记录待恢复');
+    return result;
+  } finally { db.close(); }
+}
+
 /** Read just one automatic round and its row when another tab handed off the job. */
-export async function readAutomaticPreEntryCheckpoint(owner: string, id: string): Promise<PreEntryLibrary | undefined> {
+export async function readAutomaticPreEntryCheckpoint(owner: string, id: string, requireIntact = false): Promise<PreEntryLibrary | undefined> {
   const db = await open();
   try {
     return await new Promise((resolve, reject) => {
@@ -27,12 +118,17 @@ export async function readAutomaticPreEntryCheckpoint(owner: string, id: string)
       const meta = store.get(metaKey(owner));
       let value: PreEntryLibrary | undefined;
       meta.onsuccess = () => {
-        const round = validPreEntryLibrary(meta.result) ? meta.result.rounds.find(round => round.id === id && isAutomaticPreEntryRound(round)) : undefined;
-        const plan = round?.plans?.[0];
-        if (!round || !plan) return;
+        if (meta.result == null) return;
+        if (!validPreEntryLibrary(meta.result)) { if (requireIntact) reject(Error('自动筛选进度目录无效')); return; }
+        const round = meta.result.rounds.find(round => round.id === id);
+        if (!round) return;
+        const plan = round.plans?.[0];
+        if (!isAutomaticPreEntryRound(round) || !plan) { if (requireIntact) reject(Error('自动筛选的冻结方案不完整')); return; }
         const row = store.get(rowPrefix(owner) + `${id}:0:${plan.id}`);
         row.onsuccess = () => {
-          if (row.result) value = { version: 1, rounds: [round], records: [row.result] };
+          const record = row.result as PreEntryRecord | undefined;
+          if (record?.roundId === id && record.id === `${id}:0:${plan.id}`) value = { version: 1, rounds: [round], records: [record] };
+          else if (requireIntact) reject(Error('自动筛选的原始进度不完整'));
         };
       };
       tx.oncomplete = () => resolve(value);
@@ -104,7 +200,10 @@ export async function cachePreEntryReadModel(owner:string|undefined,library:PreE
       // An authoritative rebuild must not carry forward rows already removed
       // from the canonical checkpoint or reinstate a stale reader's cache.
       merged=complete&&!preferIncoming&&expected?library:preferIncoming?mergePreEntryLibraries(previous,library):mergePreEntryLibraries(library,previous);
-      store.put({version:1,generation:old?.generation,meta,complete:complete||!!old?.complete&&old.meta===meta,library:merged},viewKey(owner));
+      const isComplete=complete||!!old?.complete&&old.meta===meta;
+      store.put({version:1,generation:old?.generation,meta,complete:isComplete,library:merged},viewKey(owner));
+      if(isComplete)storeScreenIndex(store,owner,merged,meta);
+      else store.delete(browseKey(owner)+'header');
     };
     tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error);
   });}finally{db.close();}
@@ -253,6 +352,7 @@ export async function writePreEntrySnapshot(owner: string | undefined, delta: Pr
         if(next)saved.onsuccess=next;
       } catch (error) { failure=error; tx.abort(); } };
     };
+    store.delete(browseKey(owner)+'header');
     update(metaKey(owner), {...delta, records:[]});
     const updateRow=(index:number)=>{
       if(index>=delta.records.length)return;
@@ -341,6 +441,7 @@ export async function removePublishedPreEntryDrafts(draftOwner: string, owner: s
                   store.put({...draft.result,rounds:draft.result.rounds.filter((round: PreEntryRound) => round.id !== roundId)},metaKey(draftOwner));
                   for (const key of matched) store.delete(key);
                   store.delete(viewKey(draftOwner));
+                  store.delete(browseKey(draftOwner)+'header');
                   return;
                 }
                 const key = cursor.primaryKey as string, id = key.slice(draftPrefix.length);

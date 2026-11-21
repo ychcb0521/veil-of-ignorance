@@ -21,6 +21,7 @@ async function markBackupSynced(owner: string, backup: Backup) {
 export function useInstantMonitorSettings(owner: string | undefined) {
   const [saved, setSaved] = useState(() => ({ owner, settings: owner ? readInstantMonitorSettings(owner) : undefined }));
   const [pendingOwner, setPendingOwner] = useState<string>();
+  const [restore, setRestore] = useState<{ owner: string; ok: boolean }>();
   const inFlight = useRef<Pending>();
   const pending = useRef<Pending>();
   useEffect(() => {
@@ -54,7 +55,8 @@ export function useInstantMonitorSettings(owner: string | undefined) {
     window.addEventListener('online', onOnline);
 
     const startingRaw = readPersistedStateRaw(key);
-    if (typeof indexedDB !== 'undefined') void readFishPreferences<Backup | null>([backupKey(owner)]).then(([backup]) => {
+    const restoreBackup = async () => {
+      const [backup] = typeof indexedDB === 'undefined' ? [] : await readFishPreferences<Backup | null>([backupKey(owner)]);
       if (!active || !backup || inFlight.current || readPersistedStateRaw(key) !== startingRaw) return;
       const metadata = getUnpersistedStateMetadata(key);
       let shadow = 0;
@@ -71,9 +73,16 @@ export function useInstantMonitorSettings(owner: string | undefined) {
         setPendingOwner(owner);
         if (navigator.onLine !== false) onOnline();
       }
-    }).catch(() => { /* The existing local or cloud settings remain available. */ });
+    };
+    let retry: ReturnType<typeof setTimeout>;
+    const read = () => void restoreBackup().then(() => {
+      if (active) setRestore({ owner, ok: true });
+    }, () => {
+      if (active) { setRestore({ owner, ok: false }); retry = setTimeout(read, 15_000); }
+    });
+    read();
     return () => {
-      active = false;
+      active = false; clearTimeout(retry);
       unsubscribe();
       window.removeEventListener('online', onOnline);
       window.removeEventListener('storage', onStorage);
@@ -124,5 +133,5 @@ export function useInstantMonitorSettings(owner: string | undefined) {
       if (inFlight.current === item) inFlight.current = undefined;
     }
   }, [owner]);
-  return { settings: saved.owner === owner ? saved.settings : undefined, save, pendingCloud: !!owner && pendingOwner === owner };
+  return { restoreStatus: restore?.owner !== owner || !restore ? 'loading' as const : restore.ok ? 'ready' as const : 'error' as const, settings: saved.owner === owner ? saved.settings : undefined, save, pendingCloud: !!owner && pendingOwner === owner };
 }

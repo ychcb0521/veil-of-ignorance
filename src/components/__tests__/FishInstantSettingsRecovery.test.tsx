@@ -16,6 +16,18 @@ function openAfter() {
   fireEvent.click(screen.getByRole('button',{name:'即时交易条件设置'}));
   fireEvent.click(screen.getByRole('button',{name:'买后设置'}));
 }
+it('shows screening while the archive is loading and identifies the specific prerequisite when blocked', () => {
+  const automatic = {paused:false,pending:1,awaitingMail:0,screeningPending:true,storageIssue:false,setAutoPaused:vi.fn()};
+  const page = render(view(setup({instantPreferenceStatus:'ready', automaticScreening:automatic})));
+  expect(screen.getByText('筛选中')).toBeVisible();
+  expect(screen.queryByText('等待筛选库')).toBeNull();
+  page.rerender(view(setup({automaticScreening:{...automatic,waitingReason:'正在核对实盘连接与持仓'}})));
+  expect(screen.getByText('正在核对实盘连接与持仓')).toBeVisible();
+  expect(screen.queryByText('筛选中')).toBeNull();
+  page.rerender(view(setup({automaticScreening:{...automatic,paused:true}})));
+  expect(screen.getByText('筛选已暂停')).toBeVisible();
+});
+
 it('opens the separate verified instant settings while research and screening are still loading', () => {
   render(view(setup({instantPreferenceStatus:'ready'})));
   openAfter();

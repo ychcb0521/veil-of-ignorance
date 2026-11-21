@@ -535,9 +535,11 @@ export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: s
 }
 
 /** Verification only. Do not adopt, back up or overwrite either copy. */
-export async function readImmutableAccountBlobForVerification<T>(adapter: AccountBlobAdapter<T>, owner: string) {
+export async function readImmutableAccountBlobForVerification<T>(adapter: AccountBlobAdapter<T>, owner: string, cancel?:AbortSignal) {
   if (!await signedInAs(owner)) throw Error('账号已切换，请重新打开归档');
-  const signal=AbortSignal.timeout(180_000);
+  const timeout=AbortSignal.timeout(180_000);
+  const signal=cancel?AbortSignal.any([cancel,timeout]):timeout;
+  signal.throwIfAborted();
   const head=await fetchHead(adapter.name,owner,signal);
   if(!head||head.deleted)return {value:undefined,revision:head?.rev??null};
   if(await syncedImmutableAccountBlobRevision(adapter.name,owner)===head.rev){
@@ -552,7 +554,7 @@ export async function readImmutableAccountBlobForVerification<T>(adapter: Accoun
 }
 
 /** 本机存储每次保存成功后调用：记下「改过未上传」，几秒后上传（连续保存只传最后一版）。 */
-export function noteAccountBlobSaved(adapter: AccountBlobAdapter<any>, owner: string | null | undefined): Promise<void> {
+export function noteAccountBlobSaved(adapter: AccountBlobAdapter<any>, owner: string | null | undefined, deferPush = false): Promise<void> {
   if (!owner) return Promise.resolve();
   adapters.set(adapter.name, adapter);
   return enqueue(idOf(adapter.name, owner), async () => {
@@ -561,7 +563,7 @@ export function noteAccountBlobSaved(adapter: AccountBlobAdapter<any>, owner: st
     const savedAt = Math.max(Date.now(), (meta?.savedAt ?? 0) + 1);
     await writeMeta(adapter.localReceiptName ?? adapter.name, owner, { ...(meta ?? { syncedAt: 0 }), savedAt });
     return true;
-  }).then(signed => { if (signed) schedulePush(adapter, owner); }, () => schedulePush(adapter, owner));
+  }).then(signed => { if (signed && !deferPush) schedulePush(adapter, owner); }, () => { if (!deferPush) schedulePush(adapter, owner); });
 }
 
 /** 对账，并等它排下的上传也做完。供要逐个处理的大存档用：一次只编码一份，内存峰值不叠加。 */

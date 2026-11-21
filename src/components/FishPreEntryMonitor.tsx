@@ -102,7 +102,7 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
       study: () => entryDirectoryStudy(archived,round,records), preview:()=>entryDirectoryStudy(archived,round,records,false), details: close => renderEvidence(round.id, close),
     })),'screen');
   };
-  return <FishLibraryTimeDirectory browseArchive={{owner:state.account,scope:'screen'}} renderTemplate={renderTemplate} picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
+  return <FishLibraryTimeDirectory browseArchive={{owner:state.account,scope:'screen',directoryOnly:!monitor.ready,loadFull:monitor.error?monitor.retry:state.requestScreeningArchive??monitor.retry}} renderTemplate={renderTemplate} picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
     onOpenChange={samplePicker?.onOpenChange} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" kind="template" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={getDirectoryItems} edits={directoryEdits} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admittedCount}
     description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复模板目录与入选记录…'):items=>`${admittedCount} 条入选记录 · ${items.length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
     transferMenu={!samplePicker ? actions=><FishEntryLibraryDataActions actions={actions} onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...archived,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)}} onImport={monitor.importLibrary}/>:undefined}
@@ -140,7 +140,7 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
           {menuOpen&&monitor.library.rounds.some(isAutomaticPreEntryRound)&&<button type="button" className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted" onClick={()=>{setMenuOpen(false);setAutomaticResults(true);setResultsOpen(true);}}>最近自动筛选结果</button>}
           {manualRound && canResume && missingCount > 0 && <button type="button" disabled={monitor.running || !monitor.ready} className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.resume(manualRound.id); }}>重试本轮缺数据（{missingCount}）</button>}
           {automatic && <button type="button" className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted" onClick={() => { setMenuOpen(false); automatic.setAutoPaused(!automatic.paused); }}>{automatic.paused ? '恢复新鱼自动筛选' : '暂停新鱼自动筛选'}</button>}
-          {!monitor.ready && !monitor.error && <p role="status" className="px-2 py-1.5 text-[10px] text-muted-foreground">正在读取筛选库…</p>}
+          {!monitor.ready && !monitor.error && (state.requestScreeningArchive?<button type="button" className="px-2 py-1.5 text-[10px] text-primary" onClick={state.requestScreeningArchive}>载入手动筛选工作区</button>:<p role="status" className="px-2 py-1.5 text-[10px] text-muted-foreground">正在读取筛选库…</p>)}
           {monitor.error && <p role="alert" className="px-2 py-1.5 text-[10px] text-destructive">{monitor.error}{!monitor.ready && <button type="button" className="ml-1 underline" onClick={monitor.retry}>重试读取</button>}</p>}
         </PopoverContent>
       </Popover>

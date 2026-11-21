@@ -1,7 +1,7 @@
 import {supabase} from '@/integrations/supabase/client';
 import {syncedImmutableAccountBlobRevision} from '../accountBlobSync';
 import {runAccountSyncRequest} from '../accountSyncTransport';
-import {browsePageKey,readBrowseCatalog,readBrowseRevisions,recentBrowseKey,type BrowseRow,type BrowseGroup,type BrowseScope} from './libraryBrowse';
+import {browsePageKey,readBrowseCatalog,readBrowseRevisions,fullBrowseKey,recentBrowseKey,type BrowseRow,type BrowseGroup,type BrowseScope} from './libraryBrowse';
 import {filterBrowseRow,miningBrowseRows} from './libraryBrowseProjection';
 import {createFilterDirectoryReader} from './qualityLibraryDirectory';
 import {miningRecordSavedAt} from './libraryDeletion';
@@ -17,7 +17,8 @@ async function publish(owner:string,scope:BrowseScope,revision:string,source:(re
  const key=owner+'|'+scope+'|'+revision;
  if(inflight.has(key))return inflight.get(key);
  const task=(async()=>{
-   if(await readBrowseCatalog(owner,scope,AbortSignal.timeout(15000)))return;
+   const existing=await readBrowseCatalog(owner,scope,AbortSignal.timeout(15000));
+   if(existing&&!existing.recent)return;
    const revisions=await readBrowseRevisions(owner,scope,AbortSignal.timeout(15000));
    if(!revisions)return;
    const main=scope==='filter'?'fish-quality':'fish-mining-library';
@@ -27,20 +28,25 @@ async function publish(owner:string,scope:BrowseScope,revision:string,source:(re
    if(!input)return;
    const groups:BrowseGroup[]=[];
    // Publish immutable pages first. Losing the network cannot expose a partial catalog.
-   for(const {rows,...group} of input.sort((a,b)=>b.at-a.at).slice(0,12)){
-     const first=rows.sort(byTime).slice(0,100);
-     const raw=new TextEncoder().encode(JSON.stringify(first)),hash=await digest(raw);
-     const bytes=new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
-     const gzip=btoa(Array.from(bytes,b=>String.fromCharCode(b)).join(''));
-     const row={user_id:owner,key:browsePageKey(hash),value:{browse:{gzip}}};
-     const saved=await runAccountSyncRequest(()=>supabase.from('user_sim_state').upsert(row as never,{onConflict:'user_id,key',ignoreDuplicates:true}),{bytes:gzip.length});
-     if(!saved||saved.error)return;
-     groups.push({...group,count:rows.length,pages:first.length?[hash]:[]});
+   for(const {rows,...group} of input.sort((a,b)=>b.at-a.at)){
+     const pages:string[]=[];
+     rows.sort(byTime);
+     for(let start=0;start<rows.length;start+=350){
+       const raw=new TextEncoder().encode(JSON.stringify(rows.slice(start,start+350))),hash=await digest(raw);
+       const bytes=new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+       const gzip=btoa(Array.from(bytes,b=>String.fromCharCode(b)).join(''));
+       const row={user_id:owner,key:browsePageKey(hash),value:{browse:{gzip}}};
+       const saved=await runAccountSyncRequest(()=>supabase.from('user_sim_state').upsert(row as never,{onConflict:'user_id,key',ignoreDuplicates:true}),{bytes:gzip.length});
+       if(!saved||saved.error)return;
+       pages.push(hash);
+     }
+     groups.push({...group,count:rows.length,pages});
    }
    const latest=await readBrowseRevisions(owner,scope,AbortSignal.timeout(15000));
    if(JSON.stringify(latest)!==JSON.stringify(revisions)||await syncedImmutableAccountBlobRevision(receipt,owner)!==revision)return;
-   const value={browse:{version:1,scope,owner,revisions,groups,recent:true}};
-   await runAccountSyncRequest(()=>supabase.from('user_sim_state').upsert({user_id:owner,key:recentBrowseKey(scope,revisions),value} as never,{onConflict:'user_id,key',ignoreDuplicates:true}),{bytes:JSON.stringify(value).length});
+   const value={browse:{version:1,scope,owner,revisions,groups}};
+   const catalogs=[fullBrowseKey(scope,revisions),recentBrowseKey(scope,revisions)].map(key=>({user_id:owner,key,value}));
+   await runAccountSyncRequest(()=>supabase.from('user_sim_state').upsert(catalogs as never,{onConflict:'user_id,key',ignoreDuplicates:true}),{bytes:JSON.stringify(catalogs).length});
  })().finally(()=>inflight.delete(key));
  inflight.set(key,task);return task;
 }
@@ -48,8 +54,11 @@ export function publishFilterBrowse(owner:string,revision:string,study:FishQuali
  return publish(owner,'filter',revision,async()=>{
    const library=study.filterLibrary;if(!library)return;
    const read=createFilterDirectoryReader(library),edits=study.monitorLibrary?.directoryEdits;
-   return library.rounds.filter(r=>!edits?.[r.id]?.hidden).sort((a,b)=>b.startedAt-a.startedAt).slice(0,12)
+   const groups=library.rounds.filter(r=>!edits?.[r.id]?.hidden)
      .map(r=>({id:r.id,at:r.startedAt,title:edits?.[r.id]?.name??'过滤轮次',rows:read(r).records.map(filterBrowseRow)}));
+   const legacy=read().records;
+   if(legacy.length&&!edits?.['filter-legacy']?.hidden)groups.push({id:'filter-legacy',title:edits?.['filter-legacy']?.name??'历史记录',at:legacy.reduce((at,r)=>Math.max(at,r.updatedAt),0),rows:legacy.map(filterBrowseRow)});
+   return groups;
  });
 }
 export async function publishMiningBrowse(owner:string,library:FishMiningLibrary){

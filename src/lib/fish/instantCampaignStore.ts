@@ -52,6 +52,11 @@ async function readInstantJobs(owner: string, include: (job: Saved) => boolean):
 }
 
 const isOpenJob = (job: Saved) => !!job.opened && !job.snapshot && !('sell' in job.input);
+/** Recover active admissions with one pass through each account queue, including reserved entries awaiting a fill. */
+export async function readActiveInstantRecordIds(owner: string): Promise<string[]> {
+  const jobs = await readInstantJobs(owner, job => isOpenJob(job) || !job.synced && !job.opened && !('sell' in job.input));
+  return [...new Set(jobs.map(job => job.input.recordId))];
+}
 const openReads = new Map<string, Promise<InstantPositionFill[]>>();
 export function readOpenInstantPositions(owner: string): Promise<InstantPositionFill[]> {
   const existing = openReads.get(owner);

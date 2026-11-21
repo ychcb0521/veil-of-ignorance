@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { emptyPreEntryLibrary, type PreEntryLibrary } from '../preEntryMonitor';
-import { readPreEntrySnapshot, writePreEntrySnapshot, readPreEntryTableClears, writePreEntryTableClears, readPreEntryReadModel, readPreEntryCacheRevision, cachePreEntryReadModel, removePublishedPreEntryDrafts } from '../preEntryPersistence';
+import { indexExistingScreenSnapshot,readScreenCatalog,readScreenPage,readOpenAdmissionCheckpoints, readAutomaticPreEntryCheckpoint, readPreEntrySnapshot, writePreEntrySnapshot, readPreEntryTableClears, writePreEntryTableClears, readPreEntryReadModel, readPreEntryCacheRevision, cachePreEntryReadModel, removePublishedPreEntryDrafts } from '../preEntryPersistence';
 import { withPreEntryTableClears } from '../preEntryTableClears';
 import { qualityScreeningResults } from '../qualityScreeningResults';
 import { persistPreEntrySnapshot } from '../preEntryPersistenceClient';
@@ -31,6 +31,43 @@ beforeEach(() => {
 });
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();});
 function fixture():PreEntryLibrary{return {...emptyPreEntryLibrary(),settings:{updatedAt:1,plans:[],hours:48},rounds:[{id:'r',state:'paused',startedAt:1,updatedAt:1,filters:[],hours:48}],records:[{id:'a',roundId:'r',status:'paused',startTime:1,cursor:2,updatedAt:2,readings:[],sample:{id:'a',source:{id:'a',symbol:'TESTUSDT',timeMs:1,timeLabel:'',fallbackZone:''},groups:[],importedAt:1,enteredAt:1,basis:'signal'},exclusionProcess:{version:1,startedAt:1,entries:[{kind:'observation',from:1,through:2,count:1,reason:'锁定',status:'blocked'}]}}]};}
+it('restores only requested open admissions, rejects an incomplete checkpoint and isolates accounts', async () => {
+  const input = fixture();
+  const round = { ...input.rounds[0], instantTrading: true as const, state: 'complete' as const, plans: [{ id: 'p' } as never] };
+  const record = { ...input.records[0], id: 'r:0:p', status: 'matched' as const, matchedAt: 3 };
+  await writePreEntrySnapshot('alice', { version: 1, rounds: [round], records: [record] }, true);
+  reads.length = 0;
+  expect(await readOpenAdmissionCheckpoints('alice', [record.id, record.id])).toEqual({ version: 1, rounds: [round], records: [record] });
+  expect(reads).toEqual(['incremental:user:alice:meta', 'incremental:user:alice:record:r:0:p']);
+  await expect(readOpenAdmissionCheckpoints('bob', [record.id])).rejects.toThrow('入选记录待恢复');
+  disk.delete('incremental:user:alice:record:r:0:p');
+  await expect(readAutomaticPreEntryCheckpoint('alice', 'r', true)).rejects.toThrow('原始进度不完整');
+  expect(await readAutomaticPreEntryCheckpoint('alice', 'new', true)).toBeUndefined();
+});
+
+it('reads only the v6 directory and selected page, including display clears and revision changes',async()=>{
+ const library=fixture();
+ library.records[0].status='matched';
+ await writePreEntrySnapshot('alice',library);
+ await cachePreEntryReadModel('alice',library);
+ reads.length=0;
+ const directory=await readScreenCatalog('alice');
+ expect(directory?.groups.map(group=>group.id)).toEqual(['r']);
+ expect(reads).not.toContain('read-model:user:alice');
+ expect(reads.some(key=>key.includes('page:')||key.includes(':record:'))).toBe(false);
+ await writePreEntryTableClears('alice',{a:7});
+ expect((await readScreenPage('alice',directory!.id,directory!.groups[0].pages[0]))[0][2]).toContain('组合表已清除');
+ expect(await readScreenCatalog('bob')).toBeUndefined();
+ disk.delete('browse-v1:"alice":header');
+ const canonical=structuredClone(disk.get('read-model:user:alice'));
+ await indexExistingScreenSnapshot('alice');
+ expect((await readScreenCatalog('alice'))?.groups).toEqual(directory!.groups);
+ expect(disk.get('read-model:user:alice')).toEqual(canonical);
+ await expect(indexExistingScreenSnapshot('bob')).rejects.toThrow('本机没有');
+ await writePreEntrySnapshot('alice',{...library,records:[]},true);
+ await expect(readScreenPage('alice',directory!.id,directory!.groups[0].pages[0])).rejects.toThrow('更新');
+});
+
 it('checkpoints only changed rows without reading or rewriting the legacy library or unrelated records',async()=>{
  const initial=fixture(),legacy=structuredClone(initial);disk.set('user:alice',legacy);
  await writePreEntrySnapshot('alice',initial);reads.length=0;puts.length=0;

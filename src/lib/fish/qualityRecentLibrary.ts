@@ -13,6 +13,7 @@ import {templateCampaignPath} from './qualityTemplateTable';
 export const RECENT_MONITOR_DIRECTORY_KEY='idb:fish-quality-recent-directory-v1';
 export const RECENT_MONITOR_PAGE_SIZE=12;
 export const recentMonitorDirectoryKey=(revision:string)=>RECENT_MONITOR_DIRECTORY_KEY+'/'+revision;
+export const fullMonitorDirectoryKey=(revision:string)=>'idb:fish-quality-directory-v2/'+revision;
 export const recentMonitorDeletionsKey=(revision:string)=>'idb:fish-quality-recent-deletions-v1/'+revision;
 export interface RecentMonitorEntry {
   id:string;at:number;label:string;summary:string;sourceRoundId?:string;

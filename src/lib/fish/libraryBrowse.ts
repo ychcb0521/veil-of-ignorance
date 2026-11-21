@@ -14,6 +14,7 @@ export interface BrowseCatalog {
 const prefix = 'idb:fish-library-browse-v1/';
 export const browseCatalogKey = (scope: BrowseScope) => prefix + scope;
 export const recentBrowseKey=(scope:BrowseScope,revisions:Record<string,string>)=>prefix+'recent/'+scope+'/'+guards[scope].map(key=>encodeURIComponent(revisions[key])).join('/');
+export const fullBrowseKey=(scope:BrowseScope,revisions:Record<string,string>)=>recentBrowseKey(scope,revisions).replace('/recent/','/full/');
 export const browsePageKey = (hash: string) => prefix + 'page/' + hash;
 type Entry = {key: string; revision: string | null; removed: string | null; document: unknown};
 function validGroup(group: BrowseGroup) {
@@ -21,12 +22,12 @@ function validGroup(group: BrowseGroup) {
     Number.isSafeInteger(group.count) && group.count >= 0 && Array.isArray(group.pages) &&
     group.pages.every(hash => /^[a-f0-9]{64}$/.test(hash));
 }
-async function read(owner: string, scope: BrowseScope, key: string, signal: AbortSignal) {
+async function read(owner: string, scope: BrowseScope, key: string, signal: AbortSignal, extra:string[] = []) {
   // Project only the revision from archive heads. Each directory/page and all its
   // revision guards are read by one account-scoped PostgREST statement.
   const columns:string='key,revision:value->>rev,removed:value->>deleted,document:value->browse';
   const query = supabase.from('user_sim_state').select(columns)
-    .eq('user_id',owner).in('key',[key,...guards[scope]]);
+    .eq('user_id',owner).in('key',[key,...extra,...guards[scope]]);
   const {data,error} = await query.abortSignal(signal);
   if(error) throw Error('近期记录读取失败，请重试');
   const rows = new Map(((data ?? []) as unknown as Entry[]).map(row => [row.key,row]));
@@ -52,9 +53,10 @@ export async function readBrowseCatalog(owner:string,scope:BrowseScope,signal:Ab
   };
   const catalog=validate(result.doc,result.rows);
   const revisions=revisionsOf(scope,result.rows);
-  if(catalog||!revisions)return catalog;
-  const recent=await read(owner,scope,recentBrowseKey(scope,revisions),signal);
-  return validate(recent.doc,recent.rows);
+  if(catalog&&!catalog.recent||!revisions)return catalog;
+  const fullKey=fullBrowseKey(scope,revisions),recentKey=recentBrowseKey(scope,revisions);
+  const next=await read(owner,scope,fullKey,signal,[recentKey]);
+  return validate(next.doc,next.rows)??validate(next.rows.get(recentKey)?.document,next.rows)??validate(catalog,next.rows);
 }
 export async function readBrowsePage(catalog: BrowseCatalog, hash: string, signal: AbortSignal): Promise<BrowseRow[]> {
   if(!catalog.groups.some(group=>group.pages.includes(hash)))throw Error('该页不在当前目录内');

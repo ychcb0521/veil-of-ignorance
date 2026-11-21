@@ -15,7 +15,7 @@ import {formatUTC8} from '@/lib/timeFormat';
 const date=(t:number|null|undefined)=>t==null?'—':formatUTC8(t);
 const STATE={pass:'满足',fail:'不满足',error:'缺数据',pending:'待判断',none:'不过滤'} as const;
 const ROUND_STATE={running:'运行中',complete:'已完成',paused:'已暂停',failed:'失败'} as const;
-export function FishFilterLibrary({study,ready=true,account,loadError,onRetry,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onRename,openRequest,onSelectDirectory}:{ready?:boolean;account?:string;loadError?:string;onRetry?:()=>void;openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;study:FishQualityStudy;renderTemplate?:FishTemplateRenderer;renderStudy?:(s:FishQualityStudy, close?: () => void)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;onRename?:(id:string,name:string)=>Promise<boolean>}){
+export function FishFilterLibrary({study,ready=true,account,requestWorkspace,loadError,onRetry,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onRename,openRequest,onSelectDirectory}:{requestWorkspace?:()=>void;ready?:boolean;account?:string;loadError?:string;onRetry?:()=>void;openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;study:FishQualityStudy;renderTemplate?:FishTemplateRenderer;renderStudy?:(s:FishQualityStudy, close?: () => void)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;onRename?:(id:string,name:string)=>Promise<boolean>}){
  const library=study.filterLibrary;
  const getItems=useCallback(():FishDirectoryItem[]=>{
   if(!library)return [];
@@ -35,7 +35,7 @@ export function FishFilterLibrary({study,ready=true,account,loadError,onRetry,re
    settings:()=> <FilterDirectorySettings settings={legacy.settings.filter(setting=>used.has(setting.id))}/>,study:()=>filterDirectoryStudy(library,undefined,legacy),details:<FilterEvidence {...legacy}/>,note:'历史记录未保存轮次，只展示已有的冻结条件与读数，不补造缺失数据。'});
   return templates.withHistoricalNames(items,'filter');
  },[library,study.planTemplates]);
- return <FishLibraryTimeDirectory browseArchive={{owner:account,scope:'filter'}} browseRounds loading={!ready&&!loadError} loadError={loadError} onRetry={onRetry}
+ return <FishLibraryTimeDirectory browseArchive={{owner:account,scope:'filter',directoryOnly:!ready,loadFull:requestWorkspace??onRetry}} browseRounds loading={!ready&&!loadError} loadError={loadError} onRetry={onRetry}
   loadingStatus={<FishStudyRecoveryStatus owner={account}/>} renderTemplate={renderTemplate} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="过滤库" prefix="filter" kind="template" items={getItems} edits={study.monitorLibrary?.directoryEdits} onSetHidden={onSetHidden} onRename={onRename} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={library?.records.length??0}
   description={`${library?.records.length??0} 条记录 · ${library?.rounds.length??0} 轮过滤`} transferMenu={actions=><FishStoredLibraryTransferMenu scope="filter" actions={actions}/>} download={()=>downloadDirectoryTables('过滤库',getItems().map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
   info={<><p>按冻结模板整理过滤轮次。展开后展示该轮组合表，条件、读数和判断取自保存记录，不重新计算。</p><p>新轮次单独保存组合表输入和过滤结果；早期轮次只有记录引用，会明确标注。目录可编辑名称、删除和恢复，复制前先完整归档当前组合表。</p></>}

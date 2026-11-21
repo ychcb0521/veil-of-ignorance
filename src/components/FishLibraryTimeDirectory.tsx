@@ -20,12 +20,12 @@ export interface FishDirectoryItem {
   revision?:unknown;
   renderStudy?:(study:FishQualityStudy,close:()=>void)=>ReactNode;
   templateGroup?:QualityTemplateDirectoryGroup;
-  settings?:()=>ReactNode|Promise<ReactNode>;
+  settings?:(signal?:AbortSignal)=>ReactNode|Promise<ReactNode>;
   purgeable?: boolean;
   preview?:()=>FishQualityStudy|Promise<FishQualityStudy>;
   campaignPath?:(result:QualityResult)=>string|undefined;
   details?:ReactNode|((close:()=>void)=>ReactNode);
-  study:()=>FishQualityStudy|Promise<FishQualityStudy>;
+  study:(signal?:AbortSignal)=>FishQualityStudy|Promise<FishQualityStudy>;
 }
 const NO_DIRECTORY_ITEMS: FishDirectoryItem[] = [];
 const normalizeTemplateQuery=(value:string)=>value.normalize('NFKC').toLocaleLowerCase().replace(/[\s_·.-]/g,'');
@@ -89,7 +89,7 @@ export interface FishDirectoryPicker {
 }
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
 export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more,browseArchive}:{
-  browseArchive?:{owner?:string;scope:BrowseScope};
+  browseArchive?:{owner?:string;scope:BrowseScope;directoryOnly?:boolean;loadFull?:()=>void};
   notice?:ReactNode;more?:ReactNode;browseRounds?:boolean;loadingStatus?:ReactNode;loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
   picker?:FishDirectoryPicker;
@@ -123,24 +123,27 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const [editingId,setEditingId]=useState(''),[draftName,setDraftName]=useState('');
   const selectionEpoch=useRef(0);
   useEffect(()=>()=>{selectionEpoch.current++;},[]);
-  const items = useMemo(() => open ? (typeof itemsSource === 'function' ? itemsSource() : itemsSource) : NO_DIRECTORY_ITEMS, [open,itemsSource]);
+  const [managementOwner,setManagementOwner]=useState<string>(),[catalogOwner,setCatalogOwner]=useState<string>();
+  const directoryOnly = !!browseArchive?.owner && (browseArchive.directoryOnly || catalogOwner===browseArchive.owner) && managementOwner!==browseArchive.owner;
+  const items = useMemo(() => open && !directoryOnly ? (typeof itemsSource === 'function' ? itemsSource() : itemsSource) : NO_DIRECTORY_ITEMS, [open,directoryOnly,itemsSource]);
   // Named rounds may share a template, or have no corresponding saved template at all.
   const roundsView=canSwitchView&&(browseByRound??items.some(item=>!edits?.[item.id]?.hidden&&
     (!!edits?.[item.id]?.name||!item.templateGroup?.savedTemplate)));
   const templateView=kind==='template'&&!!renderTemplate&&!picker&&!manage&&!purgeMode&&!showDeleted&&!roundsView;
   const selected=items.find(item=>item.id===selectedId),itemRef=useRef(selected);itemRef.current=selected;
   const openCallback=useRef(onOpenChange);openCallback.current=onOpenChange;const requestRef=useRef(openRequest);requestRef.current=openRequest;
-  useEffect(()=>{const request=requestRef.current;if(request){selectionEpoch.current++;setOpen(true);setImportSelection(!!request.importSelection);if(request.selectedId||request.selectedIds!==undefined)setManage(true);setSelectedId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
+  useEffect(()=>{const request=requestRef.current;if(request){selectionEpoch.current++;setCatalogOwner(browseArchive?.directoryOnly?browseArchive.owner:undefined);setOpen(true);setImportSelection(!!request.importSelection);if(request.selectedId||request.selectedIds!==undefined)setManage(true);setSelectedId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
   useEffect(()=>{
-    if(!open){setLoaded(undefined);return;}if(!selectedId)return;
-    const item=itemRef.current;if(!item)return;
+    const item=itemRef.current;
+    if(!open||!selectedId||!item){setLoaded(undefined);return;}
+    const controller=new AbortController();
     let active=true;setLoaded({id:item.id});
     try{
-      const result=item.study();
+      const result=item.study(controller.signal);
       if(result instanceof Promise)void result.then(study=>{if(active)setLoaded({id:item.id,study});},e=>{if(active)setLoaded({id:item.id,error:e instanceof Error?e.message:'归档读取失败，请重试'});});
       else setLoaded({id:item.id,study:result});
     }catch(e){setLoaded({id:item.id,error:e instanceof Error?e.message:'归档读取失败，请重试'});}
-    return()=>{active=false;};
+    return()=>{active=false;controller.abort();};
   },[open,selectedId,selected?.id,selected?.revision,loadAttempt]);
   const currentLoad=loaded?.id===selectedId?loaded:undefined;
   const snapshot=currentLoad?.study;
@@ -210,8 +213,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   };
   const changeOpen=(value:boolean)=>{
     if(!value&&busy==='purge')return;
-    selectionEpoch.current++;setOpen(value);onOpenChange?.(value);
-    if(!value){setBrowseByRound(undefined);setTemplateQuery('');setImportSelection(false);setShowDeleted(false);setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
+    selectionEpoch.current++;setCatalogOwner(value&&browseArchive?.directoryOnly?browseArchive.owner:undefined);setOpen(value);onOpenChange?.(value);
+    if(!value){setManagementOwner(undefined);setBrowseByRound(undefined);setTemplateQuery('');setImportSelection(false);setShowDeleted(false);setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
   };
   const canExport=!!recordCount&&!busy&&!loading&&!loadError&&!selectedExport?.busy;
   const handleExport=()=>{
@@ -271,8 +274,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
     <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-hidden p-4 sm:p-5">
       <DialogHeader className="shrink-0 space-y-1 text-left">
         <div className="group/library-header flex flex-wrap items-center gap-1.5 pr-6">
-          <DialogTitle className="text-sm">{name}</DialogTitle>{dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo>
-          {transferMenu || compactDirectory ? <div className="ml-auto">{transferMenu ? transferMenu(exportActions) : <FishLibraryTransferMenu name={name} actions={exportActions}/>}</div> :
+          <DialogTitle className="text-sm">{name}</DialogTitle>{!directoryOnly&&dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo>
+          {directoryOnly ? (browseArchive?.loadFull && <button type="button" className={action+' ml-auto'} onClick={()=>{setManagementOwner(browseArchive.owner);browseArchive.loadFull?.();}}>载入完整库并管理</button>) : transferMenu || compactDirectory ? <div className="ml-auto">{transferMenu ? transferMenu(exportActions) : <FishLibraryTransferMenu name={name} actions={exportActions}/>}</div> :
             <button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!canExport} onClick={handleExport}><Download aria-hidden className="h-3 w-3"/>{busy==='export'?'正在导出…':'导出数据'} <span className="font-mono tabular-nums">{recordCount}</span></button>}
         </div>
         {(managedExports&&(busy==='export'||selectedExport?.busy))&&<p role="status" className="text-xs text-muted-foreground">正在导出…</p>}
@@ -282,14 +285,15 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
               setBrowseByRound(label==='按轮次');setTemplateQuery('');resetDirectorySelection();
             }}>{label}</button>)}
         </div>}
-        {(templateView||roundsView)&&<div className="relative mt-1 max-w-md">
+        {(directoryOnly||templateView||roundsView)&&<div className="relative mt-1 max-w-md">
           <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"/>
           <input type="search" value={templateQuery} onChange={event=>setTemplateQuery(event.target.value)} aria-label={'搜索'+name+(roundsView?'轮次':'模板')}
             placeholder={roundsView?"搜索轮次名称或日期…":"搜索模板编号、原名或日期…"} className="h-8 w-full rounded-md border border-border/60 bg-background pl-8 pr-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"/>
         </div>}
-        <DialogDescription className={compactDirectory&&(!browseRounds||loading||loadError)?"sr-only":"text-[11px] text-muted-foreground"}>{browseRounds&&(loading||loadError) ? '读取账号保存的过滤轮次' : typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
+        <DialogDescription className={compactDirectory&&(!browseRounds||loading||loadError)?"sr-only":"text-[11px] text-muted-foreground"}>{directoryOnly ? '选择目录查看归档记录' : browseRounds&&(loading||loadError) ? '读取账号保存的过滤轮次' : typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
       </DialogHeader>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-testid={prefix+'-directory-scroll'}>
+      {directoryOnly && open && browseArchive?.owner ? <FishArchiveBrowse key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/> : <>
       {notice}
       <h3 className={compactDirectory?"sr-only":"shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium"}>{kind==='algorithm'?'算法目录':kind==='template'?'模板目录':'时间目录'}</h3>
       <div className="space-y-3" data-testid={prefix+'-archive-directory'}>
@@ -317,7 +321,6 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
         </div>}
         {!picker&&!compactDirectory&&!!deleted&&<label className="inline-flex items-center gap-2 text-[10px] text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/>显示已删除目录（{deleted}）</label>}
         {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
-        {open&&browseArchive?.owner&&!items.length&&(loading||loadError)&&<FishArchiveBrowse key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/>}
         {loading&&(loadingStatus??<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取{name}，已有数据仍保留…</p>)}
         {loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">
           {loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}
@@ -349,7 +352,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
           </section>;
         }):visible.map(renderItem)}
         {more}
-      </div>
+      </div></>}
       </div>
       {picker && <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background p-2 text-[11px]">{picker.footer(()=>changeOpen(false))}</div>}
     </DialogContent>

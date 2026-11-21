@@ -57,7 +57,7 @@ export function FishBulkDeletionProvider({state, removeFish, children}:{
     finally{setBusy(false);}
   };
 
-  return <FishBulkDeleteContext.Provider value={state.deleteSources?r=>{setError('');setRequest(r);}:null}>
+  return <FishBulkDeleteContext.Provider value={state.deleteSources?r=>{if(!state.ready)state.requestStudyArchive?.();setError('');setRequest(r);}:null}>
     {children}
     <Dialog open={!!request} onOpenChange={v=>{if(!v&&!busy)setRequest(undefined);}}>
       <DialogContent className="max-w-lg">
@@ -68,7 +68,7 @@ export function FishBulkDeletionProvider({state, removeFish, children}:{
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2 text-sm">
-          <p>所选记录 {request?.ids.length??0} 条；关联过滤库 {filters} 条；监测库 {monitors} 条。</p>
+          <p>所选记录 {request?.ids.length??0} 条。{state.ready ? `关联过滤库 ${filters} 条；监测库 ${monitors} 条。` : '正在核对关联的过滤和监测记录…'}</p>
           <p className="text-xs text-muted-foreground">交易战役、账户交易记录和另一来源库保留。</p>
           {error&&<p role="alert" className="text-destructive">{error}</p>}
           <div className="flex justify-end gap-2">

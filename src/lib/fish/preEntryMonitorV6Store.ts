@@ -10,6 +10,8 @@ import { prepareStoredPreEntry } from './preEntryBackup';
 
 const queues = new Map<string, Promise<unknown>>();
 const immediateQueues = new Map<string, Promise<unknown>>();
+const reconciledOwners = new Set<string>();
+const deferredBackups = new Set<string>();
 const keyOf = (owner?: string) => owner ? `user:${owner}` : 'anonymous';
 function write(owner: string | undefined, library: PreEntryLibrary, immediate = false): Promise<void> {
   // Callers use immutable snapshots. postMessage/IndexedDB already clone at
@@ -49,6 +51,7 @@ export async function savePreEntryTableClears(owner: string | undefined, marks: 
   void noteAccountBlobSaved(preEntryTableClearsAccountBlob, owner);
 }
 export async function loadPreEntryLibraryV6(owner?: string,preview?:(library:PreEntryLibrary)=>void,rebuild=false): Promise<PreEntryLibrary> {
+  if (owner) reconciledOwners.delete(owner);
   const clearsStatus = await syncAccountBlobOnLoad(preEntryTableClearsAccountBlob, owner,30_000);
   if (clearsStatus === 'failed' || clearsStatus === 'timed_out') throw Error('无法恢复筛选清除标记，请重试');
   const status = await syncAccountBlobOnLoad(preEntryV6AccountBlob, owner,300_000);
@@ -59,11 +62,18 @@ export async function loadPreEntryLibraryV6(owner?: string,preview?:(library:Pre
     throw Error('筛选库云端分片版本不一致。' + (local ? '当前仅展示本机快照。' : '需要同一版本的完整备份才能恢复。'));
   }
   if (!local && (status === 'failed' || status === 'timed_out')) throw Error(describeArchiveReadIssue(owner,preEntryV6AccountBlob.name) ?? '无法读取账号入选库，请重试');
+  if (owner && (status === 'adopted' || status === 'unchanged' || status === 'pushed')) {
+    reconciledOwners.add(owner);
+    if (deferredBackups.delete(owner)) void noteAccountBlobSaved(preEntryV6AccountBlob, owner);
+  }
   return local ?? emptyPreEntryLibrary();
 }
 export async function savePreEntryLibraryV6(owner: string | undefined, library: PreEntryLibrary, immediate = false): Promise<void> {
   await write(owner, library, immediate);
-  void noteAccountBlobSaved(preEntryV6AccountBlob, owner);
+  if (immediate && owner && !reconciledOwners.has(owner)) {
+    deferredBackups.add(owner);
+    void noteAccountBlobSaved(preEntryV6AccountBlob, owner, true);
+  } else void noteAccountBlobSaved(preEntryV6AccountBlob, owner);
 }
 
 // Manual drafts use a separate local namespace; old pages and cloud library exports only see committed runs.

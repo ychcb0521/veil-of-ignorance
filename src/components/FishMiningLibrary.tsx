@@ -32,11 +32,14 @@ type MiningDirectoryProps={openRequest?:FishDirectoryRequest;onSelectDirectory?:
 export function FishMiningLibrary(props:MiningDirectoryProps){
  const {account,renderStudy,onCopyStudy,directoryEdits,openRequest,onSelectDirectory}=props;
  const bulk=useFishBulkDelete(); const [library,setLibrary]=useState<FishMiningLibrary>(emptyMiningLibrary),[open,setOpen]=useState(false),[loadError,setLoadError]=useState(''),[loading,setLoading]=useState(false),[attempt,setAttempt]=useState(0);
+ const [fullOwner,setFullOwner]=useState<string>();
+ const directoryOnly=!!account&&fullOwner!==account;
+ const changeOpen=(next:boolean)=>{setOpen(next);if(!next)setFullOwner(undefined);};
  const generation=useRef(0);
  useEffect(()=>{
   const epoch=++generation.current;
-  setLibrary(emptyMiningLibrary());setLoadError('');setLoading(open);
-  if(!open)return;
+  setLibrary(emptyMiningLibrary());setLoadError('');setLoading(open&&!directoryOnly);
+  if(!open||directoryOnly)return;
   let revision=0, pending=false;
   const reload=()=>{
    pending=true;
@@ -51,7 +54,7 @@ export function FishMiningLibrary(props:MiningDirectoryProps){
   reload();const refresh=(e:Event)=>{const detail=(e as CustomEvent).detail;if((detail?.owner??null)===(account??null)&&!(pending&&detail?.fromRestore))reload();};
   window.addEventListener(MINING_LIBRARY_EVENT,refresh);
   return()=>{generation.current=epoch+1;window.removeEventListener(MINING_LIBRARY_EVENT,refresh);};
- },[open,account,attempt]);
+ },[open,account,attempt,directoryOnly]);
  const directories=useMemo(()=>miningAlgorithmDirectories(library).map(directory=>{
    const edit=directoryEdits?.[directory.id];
    return !edit?.hidden?directory:{...directory,records:directory.records.filter(record=>miningRecordSavedAt(record)>edit.at)};
@@ -66,7 +69,7 @@ export function FishMiningLibrary(props:MiningDirectoryProps){
    renderStudy:(snapshot,close)=>renderStudy?renderStudy(snapshot,close,{family:d.family,records:d.records,runs}):
     <div className="px-4 py-3"><FishWorkspaceRows snapshot={snapshot} mining={{family:d.family,records:d.records,runs}}/></div>,
    id:d.id,at:0,label:d.family+' 系列',summary:d.records.length+' 条记录',revision:library,study:()=>miningDirectoryStudy(d.records,d.family),details:close=><FishDeferredDetails summary="挖掘记录详情" className="m-4 text-[11px]">{()=> <FishMiningRecords {...props} librarySource={miningFamilyLibrary(library,d.records)} allRecords={library.records} onClose={close}/>}</FishDeferredDetails>}));
- return <FishLibraryTimeDirectory browseArchive={{owner:account,scope:'mining'}} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="捕捞库" prefix="mining" kind="algorithm" loading={loading} loadError={loadError} onRetry={()=>setAttempt(a=>a+1)} items={items} edits={edits} onDeleteRecords={bulk?id=>{const directory=directories.find(d=>d.id===id);if(directory)requestDelete(directory.records);}:undefined} onCopyStudy={onCopyStudy} onOpenChange={setOpen} recordCount={library.records.length}
+ return <FishLibraryTimeDirectory browseArchive={{owner:account,scope:'mining',directoryOnly,loadFull:()=>setFullOwner(account)}} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="捕捞库" prefix="mining" kind="algorithm" loading={loading} loadError={loadError} onRetry={()=>setAttempt(a=>a+1)} items={items} edits={edits} onDeleteRecords={bulk?id=>{const directory=directories.find(d=>d.id===id);if(directory)requestDelete(directory.records);}:undefined} onCopyStudy={onCopyStudy} onOpenChange={changeOpen} recordCount={library.records.length}
   description={(!library.records.length && !library.anchors.length && (loading || loadError)) ? (loadError ? '账号捕捞库尚未读出' : '正在核对账号捕捞记录') : `${loading?'正在核对云端 · ':loadError?'本机 · ':''}${library.records.length} 条记录 · ${directories.length} 类算法 · ${library.anchors.length} 档`}
   transferMenu={({exportLibrary,canExportLibrary})=><FishMiningTransfer key={account} account={account} onExport={exportLibrary} canExport={canExportLibrary}/>}
   dataActions={bulk&&<button type="button" className={libraryDirectoryAction+" text-destructive"} disabled={loading||!!loadError||(!library.records.length&&!library.anchors.length)} onClick={()=>requestDelete(library.records,true)}>清空捕捞库</button>}

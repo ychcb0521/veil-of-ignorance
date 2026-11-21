@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } 
 export interface DirectorySettingsEntry {
   id: string;
   name: string;
-  load: () => ReactNode | Promise<ReactNode>;
+  load: (signal?:AbortSignal) => ReactNode | Promise<ReactNode>;
 }
 
 export function FishDirectorySettingsButton({ name, originalName, historicalAt, entries, disabled }: {
@@ -29,12 +29,13 @@ export function FishDirectorySettingsButton({ name, originalName, historicalAt, 
     const item = entryRef.current;
     if (!open || !item) return;
     let current = true;
+    const controller=new AbortController();
     setLoaded(undefined);
-    void Promise.resolve().then(item.load).then(
+    void Promise.resolve().then(()=>item.load(controller.signal)).then(
       content => { if (current) setLoaded({ id: item.id, content }); },
       error => { if (current) setLoaded({ id: item.id, error: error instanceof Error ? error.message : '模板设置读取失败' }); },
     );
-    return () => { current = false; };
+    return () => { current = false; controller.abort(); };
   }, [open, id, attempt]);
   if (!entry) return null;
   const current = loaded?.id === id ? loaded : undefined;

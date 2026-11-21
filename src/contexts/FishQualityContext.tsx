@@ -49,23 +49,41 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const preferenceStatus = preferences && preferences.owner === owner ? (preferences.ready ? 'ready' : 'error') : 'loading';
   const notify = useFishNotify(owner, undefined, undefined, true);
   const instantMonitor = useInstantMonitorSettings(owner);
-  const automaticScreening = useFishScreeningAutomation(owner, !!state.preEntry?.ready, state.preEntry, notify);
-  const cdaTracking = useFishCdaTracking(owner, state.preEntry?.library, !!state.preEntry?.ready, notify, true);
+  const preEntry = state.preEntry;
+  const executionMonitor = { ...preEntry, library: preEntry.automaticLibrary };
+  const cdaTracking = useFishCdaTracking(owner, executionMonitor.library, preEntry.ready || preEntry.instantReady && preferenceStatus === 'ready', notify, true);
   const usdtFollow = useUsdtFollow(owner, cdaTracking);
   const usdtLive = useUsdtLiveTrading(owner, usdtFollow);
   const management = useBinanceManualMonitor(usdtFollow, usdtLive, instantMonitor.settings);
   const { issue: campaignIssue, positions } = useInstantCampaigns(owner, cdaTracking, true);
+  const holdingsReady = usdtFollow.pairingReady && (!usdtFollow.paired || usdtFollow.connected && !!usdtLive.snapshot && !usdtLive.issue);
+  const fastReady = preferenceStatus === 'ready' && instantMonitor.restoreStatus === 'ready' && preEntry.instantReady && holdingsReady;
+  const automatic = useFishScreeningAutomation(owner, preEntry.ready || fastReady, executionMonitor, notify);
+  let waitingReason = automatic.waitingReason;
+  if (!preEntry.ready && automatic.pending && !automatic.paused) {
+    if (preferenceStatus !== 'ready') waitingReason = preferenceStatus === 'error' ? '账号设置读取失败' : '正在读取即时交易设置';
+    else if (instantMonitor.restoreStatus !== 'ready') waitingReason = instantMonitor.restoreStatus === 'error' ? '买后设置读取失败，正在重试' : '正在核对买后设置';
+    else if (!preEntry.instantReady) waitingReason = preEntry.instantLoadError || '正在核对即时持仓记录';
+    else if (!holdingsReady) waitingReason = '正在核对实盘连接与持仓';
+  }
+  const automaticScreening = { ...automatic, waitingReason };
   useEffect(() => owner ? registerInstantHoldingCheck(owner, symbol => {
     const code = symbol.replace(/\//g, '').toUpperCase();
-    if (usdtFollow.connected && (!usdtLive.snapshot || !!usdtLive.issue)) throw Error('实盘持仓尚未核对，等待同步后再判断开仓');
+    if ((!preEntry.ready && !holdingsReady) || (usdtFollow.connected && (!usdtLive.snapshot || usdtLive.issue))) {
+      throw Error('实盘持仓尚未核对，等待同步后再判断开仓');
+    }
     return (usdtLive.snapshot?.positions ?? []).some(row => row.symbol.replace(/\//g, '').toUpperCase() === code && Number(row.quantity) > 0);
-  }) : undefined, [owner, usdtFollow.connected, usdtLive.snapshot, usdtLive.issue]);
-  const hasAutomaticWork = automaticScreening.pending > 0 || automaticScreening.awaitingMail > 0 || (notify.config.enabled && cdaTracking.hasPendingSaleMail) || positions.length > 0;
+  }) : undefined, [owner, preEntry.ready, holdingsReady, usdtFollow.connected, usdtLive.snapshot, usdtLive.issue]);
+  const needsArchive = automatic.needsHistory || notify.config.enabled && cdaTracking.hasPendingSaleMail;
+  // Reconcile historical and legacy jobs in the background once account preferences have had first access.
+  // Only jobs missing original inputs promote the archive ahead of other history.
+  const backgroundRestore = executionMonitor.library.rounds.length > 0 ||
+    preferenceStatus !== 'loading' && (automatic.pending > 0 || automatic.awaitingMail > 0 || positions.length > 0);
   useEffect(() => {
-    if (owner) prioritizeInstantScreening(owner, hasAutomaticWork);
-    if (hasAutomaticWork) setScreeningRequested(true);
+    if (owner) prioritizeInstantScreening(owner, !!needsArchive);
+    if (needsArchive || backgroundRestore) setScreeningRequested(true);
     return () => { if (owner) prioritizeInstantScreening(owner, false); };
-  }, [owner, hasAutomaticWork]);
+  }, [owner, needsArchive, backgroundRestore]);
   const sources = useCallback((fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[], researchOpen: boolean, screeningOpen: boolean) => {
     if (researchOpen) setRequested(true);
     if (screeningOpen) setScreeningRequested(true);
@@ -75,7 +93,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const location = useLocation();
   const templates=state.study.planTemplates??state.templateCatalog;
   const names=useMemo(()=>({owner,resolver:qualityTemplateNames({planTemplates:templates})}),[owner,templates]);
-  return <FishQualityContext.Provider value={{ state: { ...state, instantPreferenceStatus:preferenceStatus, retryInstantPreferences:()=>setPreferenceAttempt(n=>n+1), automaticScreening, instantMonitor, cdaTracking: { ...cdaTracking, campaignIssue } }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
+  return <FishQualityContext.Provider value={{ state: { ...state, requestStudyArchive: activate, requestScreeningArchive: screeningRequested?undefined:() => setScreeningRequested(true), instantPreferenceStatus:preferenceStatus, retryInstantPreferences:()=>setPreferenceAttempt(n=>n+1), automaticScreening, instantMonitor, cdaTracking: { ...cdaTracking, campaignIssue } }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
     <QualityTemplateNamesContext.Provider value={names}><InstantPositionsContext.Provider value={{ positions, monitorResults: cdaTracking.monitorResults, mirrorFills: cdaTracking.mirrorFills, manualPositions: cdaTracking.manualPositions, usdtFollow, usdtLive: { ...usdtLive, management }, manage: cdaTracking.managePosition }}>{children}</InstantPositionsContext.Provider></QualityTemplateNamesContext.Provider>
     {(state.running || state.filterRunning || state.postExit?.running || state.preEntry?.running) && location.pathname !== '/' && <div role="status" className="fixed bottom-4 right-4 z-50 space-y-1 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
       {state.preEntry?.running && <div>买前筛选后台运行中 · {state.preEntry.progress?.done ?? 0}/{state.preEntry.progress?.total ?? 0}</div>}

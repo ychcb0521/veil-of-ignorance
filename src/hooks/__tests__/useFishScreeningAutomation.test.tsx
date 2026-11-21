@@ -128,6 +128,30 @@ it('freezes the independently saved settings per catch, including queued work re
 });
 
 
+it('runs a fresh capture once with its frozen settings while legacy work waits for its archive', async () => {
+  vi.useFakeTimers({now:T});
+  const owner = 'priority', prefix = 'veil.fish-screening-queue.v1:' + owner + ':';
+  const saved = { updatedAt:T, hours:4, plans:[{id:'plan',label:'买前',preEntryThreeStage:emptyPreEntryThreeStage()}] };
+  const legacy = {key:prefix+'job:legacy', id:'old', source:signal('OLD'), settings:saved, nextCheckAt:0};
+  localStorage.setItem(legacy.key, JSON.stringify(legacy));
+  writePersistedStateRaw('sim_'+owner+'_'+FISH_AUTOMATIC_SCREENING_KEY,JSON.stringify(saved));
+  const monitor = {ready:false,instantReady:true,library:{version:1,records:[],rounds:[]},startAutomatic:vi.fn(async()=>{})};
+  const notify = {config:{enabled:false}, sendAdmission:vi.fn()};
+  const h = renderHook(({ready}) => useFishScreeningAutomation(owner,ready,monitor as never,notify as never), {initialProps:{ready:false}});
+  await act(async () => { h.result.current.enqueue(signal('NEW'),T); h.result.current.enqueue(signal('NEW'),T); });
+  expect(monitor.startAutomatic).not.toHaveBeenCalled();
+  h.rerender({ready:true});
+  await act(async () => vi.advanceTimersByTimeAsync(2000));
+  expect(monitor.startAutomatic.mock.calls).toHaveLength(1);
+  expect(monitor.startAutomatic).toHaveBeenCalledWith(expect.any(String),signal('NEW'),false,expect.any(Function),saved,true,T);
+  expect(h.result.current.needsHistory).toBe(true);
+  monitor.ready=true; h.rerender({ready:true});
+  await act(async () => vi.advanceTimersByTimeAsync(2000));
+  expect(monitor.startAutomatic).toHaveBeenCalledTimes(2);
+  expect(monitor.startAutomatic).toHaveBeenLastCalledWith('old', legacy.source, false, expect.any(Function), saved, undefined, undefined);
+  h.unmount();
+});
+
 it('leaves an empty or paused queue dormant and wakes immediately when a queued capture may run',async()=>{
  vi.useFakeTimers({now:T});
  const timeouts=vi.spyOn(globalThis,'setTimeout'), intervals=vi.spyOn(globalThis,'setInterval');

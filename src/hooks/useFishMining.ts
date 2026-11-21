@@ -66,7 +66,10 @@ export function useFishMining(o: {
     generation.current++; account.current = o.account; runningRef.current=false; setRunning(false); setAnchorMs(null); setProgress(null);
     const s = load(latest.current.signalsRef.current); stateRef.current = s; setStateRaw(s); setWaiting('');
     // 挖掘库上线前挖到的鱼：从鱼舱补进挖掘库（只补一次）
-    void updateMiningLibrary(o.account, library => adoptMinedFish(library, s, latest.current.signalsRef.current, Date.now()));
+    const candidates = latest.current.signalsRef.current;
+    if (s.rules.length && candidates.some(signal => signal.mined && !signal.mined.roundId && Number.isFinite(signal.mined.anchorMs))) {
+      void updateMiningLibrary(o.account, library => adoptMinedFish(library, s, candidates, Date.now()));
+    }
     return ()=>{generation.current++;if(runningRef.current){cancelTask.current?.();latest.current.stop();}runningRef.current=false;releaseMiningLease(owner.current);};
   }, [o.account]);
 

@@ -126,7 +126,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   const pending = automatic?.pending ?? 0;
   const screeningPending = automatic?.screeningPending ?? (pending > 0 && !!(automatic?.settings ?? state.preEntry?.library.settings)?.plans.length);
   const needsSettings = pending > 0 && beforeReady && !screeningPending;
-  const screening = !automatic?.paused && (!!state.preEntry?.automaticRunning || screeningPending);
+  const screening = !automatic?.paused && (!!state.preEntry?.automaticRunning || screeningPending && !automatic?.waitingReason);
   const realPositions = follow?.connected && !live?.issue ? live?.snapshot?.positions : undefined;
   const liveHolding = !!realPositions?.length;
   const following = realPositions?.some(position => position.direction === 'long' && follow?.statuses.some(status =>
@@ -135,7 +135,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   const holding = liveHolding || !!instant?.positions.length;
   const verifiedExecutor = follow?.executionSafety === USDT_EXECUTION_SAFETY;
   const { label: stage, icon: StageIcon } = holding ? { label: '持仓中', icon: BriefcaseBusiness }
-    : !automatic?.paused && pending > 0 && !state.preEntry?.ready ? {label: '等待筛选库', icon: Clock3}
+    : !automatic?.paused && automatic?.waitingReason ? { label: automatic.waitingReason, icon: Clock3 }
     : screening ? { label: '筛选中', icon: Filter }
     : automatic?.paused && pending > 0 ? { label: '筛选已暂停', icon: Pause }
     : capturing ? { label: '捕捞中', icon: Pickaxe } : { label: '等待中', icon: Clock3 };

@@ -28,6 +28,7 @@ function createQueueSession(owner?: string) {
     pendingWrites: new Map<string, ScreeningQueueValue>(),
     failedWrites: new Set<string>(),
     ready: typeof indexedDB === 'undefined',
+    readFailed: false,
     channel: undefined as BroadcastChannel | undefined,
     tails: new Map<string, Promise<boolean>>(),
   };
@@ -166,7 +167,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       }
       wake.current?.();
     };
-    let loading = false, queueReadFailed = false;
+    let loading = false;
     const hydrate = async () => {
       if (loading || lifetime.signal.aborted) return;
       loading = true;
@@ -175,8 +176,8 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
           if (lifetime.signal.aborted) return;
           if (!queue.pendingWrites.has(key) && (value.revision ?? 0) >= (queue.entries.get(key)?.revision ?? 0)) queue.entries.set(key, value);
         }
-        queueReadFailed = false;
-      } catch { queueReadFailed = true; }
+        queue.readFailed = false;
+      } catch { queue.readFailed = true; }
       finally {
         loading = false;
         if (!lifetime.signal.aborted) {
@@ -273,9 +274,9 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       if (lifetime.signal.aborted) return;
       if (resumeNow) for (const [key, value] of queue.entries) if (isScreeningJob(value)) resumeJobs.add(key);
       const now = Date.now();
-      if (now >= retryAt && (queue.failedWrites.size || queueReadFailed)) {
+      if (now >= retryAt && (queue.failedWrites.size || queue.readFailed)) {
         retryAt = now + 5000;
-        if (queueReadFailed) void hydrate();
+        if (queue.readFailed) void hydrate();
         for (const key of queue.failedWrites) {
           if (key === pauseKey) {
             if (writePersistedStateRaw(key, current.current.paused ? '1' : '0')) { queue.failedWrites.delete(key); publish(); }
@@ -286,8 +287,8 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
         }
       }
       const { ready, monitor, paused } = current.current;
-      const retryStorage = queue.failedWrites.size > 0 || queueReadFailed;
-      if (!queue.ready || !ready || !monitor?.ready) return retryStorage;
+      const retryStorage = queue.failedWrites.size > 0 || queue.readFailed;
+      if (!queue.ready || !ready || !monitor || !(monitor.ready || monitor.instantReady && !queue.readFailed)) return retryStorage;
       const jobs = [...queue.entries.values()].filter(isScreeningJob);
       if (!jobs.length) return retryStorage;
       const ids = new Set(jobs.map(job => job.id));
@@ -295,22 +296,23 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       const completed = new Set(monitor.library.rounds.filter(round => ids.has(round.id) && round.state === 'complete').map(round => round.id));
       const defaultSettings = readAutomaticScreeningSettings(owner) ?? monitor.library.settings;
       const isMail = (job: Job) => job.matched || completed.has(job.id) && records.get(job.id)?.status === 'matched';
-      const next = jobs.filter(job => !isMail(job) && (resumeJobs.has(job.key) || job.nextCheckAt <= now)
-        && (records.has(job.id) || (job.settings ?? defaultSettings)?.plans.length))
+      const canScreen = (job: Job) => (monitor.ready || job.instantTrading) &&
+        (records.has(job.id) || (job.settings ?? defaultSettings)?.plans.length || job.runner && !monitor.ready);
+      const next = jobs.filter(job => canScreen(job) && !isMail(job) && (resumeJobs.has(job.key) || job.nextCheckAt <= now))
         .reduce<Job | undefined>((first, job) => !first || job.nextCheckAt < first.nextCheckAt ? job : first, undefined);
       if (next && !paused && !(monitor.automaticRunning ?? monitor.running)) void exclusive('scan', async () => {
         const job = await readJob(next.key);
         const active = current.current.monitor;
-        if (!job || job.matched || !resumeJobs.has(job.key) && job.nextCheckAt > Date.now() || !active?.startAutomatic
+        if (!current.current.ready || !job || !canScreen(job) || job.matched || !resumeJobs.has(job.key) && job.nextCheckAt > Date.now() || !active?.startAutomatic
           || (active.automaticRunning ?? active.running) || current.current.paused || lifetime.signal.aborted) return;
         // Persist the next attempt before starting, so a reload can safely resume the same frozen round.
         const settings = job.settings ?? readAutomaticScreeningSettings(owner) ?? active.library.settings;
         resumeJobs.delete(job.key);
-        await save({ ...job, settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined,
-          runner: tab.current, nextCheckAt: Date.now() + MINUTE });
-        if (lifetime.signal.aborted || current.current.paused) return;
+        if (!await save({ ...job, settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined,
+          runner: tab.current, nextCheckAt: Date.now() + MINUTE })) return;
+        if (lifetime.signal.aborted || current.current.paused || !current.current.ready) return;
         let matchedWrite: Promise<boolean> | undefined;
-        await active.startAutomatic(job.id, job.source, !!job.runner && job.runner !== tab.current, match => {
+        await active.startAutomatic(job.id, job.source, !!job.runner && (!active.ready || job.runner !== tab.current), match => {
           const latest = queue.entries.get(job.key);
           if (!isScreeningJob(latest) || lifetime.signal.aborted) return;
           matchedWrite = save({ ...latest, matched: true });
@@ -335,7 +337,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       const pendingMail = jobs.find(job => (job.nextMailAt ?? 0) <= now && isMail(job));
       if (pendingMail) mail(pendingMail);
       const config = current.current.notify.config;
-      return retryStorage || (!paused && jobs.some(job => !isMail(job) && (records.has(job.id) || (job.settings ?? defaultSettings)?.plans.length)))
+      return retryStorage || (!paused && jobs.some(job => canScreen(job) && !isMail(job)))
         || ((!config.enabled || !fishNotifyMissing(config)) && jobs.some(isMail));
     };
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -363,7 +365,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       queue.channel = undefined;
     };
   }, [owner, pauseKey, persist, prefix, publish, queue, save]);
-  useEffect(() => { wake.current?.(); }, [ready, monitor?.ready, monitor?.automaticRunning, monitor?.library.settings, paused, settings, notify.config, jobs.length, storageIssue]);
+  useEffect(() => { wake.current?.(); }, [ready, monitor?.ready, monitor?.instantReady, monitor?.automaticRunning, monitor?.library.settings, paused, settings, notify.config, jobs.length, storageIssue]);
 
   const matchedIds = useMemo(() => {
     if (!jobs.length || !monitor) return undefined;
@@ -377,6 +379,17 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
     || pendingJobs.some(job => selectedPreEntryPlan(job.settings?.plans))
     || !!pendingIds && !!monitor?.library.records.some(record => pendingIds.has(record.roundId)));
   const pending = pendingJobs.length;
-  return { enqueue, paused, setAutoPaused, pending, screeningPending, awaitingMail: jobs.length - pending, storageIssue,
+  const needsArchive = (job: Job) => !job.instantTrading || job.id === monitor?.missingCheckpoint ||
+    !fallback && !selectedPreEntryPlan(job.settings?.plans) && !job.runner;
+  const needsHistory = !monitor?.ready && (pendingJobs.some(needsArchive) || !!monitor?.instantLoadError);
+  let waitingReason: string | undefined;
+  if (pending && !monitor?.automaticRunning && !paused) {
+    if (!queue.ready) waitingReason = '正在读取待筛队列';
+    else if (!monitor?.ready && queue.readFailed) waitingReason = '待筛队列读取失败，正在重试';
+    else if (needsHistory && pendingJobs.every(needsArchive)) {
+      waitingReason = monitor?.missingCheckpoint ? '正在恢复该信号的原始筛选进度' : '正在恢复待处理信号的原始条件';
+    }
+  }
+  return { enqueue, paused, setAutoPaused, pending, needsHistory, waitingReason, screeningPending, awaitingMail: jobs.length - pending, storageIssue,
     attemptIssue: attemptIssues.scan || attemptIssues.mail, settings, saveSettings };
 }

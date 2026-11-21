@@ -233,7 +233,8 @@ export function TimeControl({
   const entrySignalsRef = useRef(entrySignals);
   entrySignalsRef.current = entrySignals;
   const [savedTuringSignals, setSavedTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_SIGNALS);
-  const needsTuringArchive = (turing && signalLibOpen) || fishOpen || isTuringCupSymbol(activeSymbol ?? '');
+  const [workspaceRequested, setWorkspaceRequested] = useState(fishOpen);
+  const needsTuringArchive = (turing && signalLibOpen) || (fishOpen && workspaceRequested) || isTuringCupSymbol(activeSymbol ?? '');
   const turingArchive = useTuringReplayArchive(user?.id, needsTuringArchive);
   const replaySamples = useMemo(() => turingArchive.archive ? turingReplaySamples(turingArchive.archive) : EMPTY_SIGNALS, [turingArchive.archive]);
   const replayIds = useMemo(() => new Set(replaySamples.map(signal => signal.id)), [replaySamples]);
@@ -245,7 +246,8 @@ export function TimeControl({
     ) : EMPTY_SIGNALS;
     return replaySamples.length ? mergeSignals(saved, replaySamples) : saved;
   }, [savedTuringSignals, replaySamples, replayIds]);
-  const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs, fishOpen || (signalLibOpen && !entryPeriod), fishOpen);
+  const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs, workspaceRequested || (signalLibOpen && !entryPeriod), workspaceRequested);
+  const panelQuality = workspaceRequested ? fishQuality : { ...fishQuality, requestWorkspace: () => setWorkspaceRequested(true) };
   const instant = useScreenedInstantPositions();
   const openScreenedPositions = instant?.positions;
   const openBinanceCampaigns = instant?.usdtLive?.openCampaigns;
@@ -867,7 +869,7 @@ export function TimeControl({
         )}
       </div>
 
-      <div ref={fishHostRef} data-testid="fish-viewport" className={fishOpen?'relative z-30 flex min-h-0 flex-col bg-card':undefined} style={{height:fishHeight}}>{fishOpen && <ModuleErrorBoundary label="渔" backgroundTasks><FishBulkDeletionProvider state={fishQuality} removeFish={fish.removeMany}><FishPanel fillHeight quality={fishQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} onCardsChange={onlineReconstruction.onCardsChange} reconstructionRunning={onlineReconstruction.running} librarySignals={onlineSignals} onSuggest={fish.suggest} onTestHitRate={fish.testHitRate} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings, status === 'stopped'); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
+      <div ref={fishHostRef} data-testid="fish-viewport" className={fishOpen?'relative z-30 flex min-h-0 flex-col bg-card':undefined} style={{height:fishHeight}}>{fishOpen && <ModuleErrorBoundary label="渔" backgroundTasks><FishBulkDeletionProvider state={fishQuality} removeFish={fish.removeMany}><FishPanel fillHeight quality={panelQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} onCardsChange={onlineReconstruction.onCardsChange} reconstructionRunning={onlineReconstruction.running} librarySignals={onlineSignals} onSuggest={fish.suggest} onTestHitRate={fish.testHitRate} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings, status === 'stopped'); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
         onJump={handleJumpFish} onJumpQuality={source => void handleJumpFish(source.id, source)} onRateQuality={handleRateQualitySource} onImportCabin={fish.importCabin} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} qualityJumpPending={pendingJump?.fromQuality} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} /></FishBulkDeletionProvider></ModuleErrorBoundary>}</div>
 
       {/* 信号库折叠面板 */}

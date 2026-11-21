@@ -14,8 +14,8 @@ it('shows the latest 12 entries while the whole study is pending and reads only 
  const view=render(<FishMonitorLibrary {...props}/>);
  fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
  await waitFor(()=>expect(screen.getAllByTestId('monitor-archive-item')).toHaveLength(12));
- expect(store.body).not.toHaveBeenCalled();expect(screen.getByText(/完整研究仍在后台恢复/)).toBeInTheDocument();
- expect(screen.getByText('已显示最近 12 项目录')).toBeInTheDocument();expect(screen.queryByRole('button',{name:'导出监测库数据'})).toBeNull();
+ expect(store.body).not.toHaveBeenCalled();expect(screen.getByText(/展开时读取该项正文/)).toBeInTheDocument();
+ expect(screen.getByText('共 14 项目录 · 已显示 12 项')).toBeInTheDocument();expect(screen.queryByRole('button',{name:'导出监测库数据'})).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'打开监测归档 round-0'}));
  await screen.findByText('所选正文');expect(store.body).toHaveBeenCalledTimes(1);
  expect(screen.queryByRole('button',{name:'复制至组合表'})).toBeNull();

@@ -1,14 +1,14 @@
 import {beforeEach,expect,it,vi} from 'vitest';
 const cloud=vi.hoisted(()=>({owner:'alice',rows:new Map<string,unknown>(),reads:[] as string[][],writes:[] as {key:string;value:any}[],body:vi.fn()}));
 vi.mock('@/integrations/supabase/client',()=>({supabase:{auth:{getSession:async()=>({data:{session:{user:{id:cloud.owner}}}})},from:()=>({
- select:()=>{let keys:string[]=[],owner='';const q:any={eq:(_key:string,value:string)=>{owner=value;return q;},in:(_key:string,value:string[])=>{keys=value;return q;},abortSignal:()=>q,
- then:(resolve:any,reject:any)=>{cloud.reads.push(keys);return Promise.resolve({data:owner===cloud.owner?keys.filter(key=>cloud.rows.has(key)).map(key=>({key,value:cloud.rows.get(key)})):[],error:null}).then(resolve,reject);}};return q;},
+ select:(columns:string)=>{let keys:string[]=[],owner='';const q:any={eq:(_key:string,value:string)=>{owner=value;return q;},in:(_key:string,value:string[])=>{keys=value;return q;},abortSignal:()=>q,
+ then:(resolve:any,reject:any)=>{cloud.reads.push(keys);return Promise.resolve({data:owner===cloud.owner?keys.filter(key=>cloud.rows.has(key)).map(key=>{const value=cloud.rows.get(key) as any;return columns.includes('revision')?{key,revision:value.rev,removed:String(!!value.deleted)}:{key,value};}):[],error:null}).then(resolve,reject);}};return q;},
  upsert:async(row:any)=>{cloud.rows.set(row.key,structuredClone(row.value));cloud.writes.push(structuredClone(row));return {error:null};},
 })}}));
 vi.mock('../qualityArchiveStore',()=>({readOriginalQualityArchive:cloud.body,qualityArchiveBodyBlob:()=>({read:async()=>undefined,write:async()=>{}})}));
 vi.mock('@/lib/accountBlobSync',()=>({syncAccountBlobFully:async()=> 'pushed',readImmutableAccountBlobForVerification:cloud.body,decodeAccountBlob:vi.fn()}));
 import {readRecentMonitorDirectory,readRecentMonitorBody,publishRecentMonitorDirectory} from '../qualityRecentLibraryStore';
-import {recentMonitorDirectoryKey,recentMonitorDeletionsKey,type RecentMonitorDirectory} from '../qualityRecentLibrary';
+import {fullMonitorDirectoryKey,recentMonitorDirectoryKey,recentMonitorDeletionsKey,type RecentMonitorDirectory} from '../qualityRecentLibrary';
 import {newQualityStudy} from '../quality';
 import {__resetAccountSyncTransportForTests} from '../../accountSyncTransport';
 const at=1795242107522;
@@ -17,7 +17,7 @@ beforeEach(()=>{cloud.owner='alice';cloud.rows.clear();cloud.reads=[];cloud.writ
 it('reads only the current lightweight catalog and rejects another account or revision',async()=>{
  cloud.rows.set(recentMonitorDirectoryKey('r1'),catalog());
  expect(await readRecentMonitorDirectory('alice')).toEqual(catalog());
- expect(cloud.reads).toEqual([['idb:fish-quality'],[recentMonitorDirectoryKey('r1')]]);
+ expect(cloud.reads).toEqual([['idb:fish-quality'],[fullMonitorDirectoryKey('r1'),recentMonitorDirectoryKey('r1')]]);
  await expect(readRecentMonitorDirectory('bob')).rejects.toThrow('账号已切换');
  cloud.rows.set('idb:fish-quality',{rev:'r2'});expect(await readRecentMonitorDirectory('alice')).toBeUndefined();
 });

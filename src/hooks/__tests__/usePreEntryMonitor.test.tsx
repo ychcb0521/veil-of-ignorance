@@ -1,3 +1,6 @@
+import * as campaigns from '@/lib/fish/instantCampaignStore';
+import * as checkpoints from '@/lib/fish/preEntryPersistence';
+import * as admissions from '@/lib/fish/instantAdmission';
 import {collectFishQuality} from '@/lib/fish/quality';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,6 +38,67 @@ it('stops the current screening task before clearing its final displayed observa
  const h=renderHook(()=>usePreEntryMonitor('clear-running',true,run));await waitFor(()=>expect(h.result.current.ready).toBe(true));act(()=>{void h.result.current.start(study(),1);});await waitFor(()=>expect(run).toHaveBeenCalledOnce());await act(()=>h.result.current.clearTableResults());
  expect(h.result.current.running).toBe(false);expect(h.result.current.library.records[0].tableClearedAt).toBeGreaterThan(h.result.current.library.records[0].updatedAt);expect(h.result.current.library.records[0].readings[0].value).toBe(123);expect(h.result.current.library.rounds[0].state).toBe('paused');
 });
+it.each(['recovered', 'failed'] as const)('keeps instant screening independent of a %s historical restore', async outcome => {
+  vi.stubGlobal('indexedDB', {});
+  vi.spyOn(campaigns, 'readActiveInstantRecordIds').mockResolvedValue([]);
+  vi.spyOn(checkpoints, 'readAutomaticPreEntryCheckpoint').mockResolvedValue(undefined);
+  const reserve = vi.spyOn(admissions, 'reserveInstantAdmission').mockResolvedValue(false);
+  const matched = vi.fn();
+  const input = study(), filter = input.buyFilters[0];
+  const plan = freezeQualityPlan({ id: 'p', label: '买前', metric: filter.metric, snapshot: filter.snapshot,
+    rule: { metric: filter.metric, direction: filter.direction, threshold: filter.threshold } });
+  const settings = { plans: [plan], updatedAt: t, hours: 4 };
+  const frozen = structuredClone(settings);
+  const preview = { ...emptyPreEntryLibrary(), settings: { ...settings, hours: 876 } };
+  let endArchive!: () => void, endScan!: () => void, task!: QualityRunOptions;
+  storage.load.mockImplementation((_owner, show) => {
+    show(preview);
+    return new Promise((resolve, reject) => { endArchive = () => outcome === 'failed' ? reject(Error('分片版本不一致')) : resolve(emptyPreEntryLibrary()); });
+  });
+  const run = vi.fn(async (options: QualityRunOptions) => {
+    task = options;
+    await new Promise<void>(resolve => { endScan = resolve; });
+  });
+  const view = renderHook(({browse}) => usePreEntryMonitor('priority', browse, run, true), {initialProps:{browse:false}});
+  try {
+    await waitFor(() => expect(view.result.current.instantReady).toBe(true));
+    expect(storage.load).not.toHaveBeenCalled();
+    await act(() => view.result.current.startAutomatic('interrupted', input, true, matched, settings, true));
+    expect(run).not.toHaveBeenCalled();
+    expect(view.result.current.missingCheckpoint).toBe('interrupted');
+    const sample = qualityComparisonRows(input)[0];
+    vi.mocked(checkpoints.readAutomaticPreEntryCheckpoint).mockResolvedValueOnce({version:1,
+      rounds:[{id:'mismatched',instantTrading:true,startedAt:t,updatedAt:t,hours:4,state:'complete',plans:[plan],filters:[]}],
+      records:[{id:'mismatched:0:p',roundId:'mismatched',status:'matched',matchedAt:t,startTime:t,cursor:t,
+        updatedAt:t,readings:[],sample:{...sample,source:{...sample.source,symbol:'OTHERUSDT'}}}],
+    });
+    await act(() => view.result.current.startAutomatic('mismatched', input, true, matched, settings, true));
+    expect(view.result.current.missingCheckpoint).toBe('mismatched');
+    expect(run).not.toHaveBeenCalled();
+    expect(matched).not.toHaveBeenCalled();
+    let running!: Promise<void>;
+    act(() => { running = view.result.current.startAutomatic('fresh', input, false, matched, settings, true, t); });
+    await waitFor(() => expect(run).toHaveBeenCalledOnce());
+    expect(task.preEntry!.round).toMatchObject({ id:'fresh', hours:4, plans:frozen.plans, liveCapturedAt:t });
+    view.rerender({browse:true});
+    await waitFor(() => expect(view.result.current.library.settings?.hours).toBe(876));
+    expect(view.result.current.automaticLibrary.settings).toBeUndefined();
+    await act(() => view.result.current.start(input, 4));
+    expect(run).toHaveBeenCalledOnce();
+    await act(async () => endArchive());
+    expect(view.result.current.ready).toBe(outcome === 'recovered');
+    expect(task.signal.aborted).toBe(false);
+    expect(view.result.current.automaticLibrary.rounds.find(r => r.id === 'fresh')?.state).toBe('running');
+    act(() => task.preEntry!.onRecord({...task.preEntry!.records[0], status:'matched', matchedAt:t+60000, updatedAt:Date.now()+1}));
+    endScan(); await act(() => running);
+    expect(reserve).toHaveBeenCalledOnce();
+    expect(matched).not.toHaveBeenCalled();
+    expect(view.result.current.automaticLibrary.records[0].status).toBe('unmatched');
+    expect(settings).toEqual(frozen);
+    expect(storage.save.mock.calls.every(([,value,immediate]) => immediate && !value.settings && value.rounds.every(r => r.id === 'fresh'))).toBe(true);
+  } finally { view.unmount(); vi.restoreAllMocks(); vi.unstubAllGlobals(); }
+});
+
 describe('买前监测独立任务', () => {
   it('retains both frozen settings when switching versions and can run the old set again',async()=>{
     const f=study().buyFilters[0],oldPlan=freezeQualityPlan({id:'old',label:'原版资产',metric:f.metric,snapshot:f.snapshot,rule:{metric:f.metric,direction:f.direction,threshold:f.threshold}});

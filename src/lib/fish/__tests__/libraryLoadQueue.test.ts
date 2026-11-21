@@ -20,6 +20,25 @@ it('runs only one restore per account, starts waiting libraries in priority orde
   expect(order).toEqual(['instant','monitor','screening','filter','mining']);
 });
 
+it('starts a late instant read during a blocked archive, then resumes the ordered backlog', async () => {
+  const order: string[] = [];
+  let releaseArchive!: () => void, releaseInstant!: () => void;
+  const archive = readFishLibrary('busy', 'monitor', () => new Promise<void>(resolve => {
+    order.push('monitor'); releaseArchive = resolve;
+  }));
+  await Promise.resolve();
+  const next = readFishLibrary('busy', 'mining', async () => { order.push('mining'); });
+  const instant = readFishLibrary('busy', 'instant', () => new Promise<void>(resolve => {
+    order.push('instant'); releaseInstant = resolve;
+  }));
+  await Promise.resolve();
+  expect(order).toEqual(['monitor', 'instant']);
+  releaseArchive(); await archive;
+  expect(order).toEqual(['monitor', 'instant']);
+  releaseInstant(); await Promise.all([instant, next]);
+  expect(order).toEqual(['monitor', 'instant', 'mining']);
+});
+
 it('promotes the shared screening read when instant trading needs admission history', async () => {
   const order: string[] = [];
   const pending = (['monitor','screening','instant'] as const).map(p =>

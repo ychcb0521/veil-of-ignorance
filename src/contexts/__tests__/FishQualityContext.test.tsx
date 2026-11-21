@@ -2,9 +2,15 @@ import {useState} from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { FishQualityProvider, usePageFishQuality } from '@/contexts/FishQualityContext';
+import { FishQualityProvider, useFishCaptureAutomation, usePageFishQuality } from '@/contexts/FishQualityContext';
 import { importQualityFish, newQualityStudy, qualityDisplayRows, qualityResultKey, qualityRunSamples, type QualityRunOptions } from '@/lib/fish/quality';
 import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
+import * as preferences from '@/hooks/useFishAccountSettings';
+import * as db from '@/lib/fish/fishPreferencesDb';
+import * as checkpoints from '@/lib/fish/preEntryPersistence';
+import { emptyPreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
+import { FISH_AUTOMATIC_SCREENING_KEY } from '@/lib/fish/preEntryActivePlan';
+import { writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
 
 const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), screening: vi.fn() }));
@@ -25,6 +31,44 @@ function Other() { const navigate = useNavigate(); return <button onClick={() =>
 beforeEach(() => { vi.useFakeTimers(); storage.load.mockReset().mockResolvedValue({ study: { ...importQualityFish(newQualityStudy(T), fish), workspaceUpdatedAt: T } }); storage.save.mockReset().mockResolvedValue(true); storage.screening.mockReset().mockResolvedValue({ version: 1, rounds: [], records: [] }); });
 afterEach(() => { cleanup(); vi.clearAllTimers(); vi.useRealTimers(); });
 const flush = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+it('screens from the normal capture entry point before the history opens and waits for verified account settings', async () => {
+  vi.stubGlobal('indexedDB', {});
+  vi.spyOn(db, 'readFishPreferences').mockImplementation(async keys => keys.map(() => undefined));
+  vi.spyOn(db, 'readFishPreferenceEntries').mockResolvedValue([]);
+  vi.spyOn(db, 'writeFishPreference').mockResolvedValue(undefined);
+  vi.spyOn(checkpoints, 'readAutomaticPreEntryCheckpoint').mockResolvedValue(undefined);
+  let confirm!: (value: boolean) => void;
+  vi.spyOn(preferences, 'loadFishAccountPreferences').mockReturnValue(new Promise(resolve => { confirm = resolve; }));
+  const filter = makeQualityBuyFilter('state:state','>',.8);
+  const settings = { hours:4, updatedAt:T, plans:[{id:'verified',label:'买前',metric:filter.metric,
+    snapshot:filter.snapshot,preEntryThreeStage:emptyPreEntryThreeStage()}] };
+  let finishArchive!: (value: unknown) => void;
+  storage.screening.mockImplementation(() => new Promise(resolve => { finishArchive = resolve; }));
+  const key = 'sim_priority_'+FISH_AUTOMATIC_SCREENING_KEY;
+  writePersistedStateRaw(key, JSON.stringify(settings));
+  const run = vi.fn(async (_options: QualityRunOptions) => {});
+  function Capture() {
+    const q = usePageFishQuality(EMPTY, EMPTY, EMPTY, false, false);
+    const {enqueue} = useFishCaptureAutomation();
+    return <><button onClick={() => enqueue(fish[0],T)}>收到新信号</button><output>{q.automaticScreening?.waitingReason}</output></>;
+  }
+  const view = render(<MemoryRouter><FishQualityProvider owner="priority" run={run}><Capture/></FishQualityProvider></MemoryRouter>);
+  try {
+    await flush();
+    fireEvent.click(screen.getByText('收到新信号')); await flush();
+    expect(run).not.toHaveBeenCalled();
+    expect(screen.getByText('正在读取即时交易设置')).toBeVisible();
+    expect(storage.screening).not.toHaveBeenCalled();
+    await act(async () => confirm(true)); await flush();
+    expect(run).toHaveBeenCalledOnce();
+    expect(run.mock.calls[0][0].preEntry?.round).toMatchObject({instantTrading:true,liveCapturedAt:T,hours:4,plans:[{id:'verified'}]});
+    expect(storage.screening).toHaveBeenCalledOnce();
+    expect(storage.load).not.toHaveBeenCalled();
+  } finally {
+    view.unmount(); finishArchive?.({version:1,rounds:[],records:[]}); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+  }
+});
+
 it('does not load or save the research archive during a campaign-only visit, then activates once on demand', async () => {
   render(<MemoryRouter initialEntries={['/other']}><FishQualityProvider owner="a" run={vi.fn(async () => {})}><Routes><Route path="/" element={<Controls/>}/><Route path="/other" element={<Other/>}/></Routes></FishQualityProvider></MemoryRouter>);
   await flush(20_000);

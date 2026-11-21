@@ -23,12 +23,14 @@ const pairingCode = /^[0-9a-f]{64}$/;
 
 async function readPairing(owner: string) {
   const storageKey = key(owner);
-  const [saved] = await readFishPreferences<string>([storageKey]).catch(() => []);
-  if (typeof saved === 'string' && pairingCode.test(saved)) return saved;
+  let verified = true;
+  const [saved] = await readFishPreferences<string>([storageKey]).catch(() => { verified = false; return []; });
+  if (typeof saved === 'string' && pairingCode.test(saved)) return { token: saved, verified: true };
   try {
     const legacy = localStorage.getItem(storageKey);
-    return legacy && pairingCode.test(legacy) ? legacy : undefined;
-  } catch { return undefined; }
+    if (legacy && pairingCode.test(legacy)) return { token: legacy, verified: true };
+    return { token: undefined, verified };
+  } catch { return { token: undefined, verified: false }; }
 }
 interface FollowState {
   connected: boolean;
@@ -52,7 +54,7 @@ const disconnected: FollowState = { connected: false, paused: false, startedAt: 
 export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracking) {
   const trackingRef = useRef(tracking);
   trackingRef.current = tracking;
-  const [pairing, setPairing] = useState<{ owner?: string; token?: string }>({});
+  const [pairing, setPairing] = useState<{ owner?: string; token?: string; verified?: boolean }>({});
   const [state, setState] = useState<{ owner?: string; data: FollowState }>({ data: disconnected });
   const [issue, setIssue] = useState('');
   const token = pairing.owner === owner ? pairing.token : undefined;
@@ -68,12 +70,16 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
   useEffect(() => {
     if (!owner) return;
     let active = true;
-    let revision = 0;
+    let revision = 0, retry: ReturnType<typeof setTimeout>;
     const refresh = async () => {
+      clearTimeout(retry);
       const request = ++revision;
       const write = pairingWrite.current;
-      const token = await readPairing(owner);
-      if (active && request === revision && write === pairingWrite.current) setPairing({ owner, token });
+      const pairing = await readPairing(owner);
+      if (active && request === revision && write === pairingWrite.current) {
+        setPairing({ owner, ...pairing });
+        if (!pairing.verified) retry = setTimeout(refresh, 15_000);
+      }
     };
     const storage = (event: StorageEvent) => { if (event.key === key(owner)) void refresh(); };
     let channel: BroadcastChannel | undefined;
@@ -85,7 +91,7 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     void refresh();
     window.addEventListener('storage', storage);
     return () => {
-      active = false;
+      active = false; clearTimeout(retry);
       window.removeEventListener('storage', storage);
       channel?.close();
       pairingChannel.current = undefined;
@@ -309,6 +315,6 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     void tick();
     return () => { abort.abort(); clearInterval(timer); };
   },[owner,token,data.connected,data.handoff?.authorized,data.handoff?.stage,readMirror]);
-  return { ...data, owner, paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns,
+  return { ...data, owner, pairingReady: !!owner && pairing.owner === owner && (!!token || !!pairing.verified), paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns,
     readManualMonitor, adoptManualMonitor, switchManualMonitor, switchFollowMonitor, advanceManualMonitor, controlPosition, readDeskQuote, deskOpen, deskClose };
 }

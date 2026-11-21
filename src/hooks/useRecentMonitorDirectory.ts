@@ -7,7 +7,7 @@ export function useRecentMonitorDirectory(owner:string|undefined,enabled:boolean
   if(!enabled||!owner)return;
   let active=true;
   setState(previous=>({owner,loading:true,...(previous.owner===owner?{directory:previous.directory}:{}),error:undefined}));
-  void readRecentMonitorDirectory(owner).then(directory=>{if(active)setState({owner,directory,loading:false});},()=>{if(active)setState({owner,loading:false,error:'近期目录读取失败，可重试读取'});});
+  void readRecentMonitorDirectory(owner).then(directory=>{if(active)setState({owner,directory,loading:false,error:directory?undefined:'当前版本尚无独立监测目录'});},()=>{if(active)setState({owner,loading:false,error:'近期目录读取失败，可重试读取'});});
   return()=>{active=false;};
  },[owner,enabled,attempt]);
  return {...(state.owner===owner?state:{loading:enabled}),retry:useCallback(()=>retry(n=>n+1),[])};
