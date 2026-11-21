@@ -53,3 +53,10 @@ it('still opens recent-first after the whole study is ready and keeps full-libra
  fireEvent.click(screen.getByRole('button',{name:'查看全部轮次'}));expect(screen.queryAllByTestId('monitor-archive-item')).toHaveLength(0);
  expect(screen.getByText(/暂无监测归档/)).toBeInTheDocument();expect(rename).not.toHaveBeenCalled();
 });
+it('shows a newly completed local round immediately instead of shadowing it with an older cloud catalog',()=>{
+ const study=newQualityStudy(at);study.monitorLibrary={version:1,importedLegacy:false,settings:[],records:[],archives:[],rounds:[{id:'local-new',startedAt:at+60000,updatedAt:at+60001,state:'complete',recordIds:[]}]};
+ render(<FishMonitorLibrary study={study} ready account="alice" renderStudy={()=> <p>最新本机轮次</p>}/>);
+ fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
+ fireEvent.click(screen.getByRole('button',{name:'打开监测归档 local-new'}));
+ expect(screen.getByText('最新本机轮次')).toBeInTheDocument();expect(store.directory).not.toHaveBeenCalled();expect(store.body).not.toHaveBeenCalled();
+});
