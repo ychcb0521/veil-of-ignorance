@@ -232,7 +232,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
     : waiting && /网络|正忙|标签页|限频/.test(waiting) ? waiting
     : s.lastError ? `出错：${s.lastError}（${retryText}）`
     : waiting || `排队中：下一档 ${short(s.cursorMs)}`;
-  const statusLabel = activeAnchor != null ? '捕捞中' : s.stopped ? '已停止' : rangeComplete ? '区间已完成' : reached ? '已达目标'
+  const statusLabel = activeAnchor != null ? '捕捞中' : rangeComplete ? '区间已完成' : reached ? '已达目标'
     : !s.enabled ? hasStarted ? '已暂停' : '未开始'
     : caughtUp ? '已追上现在' : s.errorKind==='configuration' ? '配置需处理' : waiting ? (/限频/.test(waiting)?'限频等待':'等待中') : s.lastError ? '等待重试' : '排队中';
   const hasError = !s.stopped && !!s.lastError && !running && !reached && !caughtUp && !rangeComplete;
@@ -320,10 +320,10 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
           </DialogContent>
         </Dialog>
         <FishMiningLibrary openRequest={openRequest} onSelectDirectory={onSelectDirectory} directoryEdits={directoryEdits} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy} account={mining.account} holdKeys={mining.holdKeys} onJump={onJump} canJump={canJump} onSelectInTable={onSelectInTable}/>
-        {(running || hasError || s.enabled || hasStarted) && <span role="status" aria-label={statusDetail} title={statusDetail}
+        {!s.stopped && (running || hasError || s.enabled || hasStarted) && <span role="status" aria-label={statusDetail} title={statusDetail}
           className={`ml-1 inline-flex items-center gap-2 whitespace-nowrap text-[10px] leading-4 ${hasError ? 'text-destructive' : 'text-muted-foreground'}`}>
           <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${activeAnchor != null ? 'animate-pulse bg-primary' : hasError ? 'bg-destructive' : 'bg-muted-foreground/40'}`}/>
-          {statusLabel}{!s.stopped && <span className="font-mono tabular-nums">{s.mined}/{s.target}</span>}
+          {statusLabel}<span className="font-mono tabular-nums">{s.mined}/{s.target}</span>
         </span>}
 
         {hasError&&<button type="button" disabled={running} onClick={mining.retry??mining.start} className={qualityPrimaryAction}>{s.errorKind==='configuration'?'重新检查':'立即重试'}</button>}

@@ -164,7 +164,7 @@ it('keeps stop inside the run menu for a reached round and opens a new round onl
   expect(mining.stop).toHaveBeenCalledOnce();
   expect(mining.start).not.toHaveBeenCalled();
   view.rerender(<FishMiningPanel mining={{...mining,state:{...mining.state,stopped:true,enabled:false}} as never} sellFixed campaignHref="#"/>);
-  expect(screen.getByRole('status')).toHaveTextContent(/^已停止$/);
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
   expect(screen.queryByRole('progressbar', {name:'批量捕捞进度'})).not.toBeInTheDocument();
   expect(screen.queryByRole('button', {name:'继续批量捕捞'})).toBeNull();
   fireEvent.click(screen.getByRole('button', {name:'开始新一轮'}));
