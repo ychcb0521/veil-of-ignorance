@@ -164,13 +164,17 @@ it('keeps stop inside the run menu for a reached round and opens a new round onl
   expect(mining.stop).toHaveBeenCalledOnce();
   expect(mining.start).not.toHaveBeenCalled();
   view.rerender(<FishMiningPanel mining={{...mining,state:{...mining.state,stopped:true,enabled:false}} as never} sellFixed campaignHref="#"/>);
-  expect(screen.getByRole('status')).toHaveTextContent('已停止105/100');
+  expect(screen.getByRole('status')).toHaveTextContent(/^已停止$/);
+  expect(screen.queryByRole('progressbar', {name:'批量捕捞进度'})).not.toBeInTheDocument();
   expect(screen.queryByRole('button', {name:'继续批量捕捞'})).toBeNull();
   fireEvent.click(screen.getByRole('button', {name:'开始新一轮'}));
   const dialog = within(screen.getByRole('dialog', {name:'重新开始批量捕捞'}));
   expect(dialog.getByLabelText('扫描起点（北京时间）')).toHaveValue('2026-04-02T12:00');
   fireEvent.click(dialog.getByRole('button', {name:'取消'}));
   expect(mining.start).not.toHaveBeenCalled();
+  view.rerender(<FishMiningPanel mining={api({}, {enabled:true, mined:0, target:100}) as never} sellFixed campaignHref="#"/>);
+  expect(screen.getByRole('progressbar', {name:'批量捕捞进度'})).toHaveAttribute('aria-valuenow','0');
+  expect(screen.getByRole('status')).toHaveTextContent('0/100');
 });
 it('shows a target stop even if the saved run was enabled and allows adding to the same round',()=>{
   const m=api({}, {enabled:true,rules:currentDefaultRules(),target:100,mined:106,anchorsDone:13,

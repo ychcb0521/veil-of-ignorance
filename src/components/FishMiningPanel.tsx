@@ -245,7 +245,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
             <div className="space-y-1.5 border-t border-border/50 pt-2.5 text-muted-foreground">{!sellFixed && <p className="text-amber-700 dark:text-amber-400">还没固定卖出方案：命中的信号会入舱并加入列表，在「持仓监测 → 条件设置」中固定一套方案后，才会按它比较各探测算法。</p>}<p>命中的信号直接进「鱼舱」（不算新鱼、不发邮件），同时加入鱼质量并自动勾选；点「开始过滤」或「开始监测」后，各自独立运行。</p><p>同一段持续的信号只记第一次能发现的那一档，以该档的历史时间模拟买入。普通捕捞运行时，批量捕捞会等到空闲再继续。</p><p>暂停后可继续同一轮。点右侧 ▾ 里的「停止本轮」可结束扫描和自动重试，已完成的档位保留。</p><p>开始按钮右侧的 ▾ 中可选「重新开始」，设置起止时间后开始新一轮。捕捞库按 CDA、BSS、CBI-2 等算法家族分目录，目录使用组合表的形式。</p><a href={campaignHref} className="inline-flex items-center gap-0.5 text-primary hover:underline">在交易战役查看<ArrowUpRight aria-hidden className="h-3 w-3"/></a></div>
           </div>
         </FishQualityInfo>
-      </>} progress={<div className="absolute inset-x-0 bottom-0 h-px overflow-hidden bg-border/60" role="progressbar" aria-label="批量捕捞进度" aria-valuemin={0} aria-valuemax={s.target} aria-valuenow={Math.min(s.mined, s.target)} aria-valuetext={`已捕捞 ${s.mined} 条，目标 ${s.target} 条`}><div className="h-full rounded-r-full bg-primary/70 transition-[width] duration-500" style={{ width: `${share * 100}%` }}/></div>}>
+      </>} progress={!s.stopped && <div className="absolute inset-x-0 bottom-0 h-px overflow-hidden bg-border/60" role="progressbar" aria-label="批量捕捞进度" aria-valuemin={0} aria-valuemax={s.target} aria-valuenow={Math.min(s.mined, s.target)} aria-valuetext={`已捕捞 ${s.mined} 条，目标 ${s.target} 条`}><div className="h-full rounded-r-full bg-primary/70 transition-[width] duration-500" style={{ width: `${share * 100}%` }}/></div>}>
         <div role="group" aria-label="批量捕捞运行" className="inline-flex h-6 shrink-0 items-stretch">
           {s.stopped
             ? <button type="button" onClick={()=>setRestartOpen(true)} className={qualitySplitPrimaryAction}><Play className="h-3 w-3"/>开始新一轮</button>
@@ -323,7 +323,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
         {(running || hasError || s.enabled || hasStarted) && <span role="status" aria-label={statusDetail} title={statusDetail}
           className={`ml-1 inline-flex items-center gap-2 whitespace-nowrap text-[10px] leading-4 ${hasError ? 'text-destructive' : 'text-muted-foreground'}`}>
           <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${activeAnchor != null ? 'animate-pulse bg-primary' : hasError ? 'bg-destructive' : 'bg-muted-foreground/40'}`}/>
-          {statusLabel}<span className="font-mono tabular-nums">{s.mined}/{s.target}</span>
+          {statusLabel}{!s.stopped && <span className="font-mono tabular-nums">{s.mined}/{s.target}</span>}
         </span>}
 
         {hasError&&<button type="button" disabled={running} onClick={mining.retry??mining.start} className={qualityPrimaryAction}>{s.errorKind==='configuration'?'重新检查':'立即重试'}</button>}
