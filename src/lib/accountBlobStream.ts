@@ -4,17 +4,19 @@ import { reviveAccountBlobValue, serializeAccountBlob } from './accountBlobCodec
 /** Parse decompressed bytes without allocating one archive-sized JSON string.
  * Values and special tags retain the existing codec's exact semantics.
  */
-export async function deserializeAccountBlobStream(stream: ReadableStream<Uint8Array>, projection?:{record:(value:unknown,path:readonly (string|number|undefined)[])=>unknown;flush:()=>Promise<void>}, visit?: (key:string|number|undefined,parent:string|number|undefined,value:unknown)=>void): Promise<unknown> {
+export async function deserializeAccountBlobStream(stream: ReadableStream<Uint8Array>, projection?:{record:(value:unknown,path:readonly (string|number|undefined)[])=>unknown;flush:()=>Promise<void>}, visit?: (key:string|number|undefined,parent:string|number|undefined,value:unknown)=>void, intern?: (value:unknown)=>unknown): Promise<unknown> {
   const parser = new JSONParser({ keepStack: true, stringBufferSize: 64 * 1024 });
   const canonical = new Map<string, object>();
   let result: unknown, complete = false;
   parser.onValue = ({ value, key, parent, stack }) => {
-    let next = reviveAccountBlobValue(String(key ?? ''), value);
+    let next = value && typeof value==='object' ? reviveAccountBlobValue(String(key ?? ''), value) : value;
+    // Equal-looking object keys in a tagged Map or Set must retain distinct identities.
+    if (intern && !(value && typeof value === 'object' && (key === 'v' || stack.some(frame => frame.key === 'v')))) next = intern(next);
     if(visit)visit(key,stack[stack.length-1]?.key,next);
     if(projection)next=projection.record(next,[...stack.map(frame=>frame.key),key]);
     // IndexedDB can share these immutable frozen objects, avoiding thousands of
     // identical plan/formula copies after a cloud restore. Content is unchanged.
-    if (['plan', 'snapshot', 'detectors'].includes(String(key)) && next && typeof next === 'object') {
+    if (!intern && ['plan', 'snapshot', 'detectors'].includes(String(key)) && next && typeof next === 'object') {
       const text = serializeAccountBlob(next);
       if (text.length <= 128 * 1024) {
         const previous = canonical.get(text);
@@ -22,7 +24,7 @@ export async function deserializeAccountBlobStream(stream: ReadableStream<Uint8A
         else { canonical.set(text, next); if (canonical.size > 128) canonical.delete(canonical.keys().next().value!); }
       }
     }
-    if (parent !== undefined && key !== undefined) {
+    if (parent !== undefined && key !== undefined && (next !== value || key === '__proto__' || intern && typeof value==='string' && value.length>=96)) {
       Object.defineProperty(parent, key, { value: next, enumerable: true, writable: true, configurable: true });
     }
     if (stack.length === 0) { result = next; complete = true; }

@@ -59,6 +59,9 @@ it('shows stored templates while holding research loads and resumes normal editi
   expect(dialog.getByRole('alert')).toHaveTextContent('账号研究恢复超时');
   fireEvent.click(dialog.getByRole('button',{name:'重试加载'}));
   expect(retry).toHaveBeenCalledOnce();
+  expect(screen.queryByText('正在核对账号与本机研究记录…')).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name:'重试恢复账号研究', hidden:true}));
+  expect(retry).toHaveBeenCalledTimes(2);
   expect(restore).not.toHaveBeenCalled();
   expect(s.setSellPlans).not.toHaveBeenCalled();
   view.rerender(<FishQuality state={{...loading, ready:true, study:{...s.study, planTemplates:[template]}}}/>);

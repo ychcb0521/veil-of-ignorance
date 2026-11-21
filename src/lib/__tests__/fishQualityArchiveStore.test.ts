@@ -31,6 +31,17 @@ function legacyStudy(): FishQualityStudy {
 const archiveKeys = () => [...disk.keys()].filter(k => k.includes('\u0000monitor-archive-'));
 const inline = (value: unknown) => ((value as FishQualityStudy).monitorLibrary?.archives ?? []).filter(a => a.study).length;
 
+it('only treats a clean first restore as synced, and merges unsynced fallback records before clearing them', async () => {
+  const {qualityAccountBlob} = await import('@/lib/fish/qualityStore');
+  const remote = monitorArchiveFixture();
+  expect(await qualityAccountBlob.mergeRemote!('clean', remote, {preferRemote:true})).toBe('matchesRemote');
+  const local = {...remote, workspaceUpdatedAt:123, samples:remote.samples.slice(0,1)};
+  localStorage.setItem('fish-quality:existing', JSON.stringify(local));
+  expect(await qualityAccountBlob.mergeRemote!('existing', remote, {preferRemote:true})).toBeUndefined();
+  expect(localStorage.getItem('fish-quality:existing')).toBeNull();
+  expect((disk.get('fish-quality:existing') as FishQualityStudy).workspaceUpdatedAt).toBe(123);
+});
+
 it('moves archive bodies out of a legacy study before the campaign worker reads it, once per device', async () => {
   const legacy = legacyStudy(), bodies = legacy.monitorLibrary!.archives!.map(a => a.study);
   disk.set('fish-quality:legacy', legacy);

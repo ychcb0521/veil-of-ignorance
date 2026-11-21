@@ -24,6 +24,8 @@ import { runAccountSyncRequest, __resetAccountSyncTransportForTests } from './ac
 import { serializeAccountBlob, deserializeAccountBlob, fingerprintAccountBlobValue, prepareAccountBlobEncoding } from './accountBlobCodec';
 export { serializeAccountBlob, deserializeAccountBlob, fingerprintAccountBlob } from './accountBlobCodec';
 
+import {checkRecoverySignal,readQualityRecoveryParts,clearRecoveryParts,type RecoveryRead,type RecoveryProgress} from './qualityRecoveryTransfer';
+
 export const ACCOUNT_BLOB_PREFIX = 'idb:';
 const CHUNK_CHARS = 900_000;
 const PUSH_DELAY_MS = 8_000;
@@ -34,7 +36,8 @@ const LOAD_TIMEOUT_MS = 6_000;
 
 export interface AccountBlobAdapter<T = unknown> {
   /** Optional bounded decoder; original codec remains the default for all assets. */
-  decodeRemote?(owner:string,enc:'gzip'|'json',pieces:readonly string[]):Promise<unknown>;
+  restoreProgress?(owner:string,progress:RecoveryProgress):void;
+  decodeRemote?(owner:string,enc:'gzip'|'json',pieces:readonly string[],read?:RecoveryRead):Promise<unknown>;
   /** 云端键名（不含前缀），如 fish-quality。 */
   name: string;
   /** Distinct local representations must not share a receipt with older clients. The cloud key stays the same. */
@@ -210,9 +213,21 @@ async function fetchHead(name: string, owner: string, signal?: AbortSignal): Pro
   const value = (data as { value?: unknown } | null)?.value;
   return validHead(value) ? value : null;
 }
-async function fetchValue(name: string, owner: string, head: Head,decode?:AccountBlobAdapter['decodeRemote'],signal?:AbortSignal): Promise<{ ok: true; value: unknown } | { ok: false }> {
+async function fetchValue(name: string, owner: string, head: Head,decode?:AccountBlobAdapter['decodeRemote'],signal?:AbortSignal,recovery?:RecoveryRead): Promise<{ ok: true; value: unknown } | { ok: false }> {
   if (head.deleted) return { ok: true, value: undefined };
   const keys = Array.from({ length: head.parts }, (_, i) => chunkKey(name, i));
+  if(recovery && decode){
+    const parts=await readQualityRecoveryParts(idOf(name,owner),head.rev,keys,async(batch,signal)=>{
+      const {data,error}=await (table().select('key, value') as any).eq('user_id',owner).in('key',batch).abortSignal(signal);
+      if(error)throw Error(error.message);
+      return data??[];
+    },recovery);
+    const value=await decode(owner,head.enc,parts,recovery);
+    checkRecoverySignal(recovery.signal);
+    const latest = await fetchHead(name, owner, recovery.signal);
+    if (latest?.rev !== head.rev) return {ok: false};
+    return {ok:true,value};
+  }
   const parts: string[] = [];
   // PostgREST aggregates rows into one JSON response. A whole 50 MB archive can
   // exceed the database statement deadline before any bytes reach the browser.
@@ -373,7 +388,7 @@ async function adopt(adapter: AccountBlobAdapter<any>, owner: string, head: Head
  * 打开时对一次账：按文件头注释的规则决定取云端、上传本机还是不动。
  * `begin()` 返回 false 表示页面已经等不及、先用本机那份了——此时绝不再改本机数据。
  */
-async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin: () => boolean, signal: AbortSignal): Promise<AccountBlobSyncStatus> {
+async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin: () => boolean, signal: AbortSignal, recovery?:RecoveryRead): Promise<AccountBlobSyncStatus> {
   if (!(await signedInAs(owner))) return 'skipped';
   // An unchanged head needs metadata only. Reading the whole 400+ MB research
   // archive here would duplicate the campaign worker's read on every page load.
@@ -384,9 +399,11 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
     if (dirty) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
     return 'unchanged';
   }
-  const local = await adapter.read(owner);
+  let local = await adapter.read(owner);
   if (signal.aborted) throw signal.reason;
   const localWeight = adapter.weight(local);
+  // Merge adapters read the latest durable state inside their write transaction.
+  if (adapter.mergeRemote) local = undefined;
   if (!head) {
     if (localWeight > 0 || (meta?.rev && meta.savedAt > meta.syncedAt)) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
     return 'unchanged';
@@ -396,12 +413,12 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
   if (meta?.rev) takeCloud = !dirty || head.savedAt >= meta.savedAt;
   else if (localWeight === 0) takeCloud = true;
   else {
-    cloud = await fetchValue(adapter.name, owner, head,adapter.decodeRemote,signal);
+    cloud = await fetchValue(adapter.name, owner, head,adapter.decodeRemote,signal,recovery);
     if (!cloud.ok) return 'failed';
     takeCloud = adapter.weight(cloud.value) > localWeight;
   }
   if(adapter.mergeRemote){
-    cloud??=await fetchValue(adapter.name,owner,head,adapter.decodeRemote,signal);
+    cloud??=await fetchValue(adapter.name,owner,head,adapter.decodeRemote,signal,recovery);
     if(!cloud.ok)return 'failed';
     if(!begin())return 'skipped';
     const merge=await adapter.mergeRemote(owner,cloud.value,{preferRemote:takeCloud});
@@ -418,14 +435,14 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
   }
   if (signal.aborted) throw signal.reason;
   if (!takeCloud) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
-  cloud ??= await fetchValue(adapter.name, owner, head,adapter.decodeRemote,signal);
+  cloud ??= await fetchValue(adapter.name, owner, head,adapter.decodeRemote,signal,recovery);
   if (!cloud.ok) return 'failed';
   if (!begin()) return 'skipped';
   await adopt(adapter, owner, head, cloud.value, local);
   return 'adopted';
 }
 
-const loads = new Map<string, { task: Promise<AccountBlobSyncStatus>; gate: { state: 'open' | 'adopting' | 'closed' }; controller: AbortController; waiting: number; settled: boolean }>();
+const loads = new Map<string, { task: Promise<AccountBlobSyncStatus>; gate: { state: 'open' | 'adopting' | 'closed' }; controller: AbortController; waiting: number; settled: boolean; progressAt:()=>number }>();
 /**
  * 本机存储读取前调用：每页每个账号对一次账，最多等 6 秒；
  * 超时就先用本机那份（之后的对账不再改本机数据，下次打开再来）。
@@ -439,18 +456,25 @@ export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: s
   if (!entry) {
     const gate: { state: 'open' | 'adopting' | 'closed' } = { state: 'open' };
     const controller = new AbortController();
-    const task = enqueue(id, () => reconcile(adapter, owner, () => { if (gate.state !== 'open') return false; gate.state = 'adopting'; return true; }, controller.signal))
+    let lastProgressAt=Date.now();
+    const recovery:RecoveryRead|undefined=adapter.restoreProgress?{signal:controller.signal,report(progress){
+      if(controller.signal.aborted)return;
+      lastProgressAt=Date.now();
+      adapter.restoreProgress!(owner,progress);
+    }}:undefined;
+    const task = enqueue(id, () => reconcile(adapter, owner, () => { if (gate.state !== 'open') return false; gate.state = 'adopting'; recovery?.report({phase:'save',done:0,total:0}); return true; }, controller.signal,recovery))
       .catch((error): AccountBlobSyncStatus => {
         if (controller.signal.aborted) return 'timed_out';
         console.warn('[账号研究] 恢复未完成', adapter.name, error instanceof Error ? error.message : '读取失败');
         return 'failed';
       });
-    const created = { task, gate, controller, waiting: 0, settled: false };
+    const created = { task, gate, controller, waiting: 0, settled: false,progressAt:()=>lastProgressAt };
     loads.set(id, created);
     entry = created;
     // 失败或没赶上：下次打开再对账。
     void task.then(status => {
       created.settled = true;
+      if(recovery && status==='adopted')clearRecoveryParts(id);
       if ((status === 'failed' || status === 'skipped' || status === 'timed_out') && loads.get(id) === created) loads.delete(id);
     });
   }
@@ -460,10 +484,14 @@ export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: s
   // 正在写本机时等它结束；其余情况超时后取消读取，避免继续向数据库拉取余下分片。
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<AccountBlobSyncStatus>(resolve => {
-    timer = setTimeout(() => {
-      if (gate.state === 'adopting') return;
-      resolve('timed_out');
-    }, timeoutMs);
+    const started=Date.now();
+    const check=()=>{
+      if(gate.state==='adopting')return;
+      const remaining=timeoutMs-(Date.now()-Math.max(started,load.progressAt()));
+      if(adapter.restoreProgress&&remaining>0)timer=setTimeout(check,remaining);
+      else resolve('timed_out');
+    };
+    timer=setTimeout(check,timeoutMs);
   });
   return Promise.race([task, timeout]).finally(() => {
     clearTimeout(timer);
@@ -538,7 +566,7 @@ export async function flushAccountBlobPushesForTests(): Promise<void> {
 export function __startNewPageForTests(): void { loads.clear(); }
 export function __resetAccountBlobSyncForTests(): void {
   for (const entry of pushTimers.values()) clearTimeout(entry.timer);
-  pushTimers.clear(); queues.clear(); loads.clear(); memory.clear(); adapters.clear();
+  clearRecoveryParts();pushTimers.clear(); queues.clear(); loads.clear(); memory.clear(); adapters.clear();
   nextPushAt.clear(); pushing.clear(); blobPushTail = Promise.resolve();
   __resetAccountSyncTransportForTests();
 }

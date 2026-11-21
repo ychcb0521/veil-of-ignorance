@@ -1,3 +1,4 @@
+import {FishStudyRecoveryStatus} from './FishStudyRecoveryStatus';
 import { captureLimitText } from '@/lib/fish/thresholdRange';
 import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
 import {FishHoldingImpulse1115Evidence} from './FishHoldingImpulse1115Evidence';
@@ -1065,7 +1066,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
       {state.archiving&&<p role="status" className="text-[11px] text-primary" data-testid="quality-archive-saving">{workspace?'正在保存结果…':'正在归档全部运行结果到监测库…保存完成后开始重算。'}</p>}
       {state.entry&&(state.entry.running||state.entry.error)&&<div className="flex items-center gap-3 text-[10px] text-muted-foreground" data-testid="quality-entry-progress"><span>入场读数 {state.entry.progress?.done??0}/{state.entry.progress?.total??0}</span>{state.entry.running?<button type="button" className="text-primary hover:underline" onClick={state.entry.cancel}>暂停入场补算</button>:<button type="button" className="text-primary hover:underline" onClick={()=>state.entry?.request(plans.map(p=>p.id),visible.flatMap(qualityTableMembers).map(r=>r.signalId??r.id),true)}>重试入场读数</button>}{state.entry.error&&<span className="text-destructive">{state.entry.error}</span>}</div>}
       {!archiveView&&postExitPlanIds.length>0&&<div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground" data-testid="quality-post-exit-progress"><span>卖后反事实 · 以实际最终卖出价为基准 · 0.5 / 1 / 2 / 4 / 6h</span>{state.postExit?.running?<><span role="status">补算 {state.postExit.progress?.done??0}/{state.postExit.progress?.total??0}</span><button type="button" className="text-primary hover:underline" onClick={state.postExit.cancel}>暂停反事实</button></>:<button type="button" className="text-primary hover:underline" onClick={()=>requestObservations(true)}>补算 / 重试反事实</button>}{state.postExit?.error&&<span className="text-destructive">{state.postExit.error}</span>}</div>}
-      {!ready && <p role="status" className="text-[10.5px] text-muted-foreground">恢复本机记录…</p>}
+      {!ready && <FishStudyRecoveryStatus owner={state.account} error={state.error} retry={state.retryStudyLoad}/>}
       {(error || state.warning || state.error) && <p role="alert" className="text-[11px] text-destructive">{error || state.error || state.warning}</p>}
       {/* 表格到达上下边界后，滚轮自然交给「渔」面板，避免只能移到表格外才能继续滚动。 */}
       <div className="flex flex-wrap items-center justify-between gap-2" data-testid="quality-combination-toolbar"><div className="inline-flex items-center gap-0.5"><h4 id={archiveKind?titleId:undefined} className="text-xs font-medium text-foreground" data-testid="quality-combination-title">组合表</h4>{!archiveKind&&<FishCombinationHelp workspace={!!workspace}/>}

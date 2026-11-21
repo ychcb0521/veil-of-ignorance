@@ -16,7 +16,7 @@ const cloud = vi.hoisted(() => {
       eq(col: keyof Row, value: string) { filters.push(row => row[col] === value); return builder; },
       in(col: keyof Row, values: string[]) { if(values.length>state.maxReadKeys)throw Error('canceling statement due to statement timeout'); filters.push(row => values.includes(row[col] as string)); return builder; },
       not(col: keyof Row, _op: 'like', pattern: string) { const prefix = pattern.replace(/%$/, ''); filters.push(row => !(row[col] as string).startsWith(prefix)); return builder; },
-      async maybeSingle() { const found = await run(); return { data: found[0] ?? null, error: null }; },
+      async maybeSingle() { const found = await run(); return { data: structuredClone(found[0] ?? null), error: null }; },
       then(resolve: (v: unknown) => void, reject: (e: unknown) => void) { return run().then(data => ({ data, error: null })).then(resolve, reject); },
     };
     return { builder, filters, run };
@@ -110,6 +110,27 @@ describe('accountBlobSync', () => {
     expect(b.local.value?.items).toEqual([1, 12]);
   });
 
+  it('allows continuous recovery beyond the timeout and rejects a revision changed during decode', async () => {
+    const writer = await device({items:[7]});
+    await writer.reopen();
+    for (const changed of [true, false]) {
+      const reader = await device();
+      const adapter: import('../accountBlobSync').AccountBlobAdapter<Value> = {
+        ...reader.adapter, restoreProgress: vi.fn(),
+        async decodeRemote(_owner, _enc, _parts, recovery) {
+          for (let i = 0; i < 6; i++) {
+            await new Promise(r => setTimeout(r, 12));
+            recovery!.report({phase:'decode', done:i+1, total:6});
+          }
+          if (changed) head()!.rev += '-changed';
+          return {items:[7]};
+        },
+      };
+      expect(await reader.mod.syncAccountBlobOnLoad(adapter, 'u1', 50)).toBe(changed ? 'failed' : 'adopted');
+      expect(reader.local.value).toEqual(changed ? undefined : {items:[7]});
+      if (changed) head()!.rev = head()!.rev.replace('-changed', '');
+    }
+  });
   it('checks an unchanged cloud revision without reading another full local research snapshot', async () => {
     const a = await device({ items: [1, 2, 3] });
     await a.reopen();

@@ -1,3 +1,5 @@
+import {decodeQualityStudy} from './qualityRestore';
+import {showQualityRecovery,resetQualityRecovery} from './qualityRecoveryProgress';
 import { mergeQualityPlanTemplates } from './qualityPlanTemplates';
 import {preserveQualitySourceRatings,applyQualitySourceRatings} from './qualitySourceRatings';
 import {applySavedQualityPlans,readSavedQualityPlans} from './qualitySavedPlans';
@@ -58,6 +60,7 @@ const pendingReads = new Map<string, Promise<{ study: FishQualityStudy; warning?
 export function loadQualityStudy(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
   const key = keyOf(owner), pending = pendingReads.get(key);
   if (pending) return pending;
+  resetQualityRecovery(owner);
   const task = loadQualityStudyRaw(owner).then(loaded => ({ ...loaded, study: applyQualitySourceRatings(applySavedQualityPlans(stopQualityRepair(loaded.study, Date.now()),readSavedQualityPlans(owner))) }));
   pendingReads.set(key, task);
   void task.then(loaded => {
@@ -173,7 +176,7 @@ export function ensureQualityArchivesDetached(owner?: string, force = false): Pr
   if (!force) detachChecks.set(key, done);
   return done;
 }
-export function saveQualityStudy(owner: string | undefined, study: FishQualityStudy, options?: { repairOnly?: boolean; remote?: {preferRemote:boolean} }): Promise<boolean> {
+export function saveQualityStudy(owner: string | undefined, study: FishQualityStudy, options?: { repairOnly?: boolean; remote?: {preferRemote:boolean; onFirstRestore?:()=>void} }): Promise<boolean> {
   const key = keyOf(owner);
   // App studies use immutable updates. IndexedDB already clones on put; making
   // an eager deep copy for every queued save multiplies the entire archive.
@@ -183,6 +186,7 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
   const task = (writes.get(key) ?? Promise.resolve(true)).then(()=>serializeArchiveWork(async () => {
     copy = await restorePreEntryStudy(compactQualityStudyForStorage(copy));
     let durablePrevious: FishQualityStudy | undefined;
+    let firstRestore = false;
     // 新归档的正文先写进归档库，总表只存目录。
     copy = await detachQualityArchiveBodies(owner, copy);
     try {
@@ -192,7 +196,15 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
           const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
           void readStoredQualityWithSignalReadings(store,key).then(previous => {
             durablePrevious = valid(previous) ? previous : undefined;
-            const next = merge(previous);
+            // A legacy fallback can contain unsynced edits from a failed local write.
+            let legacy: string | null = null;
+            if (options?.remote) {
+              try { legacy = localStorage.getItem(key); } catch { /* IndexedDB remains available. */ }
+            }
+            const fallback = legacy === null ? null : JSON.parse(legacy);
+            if (fallback !== null && !valid(fallback)) throw Error('本机研究记录格式异常');
+            const next = merge(valid(fallback) ? preserveStudy(durablePrevious, fallback) : previous);
+            firstRestore = previous == null && fallback == null && next === copy;
             leftInline = qualityStudyHasInlineArchives(next);
             writeStoredQualityWithSignalReadings(store,key,next);
           }).catch(error => { tx.abort(); reject(error); });
@@ -200,6 +212,7 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
         });
       } finally { db.close(); }
       try { localStorage.removeItem(key); } catch { /* optional cache cleanup */ }
+      if (firstRestore) options?.remote?.onFirstRestore?.();
       return true;
     } catch {
       try {
@@ -211,7 +224,7 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
   writes.set(key, task);
   // 记录里还剩内嵌正文（旧标签页写回的、或这次没写进归档库的）：排在这次保存之后再迁一次。
   void task.then(() => { if (leftInline) void ensureQualityArchivesDetached(owner, true); });
-  void task.then(ok => { if (ok) noteAccountBlobSaved(qualityAccountBlob, owner); });
+  if (!options?.remote) void task.then(ok => { if (ok) noteAccountBlobSaved(qualityAccountBlob, owner); });
   void task.then(ok => { if (ok && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner, repair: copy.campaignRepair && { id: copy.campaignRepair.id, state: copy.campaignRepair.state } } })); });
   void task.finally(() => { if (writes.get(key) === task) writes.delete(key); });
   return task;
@@ -220,6 +233,8 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
 /** 账号云端存档：本机那份原样上传；取回云端时排进同一条写队列，绝不和页面的保存交错。 */
 export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
   name: 'fish-quality',
+  decodeRemote:(_owner,enc,pieces,read)=>decodeQualityStudy(enc,pieces,read),
+  restoreProgress:showQualityRecovery,
   async prepareStored(owner,knownHash){
     await ensureQualityArchivesDetached(owner);await writes.get(keyOf(owner));
     // A legacy emergency localStorage copy may be newer; retain that exact
@@ -232,7 +247,16 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
     }
     return prepareStoredQuality(owner,readSavedQualityPlans(owner),knownHash);
   },
-  async mergeRemote(owner,value,context){if(value&&!await saveQualityStudy(owner,value,{remote:{preferRemote:context?.preferRemote??false}}))throw Error('鱼质量跨设备合并未保存');},
+  async mergeRemote(owner, value, context) {
+    if (!value) return;
+    let firstRestore = false;
+    const ok = await saveQualityStudy(owner, value, {remote: {
+      preferRemote: context?.preferRemote ?? false,
+      onFirstRestore() { firstRestore = true; },
+    }});
+    if (!ok) throw Error('鱼质量跨设备合并未保存');
+    if (firstRestore) return 'matchesRemote';
+  },
   async read(owner) {
     const key = keyOf(owner);
     await ensureQualityArchivesDetached(owner);
