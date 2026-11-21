@@ -2,7 +2,10 @@ import {FishStudyRecoveryStatus} from './FishStudyRecoveryStatus';
 import {createLibraryRoundReader} from '@/lib/fish/libraryRounds';
 import {createQualityTemplateDirectory, unknownTemplateGroup} from '@/lib/fish/qualityTemplateDirectory';
 import { qualityMonitorTimeLabels } from '@/lib/fish/qualityAdmissionTime';
-import {useCallback,useMemo,useRef,type ReactNode} from 'react';
+import {useCallback,useMemo,useRef,useState,type ReactNode} from 'react';
+import {useRecentMonitorDirectory} from '@/hooks/useRecentMonitorDirectory';
+import {RECENT_MONITOR_PAGE_SIZE} from '@/lib/fish/qualityRecentLibrary';
+import {readRecentMonitorBody} from '@/lib/fish/qualityRecentLibraryStore';
 import {ArchiveDirectorySettings,MonitorDirectorySettings} from './FishLibraryFrozenSettings';
 import {FishStoredLibraryTransferMenu} from './FishLibraryTransferContext';
 import {FishLibraryTimeDirectory,type FishDirectoryItem,type FishTemplateRenderer,type FishDirectoryPicker,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
@@ -12,6 +15,16 @@ import {qualityMonitorArchiveResultCount,type QualityMonitorSetting,type Quality
 import {downloadMonitorRecords} from '@/lib/fish/qualityMonitorTable';
 import type {TradeSignal} from '@/lib/signalLibrary';
 export function FishMonitorLibrary({study,ready=true,account,loadError,onRetry,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onPurgeDirectory,onRename,loadArchive,picker,onOpenChange,openRequest}:{ready?:boolean;account?:string;loadError?:string;onRetry?:()=>void;study:FishQualityStudy;picker?:FishDirectoryPicker;openRequest?:FishDirectoryRequest;onOpenChange?:(open:boolean)=>void;onJump?:(s:TradeSignal)=>void;canJump?:(s:TradeSignal)=>boolean;onOpenCampaign?:()=>void;renderTemplate?:FishTemplateRenderer;renderStudy?:(snapshot:FishQualityStudy, close?: () => void)=>ReactNode;onCopyStudy?:(snapshot:FishQualityStudy,sourceRoundId?:string)=>Promise<boolean>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;onPurgeDirectory?:(ids:readonly string[])=>Promise<{removed:readonly string[];retained:readonly string[]}>;onRename?:(id:string,name:string)=>Promise<boolean>;loadArchive?:(archive:QualityMonitorArchive, updateDirectory?:boolean)=>Promise<QualityMonitorArchiveStudy>}){
+ const [recentSession,setRecentSession]=useState(false),[pageSize,setPageSize]=useState(RECENT_MONITOR_PAGE_SIZE);
+ const recent=useRecentMonitorDirectory(account,recentSession||!!openRequest&&!ready),directory=recent.directory;
+ const usingRecent=recentSession&&!!directory;
+ const changeOpen=useCallback((open:boolean)=>{if(open){setRecentSession(!ready);setPageSize(RECENT_MONITOR_PAGE_SIZE);}else setRecentSession(false);onOpenChange?.(open);},[ready,onOpenChange]);
+ const recentItems=useMemo<FishDirectoryItem[]>(()=>!directory?[]:directory.entries.filter(entry=>!directory.edits?.[entry.id]?.hidden).slice(0,pageSize).map(entry=>{
+  const read=()=>readRecentMonitorBody(directory,entry);
+  return {id:entry.id,at:entry.at,label:entry.templateDirectory.title+' · '+entry.label,summary:entry.summary,
+   sourceRoundId:entry.sourceRoundId,revision:entry.bodyId,templateGroup:entry.templateDirectory,study:read,preview:read,
+   settings:async()=> <ArchiveDirectorySettings study={await read()}/>};
+ }),[directory,pageSize]);
  const library=study.monitorLibrary,settings=useMemo(()=>new Map((library?.settings??[]).map(s=>[s.id,s])),[library?.settings]);
  const current=useRef(study);current.current=study;
  const getItems=useCallback(():FishDirectoryItem[]=>{
@@ -50,9 +63,12 @@ export function FishMonitorLibrary({study,ready=true,account,loadError,onRetry,r
  },[library,loadArchive,settings,study.planTemplates]);
  const records=useMemo(()=>(library?.records??[]).filter(r=>settings.has(r.settingId)),[library?.records,settings]);
  const rounds=library?.rounds??[], archives=library?.archives??[];
- return <FishLibraryTimeDirectory loading={!ready&&!loadError} loadError={loadError} onRetry={onRetry}
-  loadingStatus={<FishStudyRecoveryStatus owner={account}/>} renderTemplate={renderTemplate} name="监测库" prefix="monitor" kind="template" openRequest={openRequest} picker={picker} onOpenChange={onOpenChange} items={getItems} edits={library?.directoryEdits} onSetHidden={onSetHidden} onPurgeDirectory={picker?undefined:onPurgeDirectory} onRename={onRename} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={records.length} download={()=>downloadMonitorRecords(records,settings)} transferMenu={!picker?actions=><FishStoredLibraryTransferMenu scope="monitor" actions={actions}/>:undefined}
-  description={`${library?.records.length??0} 条记录 · ${rounds.filter(r=>!r.legacy).length} 轮监测 · ${archives.length} 份完整归档${rounds.some(r=>r.legacy)?' · 含历史快照':''}`}
+ const visibleRecent=directory?.entries.filter(entry=>!directory.edits?.[entry.id]?.hidden).length??0;
+ return <FishLibraryTimeDirectory loading={!usingRecent&&!ready&&!loadError} loadError={usingRecent?undefined:loadError} onRetry={onRetry}
+  notice={usingRecent?<p role="status" className="text-xs text-muted-foreground">已优先载入最近记录，展开时读取正文。{!ready?(loadError?<>完整研究尚未恢复。{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试完整研究</button>}</>:'完整研究仍在后台恢复。'):<button type="button" className="ml-2 underline" onClick={()=>setRecentSession(false)}>查看全部轮次</button>}{!ready&&!!directory!.olderMonitorRounds?'更早的 '+directory!.olderMonitorRounds+' 轮将随完整研究恢复。':''}</p>:recentSession&&recent.error?<p role="alert" className="text-xs text-muted-foreground">{recent.error} <button type="button" className="underline" onClick={recent.retry}>重试近期目录</button></p>:undefined}
+  more={usingRecent&&(pageSize<visibleRecent||directory!.entries.length<directory!.total)?<button type="button" className="rounded border px-3 py-2 text-xs" disabled={recent.loading} onClick={()=>{setPageSize(n=>n+RECENT_MONITOR_PAGE_SIZE);if(pageSize>=visibleRecent)recent.retry();}}>{recent.loading?'正在读取更早记录…':'加载更早记录'}</button>:undefined}
+  loadingStatus={<FishStudyRecoveryStatus owner={account}/>} renderTemplate={renderTemplate} name="监测库" prefix="monitor" kind={usingRecent?'time':'template'} openRequest={openRequest} picker={picker} onOpenChange={changeOpen} items={usingRecent?recentItems:getItems} edits={usingRecent?directory?.edits:library?.directoryEdits} onSetHidden={ready?onSetHidden:undefined} onPurgeDirectory={picker||!ready?undefined:onPurgeDirectory} onRename={ready?onRename:undefined} onCopyStudy={ready?onCopyStudy:undefined} renderStudy={renderStudy} recordCount={ready?records.length:0} download={()=>downloadMonitorRecords(records,settings)} transferMenu={!picker?(ready?actions=><FishStoredLibraryTransferMenu scope="monitor" actions={actions}/>:()=>null):undefined}
+  description={usingRecent?`已显示最近 ${recentItems.length} 项目录`:`${library?.records.length??0} 条记录 · ${rounds.filter(r=>!r.legacy).length} 轮监测 · ${archives.length} 份完整归档${rounds.some(r=>r.legacy)?' · 含历史快照':''}`}
   info={<><p>模板下的监测轮次和归档按时间排列，保留每份运行的条件和结果。目录菜单可编辑名称、删除并恢复目录，保存后保留原时间和全部内容。</p><p>展开目录后可选择记录导入组合表，原归档保留。</p><p>早期轮次只展示仍保存的记录和条件，不补造缺失读数。完整下载、导入及导出保留。</p></>}
   empty="暂无监测归档。运行完成后可在组合表保存到监测库。"/>;
 }

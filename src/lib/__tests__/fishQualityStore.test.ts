@@ -29,7 +29,11 @@ it('clones executable inputs without visiting historical archives, screening aud
 it('encodes the durable holding snapshot with identical original wire content and catalog precedence',async()=>{
  const store=await import('@/lib/fish/qualityStore'),study=monitorArchiveFixture();await store.saveQualityStudy('backup',study);
  const value=await store.qualityAccountBlob.read('backup'),expected=await prepareAccountBlobEncoding(value);
- expect(await encodeStoredQuality('backup',readSavedQualityPlans('backup'))).toEqual(expected);expect(await encodeStoredQuality('backup',[],expected.hash)).toEqual({hash:expected.hash});
+ const prepared=await encodeStoredQuality('backup',readSavedQualityPlans('backup'));
+ const {publication,...wire}=prepared!;expect(wire).toEqual(expected);
+ expect(publication.monitorLibrary).toEqual(value?.monitorLibrary);expect(publication.filterLibrary).toBeUndefined();
+ const unchanged=await encodeStoredQuality('backup',[],expected.hash);
+ expect(unchanged?.hash).toBe(expected.hash);expect(unchanged?.encoded).toBeUndefined();
 });
 it('restores protected split plans when an old tab overwrites the main study with one original plan',async()=>{
  const store=await import('@/lib/fish/qualityStore');

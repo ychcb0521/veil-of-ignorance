@@ -86,8 +86,8 @@ export interface FishDirectoryPicker {
   footer: (close: () => void) => ReactNode;
 }
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
-export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus}:{
-  browseRounds?:boolean;loadingStatus?:ReactNode;loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
+export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more}:{
+  notice?:ReactNode;more?:ReactNode;browseRounds?:boolean;loadingStatus?:ReactNode;loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
   picker?:FishDirectoryPicker;
   onRename?:(id:string,name:string)=>Promise<boolean>;
@@ -287,6 +287,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
         <DialogDescription className={compactDirectory&&(!browseRounds||loading||loadError)?"sr-only":"text-[11px] text-muted-foreground"}>{browseRounds&&(loading||loadError) ? '读取账号保存的过滤轮次' : typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
       </DialogHeader>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-testid={prefix+'-directory-scroll'}>
+      {notice}
       <h3 className={compactDirectory?"sr-only":"shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium"}>{kind==='algorithm'?'算法目录':kind==='template'?'模板目录':'时间目录'}</h3>
       <div className="space-y-3" data-testid={prefix+'-archive-directory'}>
         {showDeleted&&compactDirectory&&<div className="flex items-center justify-between gap-2 text-xs"><span>已删除目录（{deleted}）</span><button type="button" className={action} disabled={!!busy} onClick={()=>{setShowDeleted(false);setPurgeMode(false);resetDirectorySelection();}}>返回模板汇总</button></div>}
@@ -343,6 +344,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             </div>:<div className="space-y-2 p-2">{members.map(renderItem)}</div>)}
           </section>;
         }):visible.map(renderItem)}
+        {more}
       </div>
       </div>
       {picker && <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background p-2 text-[11px]">{picker.footer(()=>changeOpen(false))}</div>}

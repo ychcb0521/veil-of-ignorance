@@ -14,7 +14,8 @@ import { preserveQualityMonitorLibrary } from './qualityMonitorLibrary';
 import { preserveQualityFilterLibrary } from './qualityFilterLibrary';
 import {describeArchiveReadIssue, setArchiveReadIssue} from '../accountArchiveRead';
 import {readFishLibrary} from './libraryLoadQueue';
-import { noteAccountBlobSaved, syncAccountBlobOnLoad, prepareAccountBlob, type AccountBlobAdapter } from '@/lib/accountBlobSync';
+import { noteAccountBlobSaved, syncAccountBlobOnLoad, syncedImmutableAccountBlobRevision, prepareAccountBlob, type AccountBlobAdapter } from '@/lib/accountBlobSync';
+import {recentMonitorSource} from './qualityRecentSource';
 import {serializeArchiveWork} from '../serializeArchiveWork';
 import {prepareStoredQuality} from './qualityBackup';
 import {restorePreEntryStudy} from './preEntryArchive';
@@ -69,6 +70,9 @@ export function loadQualityStudy(owner?: string): Promise<{ study: FishQualitySt
     const removed = permanentlyDeletedMonitorArchiveIds(loaded.study.monitorLibrary);
     if (removed.length) void purgeLocalQualityArchives(owner, removed).catch(() => {});
     void syncStoredQualityArchiveBodies(owner, loaded.study);
+    if(owner&&!loaded.warning)void syncedImmutableAccountBlobRevision('fish-quality',owner).then(async revision=>{
+      if(revision)await (await import('./qualityRecentLibraryStore')).publishRecentMonitorDirectory(owner,revision,recentMonitorSource(loaded.study));
+    }).catch(()=>{});
   }, () => {});
   const release = () => { if (pendingReads.get(key) === task) pendingReads.delete(key); };
   void task.then(release, release);
@@ -253,9 +257,12 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
     if(fallback){
       const value=await qualityAccountBlob.read(owner);
       assertQualityArchivesDetached(value);
-      return value?prepareAccountBlob(value,knownHash):undefined;
+      return value?{...await prepareAccountBlob(value,knownHash),publication:recentMonitorSource(value)}:undefined;
     }
     return prepareStoredQuality(owner,readSavedQualityPlans(owner),knownHash);
+  },
+  async afterPublish(owner,revision,publication){
+    if(valid(publication))await (await import('./qualityRecentLibraryStore')).publishRecentMonitorDirectory(owner,revision,publication);
   },
   async mergeRemote(owner, value, context) {
     if (!value) return;

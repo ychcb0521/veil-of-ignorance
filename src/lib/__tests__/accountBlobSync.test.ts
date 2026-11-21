@@ -84,6 +84,20 @@ it('backs up directly encoded durable snapshots without reading the full object 
  const uploads=cloud.state.upserts.length;await a.save({items:[1,2,3]});expect(cloud.state.upserts).toHaveLength(uploads);
  const b=await device();await b.reopen();expect(b.local.value).toEqual({items:[1,2,3]});
 });
+it('publishes a derived body after its exact root revision without deadlocking the shared upload queue',async()=>{
+ const a=await device({items:[1]});await a.reopen();
+ const adapter=a.adapter as import('../accountBlobSync').AccountBlobAdapter<Value>;
+ adapter.prepareStored=async(_owner,knownHash)=>({...await a.mod.prepareAccountBlob(a.local.value,knownHash),publication:{marker:'exact snapshot'}});
+ let finish!:()=>void;const completed=new Promise<void>(resolve=>{finish=resolve;});
+ adapter.afterPublish=vi.fn(async(owner,revision,publication)=>{
+  expect(revision).toBe(head()!.rev);expect(publication).toEqual({marker:'exact snapshot'});
+  const body={name:'derived-body',read:async()=>({items:[2]}),write:async()=>{},weight:()=>1};
+  await a.mod.syncAccountBlobFully(body,owner);finish();
+ });
+ await a.save({items:[1,2]});await completed;
+ expect(cloud.state.rows.has('u1\0idb:derived-body')).toBe(true);expect(adapter.afterPublish).toHaveBeenCalledOnce();
+ a.mod.__resetAccountBlobSyncForTests();
+});
 
 beforeEach(() => { cloud.state.rows.clear(); cloud.state.delayMs = 0; cloud.state.failNext = false; cloud.state.signedOut = false; cloud.state.upserts = []; cloud.state.maxReadKeys = Infinity; cloud.state.readSignals = []; });
 afterEach(() => { vi.useRealTimers(); });

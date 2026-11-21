@@ -53,6 +53,8 @@ export interface AccountBlobAdapter<T = unknown> {
   mergeRemote?(owner:string,value:T|undefined,context?:{preferRemote:boolean}):Promise<void | 'matchesRemote'>;
   /** 内容多少：0 = 空白。只在两边都没有同步记录时用来比较。 */
   weight(value: T | undefined): number;
+  /** Optional derived read index; never awaited by the serialized blob queue. */
+  afterPublish?(owner:string,revision:string,publication:unknown):Promise<void>;
 }
 
 interface Head { v: 1; rev: string; parts: number; savedAt: number; enc: 'gzip' | 'json'; bytes: number; deleted?: boolean }
@@ -153,7 +155,7 @@ export async function encodeAccountBlob(value: unknown, serialized?: string): Pr
   return { enc: 'json', text: json, bytes: json.length };
 }
 
-export interface PreparedAccountBlob {hash:string;encoded?:{enc:'gzip'|'json';text:string;bytes:number}}
+export interface PreparedAccountBlob {hash:string;encoded?:{enc:'gzip'|'json';text:string;bytes:number};publication?:unknown}
 /** Serialization, hashing and packing stay off the UI thread, including unchanged saves. */
 export async function prepareAccountBlob(value:unknown,knownHash?:string):Promise<PreparedAccountBlob>{
   if(typeof Worker==='function')return new Promise((resolve,reject)=>{
@@ -350,6 +352,7 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
     const latest = await readMeta(adapter.localReceiptName ?? adapter.name, owner);
     await writeMeta(adapter.localReceiptName ?? adapter.name, owner, { ...meta, savedAt: Math.max(latest?.savedAt ?? 0, savedAt), syncedAt: savedAt });
     if ((latest?.savedAt ?? 0) > savedAt) schedulePush(adapter, owner);
+    if(prepared?.publication!==undefined)void Promise.resolve().then(()=>adapter.afterPublish?.(owner,head.rev,prepared.publication)).catch(()=>{});
     return true;
   }
   const rev = newRev();
@@ -383,6 +386,7 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
   const latest = await readMeta(adapter.localReceiptName ?? adapter.name, owner);
   await writeMeta(adapter.localReceiptName ?? adapter.name, owner, { savedAt: Math.max(latest?.savedAt ?? 0, savedAt), syncedAt: savedAt, rev, parts, hash });
   if ((latest?.savedAt ?? 0) > savedAt) schedulePush(adapter, owner);
+  if(prepared?.publication!==undefined)void Promise.resolve().then(()=>adapter.afterPublish?.(owner,rev,prepared.publication)).catch(()=>{});
   return true;
 }
 

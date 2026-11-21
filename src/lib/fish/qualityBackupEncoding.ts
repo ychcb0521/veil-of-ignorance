@@ -3,6 +3,7 @@ import {prepareAccountBlobEncoding} from '../accountBlobCodec';
 import type {FishQualityStudy} from './quality';
 import {assertQualityArchivesDetached} from './qualityArchiveDirectory';
 import {readStoredQualityWithSignalReadings} from './qualitySignalReadingsStore';
+import {recentMonitorSource} from './qualityRecentSource';
 
 /** Same version-1 payload, catalog precedence, archive-directory projection and
  * codec as qualityAccountBlob.read; the whole graph stays in its worker. */
@@ -14,5 +15,5 @@ export async function encodeStoredQuality(owner:string|undefined,plans:SavedQual
   if(value.version!==1||!Array.isArray(value.samples)||!Array.isArray(value.groups)||!Array.isArray(value.results))throw Error('鱼质量备份格式无效，原数据保留');
   value=applySavedQualityPlans(value,plans);
   assertQualityArchivesDetached(value);
-  return prepareAccountBlobEncoding(value,knownHash);
+  return {...await prepareAccountBlobEncoding(value,knownHash),publication:recentMonitorSource(value)};
 }
