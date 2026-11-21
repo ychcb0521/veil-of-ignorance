@@ -99,7 +99,7 @@ it('explains the plan, starts mining and keeps the library next to settings', ()
   expect(screen.queryByText('0 / 1000')).toBeNull();
   expect(screen.queryByRole('status')).toBeNull();
   const controls=screen.getByTestId('fish-mining-panel');
-  expect(within(controls).getAllByRole('button').map(b=>b.getAttribute('aria-label')??b.textContent).filter(name=>['开始批量捕捞','开始批量捕捞的其他方式','本轮条件','批量捕捞设置','打开捕捞库','重新开始'].includes(name!))).toEqual(['开始批量捕捞','开始批量捕捞的其他方式','批量捕捞设置','打开捕捞库']);
+  expect(within(controls).getAllByRole('button').map(b=>b.getAttribute('aria-label')??b.textContent).filter(name=>['开始批量捕捞','批量捕捞的更多操作','本轮条件','批量捕捞设置','打开捕捞库','重新开始'].includes(name!))).toEqual(['开始批量捕捞','批量捕捞的更多操作','批量捕捞设置','打开捕捞库']);
   fireEvent.click(screen.getByRole('button', { name: '开始批量捕捞' })); expect(m.start).toHaveBeenCalled();
   expect(screen.queryByLabelText('批量捕捞目标条数')).toBeNull();
   expect(screen.queryByRole('button', { name: '本轮条件' })).toBeNull();
@@ -151,11 +151,16 @@ it('shows the running anchor, reached target, caught-up and error states', () =>
   rerender(<FishMiningPanel mining={api({}, { enabled: false, rules, anchorsDone: 3 }) as never} sellFixed campaignHref="#"/>);
   expect(screen.getByRole('button', { name: '继续批量捕捞' })).toBeVisible();
 });
-it('lets the user stop a reached round in the toolbar and opens a new round only on request', () => {
+it('keeps stop inside the run menu for a reached round and opens a new round only on request', () => {
   const cursor = Date.parse('2026-04-02T12:00:00+08:00');
   const mining = api({}, {enabled:true, mined:105, target:100, anchorsDone:7, cursorMs:cursor});
   const view = render(<FishMiningPanel mining={mining as never} sellFixed campaignHref="#"/>);
+  expect(screen.queryByRole('button', {name:'停止本轮'})).not.toBeInTheDocument();
+  const more = screen.getByRole('button', {name:'批量捕捞的更多操作'});
+  fireEvent.click(more);
+  expect(mining.stop).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', {name:'停止本轮'}));
+  expect(more).toHaveAttribute('aria-expanded','false');
   expect(mining.stop).toHaveBeenCalledOnce();
   expect(mining.start).not.toHaveBeenCalled();
   view.rerender(<FishMiningPanel mining={{...mining,state:{...mining.state,stopped:true,enabled:false}} as never} sellFixed campaignHref="#"/>);
@@ -227,7 +232,7 @@ it('edits a new round while a scan is running and waits for explicit confirmatio
     { featureId: 'cba', label: 'CBA', statistics: [{ name: '结果', label: '结果' }] },
   ] }, { enabled: true, rules });
   render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);
-  const open = () => {fireEvent.click(screen.getByRole('button', { name: '开始批量捕捞的其他方式' }));fireEvent.click(screen.getByRole('button', { name: '重新开始' }));};
+  const open = () => {fireEvent.click(screen.getByRole('button', { name: '批量捕捞的更多操作' }));fireEvent.click(screen.getByRole('button', { name: '重新开始' }));};
   expect(screen.queryByRole('button',{name:'重新开始'})).not.toBeInTheDocument();
   open();
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
@@ -265,7 +270,7 @@ it('copies capture scope into a new round while keeping the historical round fro
     stepMs: MINING_STEP_MS * 2,
   });
   render(<FishMiningPanel mining={mining as never} sellFixed campaignHref="#" />);
-  fireEvent.click(screen.getByRole('button', { name: '开始批量捕捞的其他方式' }));
+  fireEvent.click(screen.getByRole('button', { name: '批量捕捞的更多操作' }));
   fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
   const next = within(screen.getByRole('dialog', { name: '重新开始批量捕捞' }));
   expect(next.getByLabelText('Gate')).toBeChecked();
