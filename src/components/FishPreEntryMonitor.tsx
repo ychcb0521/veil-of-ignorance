@@ -1,3 +1,4 @@
+import {selectedDirectoryRecords} from '@/lib/fish/libraryBrowseProjection';
 import {createQualityTemplateDirectory} from '@/lib/fish/qualityTemplateDirectory';
 import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { FishConditionDialogContent } from './FishConditionSettings';
@@ -121,6 +122,7 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
       id: round.id, at: round.startedAt, label, summary, revision: archived,
       templateGroup: templates.groupPlans(round.plans ?? [], round),
       settings: () => <ScreeningDirectorySettings round={round}/>,
+      selectedStudy: (ids:ReadonlySet<string>) => entryDirectoryStudy(archived,round,selectedDirectoryRecords(records,ids)),
       study: () => entryDirectoryStudy(archived,round,records), preview:()=>entryDirectoryStudy(archived,round,records,false), details: close => renderEvidence(round.id, close),
     })),'screen');
   };

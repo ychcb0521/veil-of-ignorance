@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { createContext, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Database, Download } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { qualityComparisonRows, qualityEntryIdentity, type FishQualityStudy } from '@/lib/fish/quality';
@@ -15,6 +15,11 @@ const field = 'h-7 min-w-36 rounded-md border border-border bg-background px-2 t
 
 type ImportRows = (snapshot: FishQualityStudy, ids: readonly string[]) => boolean;
 
+export const DirectoryImportContext = createContext<{
+  onImport: ImportRows;
+  prepareImport?: {label:string; onClick?:()=>void};
+} | undefined>(undefined);
+
 const columns = { selected: '选取', symbol: '标的', market: '市场', reading: '探测数值', percentile: '百分位', signalTime: '信号时间', entryTime: '入场时间' } as const;
 const percentileHelp='同指标、公式、周期和单位下，小于或等于当前读数的有效捕捞读数占比。多项命中时按最高百分位排序。';
 const rowKey=(row:{id:string})=>row.id;
@@ -28,12 +33,11 @@ function compareValues(a:string|number|null, b:string|number|null, direction:Sor
   return direction==='ascending'?result:-result;
 }
 
-export function FishWorkspaceRows({snapshot,onImport,onDone,mining,prepareImport}:{
-  snapshot: FishQualityStudy; onImport?: ImportRows; onDone?: () => void; mining?:MiningDirectoryEvidence;
+export function FishWorkspaceRows({snapshot,onImport,onDone,mining,prepareImport,initiallySelected=false}:{
+  snapshot: FishQualityStudy; onImport?: ImportRows; onDone?: () => void; initiallySelected?:boolean; mining?:MiningDirectoryEvidence;
   prepareImport?: { label: string; onClick?: () => void };
 }) {
   const [query,setQuery] = useState('');
-  const [selected,setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [error,setError] = useState('');
   const [sort,setSort] = useState<{column:SortColumn;direction:SortDirection}>({column:'signalTime',direction:'descending'});
   const {family,records,runs}=mining??{};
@@ -46,6 +50,7 @@ export function FishWorkspaceRows({snapshot,onImport,onDone,mining,prepareImport
     return {id:row.id, symbol:row.source.symbol, market:row.source.market==='us_stock'?'美股':EXCHANGE_NAMES[row.source.exchange??'binance'],
       signalTime,entryTime:row.enteredAt&&row.enteredAt!==signalTime?row.enteredAt:null, readings,reading,percentile};
   }).sort((a,b)=>b.signalTime-a.signalTime),[snapshot,readingsByEntry]);
+  const [selected,setSelected] = useState<ReadonlySet<string>>(() => new Set(initiallySelected ? rows.map(row=>row.id) : []));
   const found=useMemo(()=>{
     const needle=query.trim().toUpperCase();
     return needle?rows.filter(row=>row.symbol.toUpperCase().includes(needle)):rows;
@@ -64,12 +69,12 @@ export function FishWorkspaceRows({snapshot,onImport,onDone,mining,prepareImport
     const active=sort.column===column;
     const Icon=active?(sort.direction==='ascending'?ArrowUp:ArrowDown):ArrowUpDown;
     const label=columns[column];
-    return <th scope="col" className={'whitespace-nowrap px-2 py-1.5 '+(column==='selected'?'w-10':'')} aria-sort={mining&&active?sort.direction:undefined}>
-      {mining?<button type="button" className="inline-flex items-center gap-1 hover:text-primary" aria-label={'按'+label+'排序'}
+    return <th scope="col" className={'whitespace-nowrap px-2 py-1.5 '+(column==='selected'?'w-10':'')} aria-sort={active?sort.direction:undefined}>
+      {<button type="button" className="inline-flex items-center gap-1 hover:text-primary" aria-label={'按'+label+'排序'}
         title={column==='percentile'?percentileHelp:column==='reading'?'同系列有多项命中时，按最大已知读数排序':'按'+label+'排序'} onClick={()=>{
           setSort(prior=>({column,direction:prior.column===column?(prior.direction==='ascending'?'descending':'ascending'):
             column==='symbol'||column==='market'?'ascending':'descending'}));
-        }}>{label}<Icon aria-hidden="true" className={'h-3 w-3 '+(active?'text-primary':'text-muted-foreground')}/></button>:label}
+        }}>{label}<Icon aria-hidden="true" className={'h-3 w-3 '+(active?'text-primary':'text-muted-foreground')}/></button>}
     </th>;
   }
   const toggle = (ids: readonly string[], enabled: boolean) => setSelected(prior => {

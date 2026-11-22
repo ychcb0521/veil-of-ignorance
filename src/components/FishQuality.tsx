@@ -11,7 +11,7 @@ import {hasCampaignOnSignalDay,hasTradeOnSignalDay} from '@/lib/signalCampaignIn
 import {qualityTemplateImportSelection,templateCampaignPath, type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
 import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import type { MiningDirectoryEvidence } from '@/lib/fish/miningLibraryDirectory';
-import { FishWorkspaceRows, FishWorkspaceSource, fishSourceButton } from './FishWorkspaceSource';
+import { DirectoryImportContext, FishWorkspaceRows, FishWorkspaceSource, fishSourceButton } from './FishWorkspaceSource';
 import { Database, Save, Trash2 } from 'lucide-react';
 import {FishCombinationHelp} from './FishCombinationHelp';
 import {FishConditionDialogContent,FishConditionSettings} from './FishConditionSettings';
@@ -1172,7 +1172,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     {tableExport&&<div hidden aria-hidden="true" data-testid="quality-export-batch"><table ref={exportTableRef}><tbody>{tableExport.entries.slice(tableExport.offset,tableExport.offset+EXPORT_BATCH).map(({row,index})=>tableExport.render(row,index))}</tbody></table></div>}
     <RowDetail row={allRows.find(r => r.id === detailId)} state={state} templateTable={templateTable} close={() => setDetailId('')}/>
   </section>;
-  return <QualityArchiveContext.Provider value={archiveView}>{body}</QualityArchiveContext.Provider>;
+  return <QualityArchiveContext.Provider value={archiveView}><DirectoryImportContext.Provider value={workspace ? {onImport:importWorkspace,prepareImport:prepareSourceImport} : undefined}>{body}</DirectoryImportContext.Provider></QualityArchiveContext.Provider>;
 }
 
 /** Reuse the live table's renderer; only selection/filter/expansion state is local to the viewer. */

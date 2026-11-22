@@ -1,12 +1,12 @@
 import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
 import {FishFilterLibrary} from '../FishFilterLibrary';
-import {FishWorkspaceRows} from '../FishWorkspaceSource';
+import {DirectoryImportContext,FishWorkspaceRows} from '../FishWorkspaceSource';
 import {newQualityStudy, type FishQualityStudy} from '@/lib/fish/quality';
 import {FishArchiveBrowse} from '../FishArchiveBrowse';
 import type {BrowseRow,BrowseScope} from '@/lib/fish/libraryBrowse';
 
-it('opens the selected cold filter round in the import picker without opening the other round',async()=>{
+it.each([true,false])('imports a cold filter round without opening the other round (source picker %s)',async picker=>{
   calls.directory.mockResolvedValue({groups:[
     {id:'one',title:'BSS 95',at:1,count:536,pages:['a']},
     {id:'two',title:'BSS 90',at:2,count:1251,pages:['b']},
@@ -26,26 +26,50 @@ it('opens the selected cold filter round in the import picker without opening th
       {id:'two',startedAt:2,updatedAt:2,state:'complete',recordIds:['saved']},
     ],
   }};
-  const panel=(ready:boolean)=><FishFilterLibrary account="alice" study={ready?complete:snapshot} ready={ready}
-    openRequest={{key:1,importSelection:true}} requestWorkspace={configure}
-    renderStudy={(selected,close)=><FishWorkspaceRows snapshot={selected} onImport={onImport} onDone={close}/>}/>;
+  const panel=(ready:boolean)=><DirectoryImportContext.Provider value={picker?undefined:{onImport}}><FishFilterLibrary account="alice" study={ready?complete:snapshot} ready={ready}
+    openRequest={picker?{key:1,importSelection:true}:undefined} requestWorkspace={configure}
+    renderStudy={(selected,close)=><FishWorkspaceRows snapshot={selected} onImport={onImport} onDone={close}/>}/></DirectoryImportContext.Provider>;
   const view=render(panel(false));
+  if(!picker)fireEvent.click(screen.getByRole('button',{name:'打开过滤库'}));
   fireEvent.click(await screen.findByRole('button',{name:/BSS 90/}));
   expect(calls.body).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button',{name:'载入所选目录'}));
   await screen.findByText('PIEVERSEUSDT');
   expect(configure).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByText('旧归档导入'));
+  if(picker){fireEvent.click(screen.getByText('旧归档导入'));
   fireEvent.click(screen.getByRole('button',{name:'载入旧版完整档案并选取记录'}));
+  }else{fireEvent.click(screen.getByRole('checkbox',{name:/勾选 PIEVERSE/}));fireEvent.click(screen.getByRole('button',{name:'载入旧版完整档案并导入所选'}));}
   expect(configure).toHaveBeenCalledOnce();
   view.rerender(panel(true));
-  fireEvent.click(await screen.findByRole('checkbox',{name:/选取 PIEVERSEUSDT/}));
+  const checkbox=await screen.findByRole('checkbox',{name:/选取 PIEVERSEUSDT/});
+  if(picker)fireEvent.click(checkbox);else expect(checkbox).toBeChecked();
   expect(screen.queryByRole('checkbox',{name:/选取 OTHERUSDT/})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'导入组合表'}));
   expect(onImport).toHaveBeenCalledWith(expect.objectContaining({
     samples:[expect.objectContaining({id:'saved',enteredAt:9,source:expect.objectContaining({symbol:'PIEVERSEUSDT'})})],
   }),expect.any(Array));
   expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['b']);
+});
+
+it.each<BrowseScope>(['mining','screen','filter'])('sorts across pages, keeps the selected record IDs and skips other directories (%s)',async scope=>{
+  calls.directory.mockResolvedValue({groups:[
+    {id:'chosen',title:'待排序',at:1,count:2,pages:['first','second']},
+    {id:'other',title:'其他目录',at:2,count:1,pages:['unrelated']},
+  ]});
+  calls.body.mockImplementation((_,key)=>Promise.resolve(key==='first'?[['ZZZ',2,'甲','z']]:[['AAA',1,'乙','a']]));
+  const pick=vi.fn();
+  render(<FishArchiveBrowse owner="alice" scope={scope} query="" pickRecords onSelectRecords={pick} legacySelection/>);
+  fireEvent.click(await screen.findByRole('button',{name:/待排序/}));
+  fireEvent.click(await screen.findByRole('checkbox',{name:/勾选 ZZZ/}));
+  fireEvent.click(screen.getByRole('button',{name:'按标的排序'}));
+  await screen.findByText('AAA');
+  expect(screen.getAllByRole('row').filter(r=>r.querySelector('td input')).map(r=>r.children[1].textContent)).toEqual(['AAA','ZZZ']);
+  expect(screen.getByRole('checkbox',{name:/勾选 ZZZ/})).toBeChecked();
+  fireEvent.click(screen.getByRole('checkbox',{name:'全选目录预览记录'}));
+  fireEvent.click(screen.getByRole('checkbox',{name:/勾选 ZZZ/}));
+  fireEvent.click(screen.getByRole('button',{name:'载入旧版完整档案并导入所选'}));
+  expect(pick).toHaveBeenCalledWith('chosen',new Set(['a']));
+  expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['first','second']);
 });
 
 it.each<BrowseScope>(['mining','filter','screen'])('reads only an explicitly requested directory for %s',async scope=>{

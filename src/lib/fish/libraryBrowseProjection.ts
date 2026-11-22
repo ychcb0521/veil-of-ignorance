@@ -19,3 +19,10 @@ export function miningBrowseRows(record:FishMiningRecord,run?:FishMiningRun) {
   if(!families.size)families.set('未分类',['捕捞信号']);
   return [...families].map(([family,details])=>({family,row:[record.signal.symbol,record.signal.timeMs,details.join(' · '),record.id] as BrowseRow}));
 }
+
+export function selectedDirectoryRecords<T extends {id:string}>(records:readonly T[], ids:ReadonlySet<string>):T[] {
+  const found=records.filter(record=>ids.has(record.id));
+  if(found.length!==ids.size || new Set(found.map(record=>record.id)).size!==ids.size)
+    throw Error('原始档案与预览记录不一致，请重新打开目录后选择');
+  return found;
+}
