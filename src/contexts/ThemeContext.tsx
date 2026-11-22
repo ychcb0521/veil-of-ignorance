@@ -26,7 +26,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       root.classList.add('dark');
       root.classList.remove('light');
     }
-    localStorage.setItem('app-theme', theme);
+    try { localStorage.setItem('app-theme', theme); } catch { /* Keep the chosen theme in this page when storage is full. */ }
   }, [theme]);
 
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');

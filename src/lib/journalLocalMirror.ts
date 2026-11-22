@@ -1,3 +1,4 @@
+import {getUserId as currentUserIdFromAuthToken} from './userStoragePrefix';
 import { queueSimStatePush } from '@/lib/simStateSync';
 
 /**
@@ -43,16 +44,7 @@ function writeStore(store: Store): void {
 }
 
 /** 与 usePersistedState 同源地取当前用户 id。 */
-function currentUserIdFromAuthToken(): string | null {
-  try {
-    if (typeof localStorage === 'undefined') return null;
-    const key = Object.keys(localStorage).find(k => k.startsWith('sb-') && k.endsWith('-auth-token'));
-    if (!key) return null;
-    return JSON.parse(localStorage.getItem(key) || '{}')?.user?.id ?? null;
-  } catch {
-    return null;
-  }
-}
+
 
 /**
  * 把 droppedColumns 在 payload 里的值镜像到本地。

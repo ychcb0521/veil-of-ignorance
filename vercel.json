@@ -10,7 +10,7 @@
       "destination": "https://elynuzxnvjzypjgzkemc.supabase.co/auth/v1/:path*"
     },
     {
-      "source": "/((?!assets/|auth-api/|instant-campaign-api$).*)",
+      "source": "/((?!history-windows[.]js$|assets/|auth-api/|instant-campaign-api$).*)",
       "destination": "/index.html"
     },
     {

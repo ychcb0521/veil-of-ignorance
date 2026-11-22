@@ -1,3 +1,4 @@
+import {getUserId as currentUserIdFromAuthToken} from './userStoragePrefix';
 /**
  * 信号库（Signal Library）
  * ------------------------------------------------------------------
@@ -452,17 +453,7 @@ export function saveSignals(list: TradeSignal[]): void {
 }
 
 /** 从 supabase auth token 里取当前用户 id（与 usePersistedState 同一来源）。 */
-function currentUserIdFromAuthToken(): string | null {
-  try {
-    const storageKey = Object.keys(window.localStorage).find(k =>
-      k.startsWith('sb-') && k.endsWith('-auth-token'));
-    if (!storageKey) return null;
-    const data = JSON.parse(window.localStorage.getItem(storageKey) || '{}');
-    return data?.user?.id ?? null;
-  } catch {
-    return null;
-  }
-}
+
 
 /**
  * 把 timeMs 还原成 `YYYY-MM-DD HH:mm:ss`（按 UTC+8 墙钟），用作导出时的「日期表头」。

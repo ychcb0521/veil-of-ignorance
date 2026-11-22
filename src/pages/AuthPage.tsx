@@ -1,3 +1,4 @@
+import { isolatedLoginOptions } from '@/lib/loginStorage';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -229,6 +230,9 @@ export default function AuthPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {isolatedLoginOptions().storageKey && <p className="text-xs text-muted-foreground">
+              本站共享存储已满，本次登录仅在当前标签页保留，刷新后仍可使用。
+            </p>}
             <div>
               <label className="text-xs text-muted-foreground mb-1.5 block uppercase tracking-wider">邮箱</label>
               <input

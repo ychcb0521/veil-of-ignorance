@@ -1,3 +1,4 @@
+import {loginStorage} from './loginStorage';
 /**
  * 当前登录用户在 localStorage 里的键前缀（sim_<userId>_ / sim_anon_）。
  *
@@ -11,10 +12,11 @@ let sessionUserId: string | null = null;
 
 export function getUserId(): string | null {
   try {
-    let raw = sessionKey ? localStorage.getItem(sessionKey) : null;
+    const storage = loginStorage();
+    let raw = sessionKey ? storage.getItem(sessionKey) : null;
     if (raw === null) {
-      sessionKey = Object.keys(localStorage).find(key => key.startsWith('sb-') && key.endsWith('-auth-token'));
-      raw = sessionKey ? localStorage.getItem(sessionKey) : null;
+      sessionKey = Object.keys(storage).find(key => key.startsWith('sb-') && key.endsWith('-auth-token'));
+      raw = sessionKey ? storage.getItem(sessionKey) : null;
     }
     if (raw !== sessionSnapshot) {
       // The storage value also changes on same-tab logout, account switches and token refresh.

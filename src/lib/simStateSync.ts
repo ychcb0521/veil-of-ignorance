@@ -1,3 +1,4 @@
+import { readHistoryAwareStorage } from './tradeHistoryStorage';
 import {mergeQualityPlanCatalogValues} from './qualityPlanCatalogMerge';
 /**
  * 模拟交易引擎状态的云端同步层。
@@ -148,7 +149,7 @@ function writeShadowTs(fullKey: string, ts: number): void {
 function writePersistedValueShadowTs(fullKey: string, raw: string | undefined, ts: number): void {
   if (raw === undefined) return;
   try {
-    if (localStorage.getItem(fullKey) === raw) writeShadowTs(fullKey, ts);
+    if (readHistoryAwareStorage(fullKey) === raw) writeShadowTs(fullKey, ts);
   } catch {
     /* 读不到真实存储时也不能声称这份数据已落盘。 */
   }

@@ -1,3 +1,4 @@
+import {loginStorage} from './loginStorage';
 /**
  * 登录态恢复失败时的分类、自救与诊断。
  *
@@ -89,10 +90,10 @@ export function reloadPage(): void {
 export function forgetStoredSession(): number {
   let removed = 0;
   try {
-    for (const key of Object.keys(localStorage)) {
+    for (const key of Object.keys(loginStorage())) {
       if (!AUTH_TOKEN_KEY.test(key)) continue;
       if (AUTH_SESSION_KEY.test(key)) announceSignOut(key);
-      localStorage.removeItem(key);
+      loginStorage().removeItem(key);
       removed += 1;
     }
   } catch { /* 存储不可用时没有令牌可清，重载后自然回到登录页。 */ }
@@ -119,9 +120,9 @@ function minutes(ms: number): string {
 
 function storedTokenState(now: number): string {
   try {
-    const key = Object.keys(localStorage).find(candidate => AUTH_SESSION_KEY.test(candidate));
+    const key = Object.keys(loginStorage()).find(candidate => AUTH_SESSION_KEY.test(candidate));
     if (!key) return '本机没有';
-    const expiresAt = Number((JSON.parse(localStorage.getItem(key) ?? 'null') as { expires_at?: unknown } | null)?.expires_at);
+    const expiresAt = Number((JSON.parse(loginStorage().getItem(key) ?? 'null') as { expires_at?: unknown } | null)?.expires_at);
     if (!Number.isFinite(expiresAt)) return '有，读不出到期时刻';
     const remaining = expiresAt * 1000 - now;
     return remaining > 0 ? `有效，还有 ${minutes(remaining)}到期` : `已过期 ${minutes(-remaining)}，需要刷新`;

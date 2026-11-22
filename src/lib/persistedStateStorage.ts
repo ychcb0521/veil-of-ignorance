@@ -1,3 +1,4 @@
+import { readHistoryAwareStorage, writeHistoryAwareStorage } from './tradeHistoryStorage';
 /**
  * Critical state must remain readable even when browser storage is full.
  * Only derived campaign chart caches may be reclaimed; never trade/order history,
@@ -39,7 +40,7 @@ export function markPersistedStateSynced(fullKey: string, raw: string, updatedAt
 export function readPersistedStateRaw(fullKey: string): string | null {
   const latest = unpersisted.get(fullKey);
   if (latest !== undefined) return latest.raw;
-  try { return localStorage.getItem(fullKey); } catch { return null; }
+  try { return readHistoryAwareStorage(fullKey); } catch { return null; }
 }
 
 function isQuotaError(error: unknown): boolean {
@@ -52,7 +53,7 @@ export function writePersistedStateRaw(fullKey: string, raw: string, origin: Sta
   unpersisted.set(fullKey, { ...origin, raw });
   notifyLocalStateChanged(fullKey);
   const write = () => {
-    localStorage.setItem(fullKey, raw);
+    writeHistoryAwareStorage(fullKey, raw);
     unpersisted.delete(fullKey);
   };
   try {
@@ -107,7 +108,7 @@ const HEADROOM_PROBE_KEY = 'veil.storage.headroom-probe';
 const RESERVE_CHECK_INTERVAL_MS = 2_000;
 const AUTH_TOKEN_KEY = /^sb-.+-auth-token(-code-verifier|-user)?$/;
 /** 界面日志与行情价缓存：消息记录（封顶 300 条）、上一段回放留下的行情价、未登录时写下的键。 */
-const DISPOSABLE_LOG_KEY = /^sim_.+_(notification_history|price_map)$|^sim_anon_/;
+const DISPOSABLE_LOG_KEY = /^sim_.+_(notification_history|price_map)$/;
 export type StorageHeadroom = 'ok' | 'reclaimed' | 'full' | 'unavailable';
 
 const padding = new Map<number, string>();
