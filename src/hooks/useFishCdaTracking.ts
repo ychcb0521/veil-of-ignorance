@@ -1,5 +1,5 @@
 import { toast } from 'sonner';
-import { instantMonitorSale } from '@/lib/fish/instantMonitorExecution';
+import { instantMonitorSale, instantMonitorExitDue } from '@/lib/fish/instantMonitorExecution';
 import type { QualityResult } from '@/lib/fish/quality';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
@@ -336,7 +336,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     const saveTemplate = async ({ record, round }: ScreenedFishAdmission, result: QualityResult, through: number) => {
       if (hasManualIntent(record.id)) return;
       const previous = read(record)?.monitorResult;
-      const alert = result.status === 'closed' ? { ...instantMonitorSale(result), observedAt: Date.now() } : undefined;
+      const alert = instantMonitorExitDue(result) ? { ...instantMonitorSale(result), observedAt: Date.now() } : undefined;
       await save(record, { after: through, monitorResult: result, alert });
       changes.current?.postMessage('alert');
       if (alert) {

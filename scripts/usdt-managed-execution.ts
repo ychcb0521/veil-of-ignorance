@@ -109,7 +109,7 @@ export function settleManagedUsdtDecision(row: UsdtCampaignLedger, key: string, 
         ...(newVetoStage?.afterAdditions === (managed.followBasis?.carriedAdditions ?? 0) + additions.length ? { vetoPath: { entry: managed.entryPrice,
           peak: newVetoStage.peakBasis === 'holding' ? peak : price, minimum: price, dynamic: 0 } } : {}) };
     } else if (pending.kind === 'mirror') {
-      checkpoint.mirrorFill = { ...pending.evidence, price, fraction: Math.min(1, quantity / managed.entryQuantity),
+      checkpoint.mirrorFill = { ...pending.evidence, executedAt:Math.max(...actual.map(fill=>fill.at)), price, fraction: Math.min(1, quantity / managed.entryQuantity),
         gainPct: (price / managed.entryPrice - 1) * 100 };
     } else if (pending.kind === 'support-reduction') {
       const costRemoved = quantity * remaining.entry;

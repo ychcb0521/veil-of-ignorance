@@ -1,7 +1,7 @@
 import type { FishCdaTracking } from '@/hooks/useFishCdaTracking';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import type { QualityResult } from './quality';
-import { instantMonitorSale } from './instantMonitorExecution';
+import { instantMonitorSale, instantMonitorExitDue } from './instantMonitorExecution';
 import { instantPositionInput } from './instantCampaign';
 import { applyInstantManualFill, instantManualTrigger } from './instantManualExecution';
 import { usdtFollowCampaigns, type UsdtFollowCampaign } from './usdtFollow';
@@ -31,7 +31,7 @@ export async function advanceFrozenUsdtFollow(campaign: UsdtFollowCampaign, at: 
     if (result.status === 'error') throw Error(result.reason || '交接持仓监测等待行情');
     if (!['open','closed'].includes(result.status)) return;
     next.checkpoint = result;
-    if (result.status === 'closed') next.sale = instantMonitorSale(result);
+    if (instantMonitorExitDue(result)) next.sale = instantMonitorSale(result);
   }
   const tracking = { admitted: [{ record, round }], alerts: new Map(next.sale ? [[record.id, next.sale]] : []),
     monitorResults: new Map(next.checkpoint ? [[record.id, next.checkpoint]] : []),

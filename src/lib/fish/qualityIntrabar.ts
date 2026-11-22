@@ -1,4 +1,5 @@
 import {createBoxStopReader,type BoxStopState} from './qualityBoxStop';
+import {MIRROR_DEADLINE_KIND,mirrorDeadlineAt,mirrorCompletedBy} from './qualityMirrorDeadline';
 import {postMirrorProtectionAt,type POST_MIRROR_PROTECTION_VERSION} from './qualityPostMirrorProtection';
 import {mirrorHardStopActive,type MirrorHardStopStage} from './qualityMirrorHardStopStages';
 import { qualityHistoryFrom, qualityInitializationPending } from './qualityInitialization';
@@ -73,6 +74,9 @@ export async function findQualityIntrabarExit(o: {
   row: TradeSignal; plan: FishProgram; scale: number; rule?: { direction:QualityOperator;threshold:number };
   staticSell?: StaticDrawdownSellRule; afterStaticSell?: StaticDrawdownSellRule;
   entry: number; since: number; end: number; resumed: boolean; load: FishReconstructionLoader; signal: AbortSignal;
+  holdingStartedAt?:number;
+  /** Real positions may count only exchange-reconciled checkpoint fills. */
+  actualMirrorFillOnly?:boolean;
   mirror?: QualityMirrorTakeProfit; mirrorFill?: QualityMirrorFill;
   boxStopStates?:Record<string,BoxStopState>;
   conditions?: QualityIntrabarCondition[]; vetoes?: readonly QualityHoldingVeto[]; holding?:QualityHoldingPath;
@@ -139,6 +143,17 @@ export async function findQualityIntrabarExit(o: {
       cause: { id: STATIC_DRAWDOWN_SELL_VERSION, label: ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL, kind: 'sell-static-drawdown', direction: '>=', threshold: rule.threshold } };
   };
   const enabled = activeHoldingVetoes(o.vetoes);
+  const deadlines=enabled.filter(v=>v.kind===MIRROR_DEADLINE_KIND).sort((a,b)=>a.threshold-b.threshold||a.id.localeCompare(b.id));
+  const deadlineEntry=o.holdingStartedAt??o.entry;
+  const checkDeadline=(at:number):QualityTrigger|undefined=>{
+    for(const v of deadlines){
+      const deadline=mirrorDeadlineAt(deadlineEntry,v.threshold);
+      if(at<deadline||mirrorCompletedBy(o.actualMirrorFillOnly?o.mirrorFill:mirrorFill,deadlineEntry,deadline))continue;
+      if(o.actualMirrorFillOnly)mirrorFill=o.mirrorFill;
+      return {at,reading:(at-deadlineEntry)/3_600_000,barOpenTime:at,atOpen:true,
+        cause:{...phaseCause(v),mirrorDeadlineVersion:v.mirrorDeadlineVersion}};
+    }
+  };
   const boxReader=createBoxStopReader({vetoes:enabled,row:o.row,entry:o.entry,since:o.since,load:o.load,signal:o.signal,previous:o.boxStopStates,activationAt:()=>postMirrorProtectionAt(mirrorFill)});
   const boxState=()=>enabled.some(v=>v.kind==='box-stop')?{boxStopStates:boxReader.states(),boxStopStateAt:boxReader.statesAt}:{};
   const risk=enabled.filter(v=>v.kind==='static-drawdown'||v.kind==='dynamic-drawdown').sort((a,b)=>a.id.localeCompare(b.id));
@@ -171,6 +186,7 @@ export async function findQualityIntrabarExit(o: {
     }
   };
   const check=async(at:number,minute?:ResearchBar):Promise<QualityTrigger|undefined>=>{
+    if(at>=o.since){const deadline=checkDeadline(at);if(deadline)return deadline;}
     const drop=checkDrop(at);
     if(at<(o.resumed?o.since:o.entry))return;
     if(at>=checkFrom) {const trigger=checkRisk(at,holding);if(trigger)return trigger;}
@@ -255,6 +271,7 @@ export async function findQualityIntrabarExit(o: {
     for(let i=0;i<minutes.length;i++) {
       if(signal.aborted)throw new DOMException('已暂停','AbortError');
       const minute=minutes[i];
+      if(minute.openTime>=o.since){const deadline=checkDeadline(minute.openTime);if(deadline){prices.push(minute);return {trigger:deadline,prices,mirrorFill,...boxState()};}}
       let boxTrigger=minute.openTime>=o.since?await boxReader.read(minute):undefined;
       if(o.mirror?.enabled && minute.openTime>=o.since && ![holding?.entry,minute.open,minute.high,minute.low,minute.close].every(n=>Number.isFinite(n)&&n!>0)) throw new Error('镜像止盈缺少有效的分钟价格，不能越过缺失行情模拟成交');
       if(holding&&minute.openTime>=o.since) {

@@ -1,4 +1,5 @@
 import {LIMITED_STATIC_DRAWDOWN_VETO_VERSION,LIMITED_STATIC_DRAWDOWN_LABEL,isLimitedStaticDrawdownVeto} from './qualityVeto';
+import {MIRROR_DEADLINE_KIND,MIRROR_DEADLINE_VERSION} from './qualityMirrorDeadline';
 import {CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION,CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION,classifiedImpulsePositionsIdentity,classifiedImpulsePositionLabel} from './qualityClassifiedImpulsePosition';
 import {HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION,holdingImpulse1115Identity} from './holdingImpulse1115Classification';
 import {POST_MIRROR_PROTECTION_VERSION,POST_MIRROR_PROTECTION_LABEL} from './qualityPostMirrorProtection';
@@ -33,7 +34,7 @@ import { shortFishHash } from './algorithm';
 import type { QualityGroup } from './quality';
 import { qualityComboIdentity, qualityVetoVersion } from './quality';
 import { isStaticDrawdownSell, qualityExitThresholdText, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from './qualityStaticDrawdownSell';
-import { activeHoldingVetoes, holdingVetoIdentity, holdingVetoLabel } from './qualityVeto';
+import { activeHoldingVetoes, holdingVetoIdentity, holdingVetoLabel, validateHoldingVeto } from './qualityVeto';
 import { mirrorExecutionIdentity, mirrorIdentity } from './qualityMirror';
 import { ADDITION_ROUND_EXITS_VERSION, additionExitIdentity, ADDITION_PROFIT_FLOOR_VERSION, ADDITION_POSITION_FLOOR_INTRABAR_VERSION, activeDetectorPrerequisite, additionIdentity, additionIncreaseIdentity, additionMirrorIdentity, qualityAdditionConditions, qualityAdditionPrerequisites } from './qualityAddition';
 import { qualityVetoStagesIdentity } from './qualityVetoStages';
@@ -161,6 +162,10 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   if (plan.payoffRiskVersion) add('payoff-initial-risk', '盈亏比止盈', '沿用首仓限制静态最大回撤', plan.payoffRiskVersion,
     '以首仓限制回撤阈值计算 L₀，分段切换后仍沿用开仓阈值。');
   const vetoes = activeHoldingVetoes(plan.holdingVetoes);
+  const deadlines=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(v=>v.kind===MIRROR_DEADLINE_KIND);
+  deadlines.forEach(validateHoldingVeto);
+  if(deadlines.length)add('hard-stop-mirror-deadline','硬性终止','限时未实现镜像平衡减仓',MIRROR_DEADLINE_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(holdingVetoIdentity(deadlines))),
+    '从首次建仓计时，按分钟检查。到时未有镜像实际成交即全仓退出，已成交则不影响余仓；加仓不重置时钟。');
   const limitedStatic=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(isLimitedStaticDrawdownVeto);
   if(limitedStatic.length)add('hard-stop-limited-static','硬性终止',LIMITED_STATIC_DRAWDOWN_LABEL,LIMITED_STATIC_DRAWDOWN_VETO_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(holdingVetoIdentity(limitedStatic))),'以首仓买入价建立固定止损线，按各条件所属阶段触价或跳空退出；起始限制阈值可作为初始风险依据。');
   const mirrorStages=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(v=>v.mirrorStage);

@@ -44,7 +44,7 @@ describe('mirror take profit',()=>{
   expect(result).toMatchObject({status:'closed',endTime:T+2*M,endPrice:90,remainingFraction:0,returnPct:expect.closeTo(-2.5),realizedPnl:expect.closeTo(-2.5)});
   const full=buildQualityCampaignData('owner',{sample,plan:g,result,detectors:[],observeHours:0,firstEvaluatedAt:T},'sell');
   expect(full.tradeRecords.map(r=>[r.quantity,r.exitPrice])).toEqual([[.5,105],[.5,90]]);
-  expect(full.campaign.actual_evolution.map(e=>e.event_type)).toEqual(['main_opened','main_partial_closed','main_fully_closed']);
+  expect(full.campaign.actual_evolution.map(e=>e.event_type)).toEqual(['main_opened','mirror_tp_placed','mirror_tp_triggered','main_fully_closed']);
   expect(computeCampaignRealizedPnl(full.campaign,full.legs,full.tradeRecords,{}).total).toBeCloseTo(-2.5);
  });
  it('fully exits at 100%, excludes the rest of the exit candle, and never sells twice',async()=>{
@@ -85,7 +85,8 @@ it('records realized partial profit in an active campaign without turning the re
  const full=buildQualityCampaignData('owner',{sample,plan,result,detectors:[],observeHours:0,firstEvaluatedAt:T},'sell');
  expect(full.campaign.status).toBe('active');expect(full.campaign.closed_at).toBeNull();expect(full.tradeRecords).toHaveLength(1);
  expect(computeCampaignRealizedPnl(full.campaign,full.legs,full.tradeRecords,{}).total).toBeCloseTo(2.5);
- expect(resolveLegExecution(full.legs[0],full.tradeRecords[0])).toMatchObject({entryPrice:100,exitPrice:null,closeTime:null});
+ // The mirror leg is settled while the campaign's remaining position stays active.
+ expect(resolveLegExecution(full.legs[0],full.tradeRecords[0])).toMatchObject({entryPrice:100,exitPrice:105,closeTime:T});
 });
 
 it('rejects missing prices on the remaining position after an earlier partial sale',async()=>{

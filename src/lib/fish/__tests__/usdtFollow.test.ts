@@ -21,6 +21,8 @@ import { freezeQualityPlan } from '../qualityPlanVersions';
 import { QUALITY_POSITION_MANAGEMENT_VERSION } from '../qualityPositionManagement';
 import type { PreEntryRecord, PreEntryRound } from '../preEntryMonitor';
 import { USDT_FOLLOW_MONITOR_BASIS } from '../usdtFollowMonitorBasis';
+import {makeQualityHoldingVeto} from '../qualityFilters';
+import {MIRROR_DEADLINE_KIND} from '../qualityMirrorDeadline';
 
 const symbol = 'NIGHTUSDT', market = { symbol, step: '0.001', min: 1, max: 100000, minNotional: 5 };
 const owner = 'fixture-user';
@@ -175,6 +177,35 @@ function exchange() {
     }),
   } satisfies UsdtExchange & { readCampaign: typeof readCampaign };
 }
+
+it('镜像一小时未成交时，不等模拟价格即由实际执行端发出无任何限价的全余仓卖出',async()=>{
+  const m=60000,at=Math.floor(Date.now()/m)*m;
+  let clock=at+59*m;
+  const anchor={symbol,positionSide:'LONG' as const,openedAt:at,openingOrderId:'800',openingTradeId:'801'};
+  const opener:UsdtCampaignFill={id:'801',orderId:'800',side:'BUY',at,quantity:'10.000',positionQuantity:'10.000',price:'4.000',action:'open',commission:0,commissionAsset:'USDT',realized:0};
+  const actual:UsdtLiveCampaign={symbol,positionSide:'LONG',direction:'long',asset:'USDT',openedAt:at,quantity:'10.000',fills:[opener]};
+  const read=vi.fn(async()=>structuredClone(actual)),venue=exchange();
+  const monitor={version:INSTANT_TEMPLATE_MONITOR,templateId:'deadline-template',name:'镜像限时终止',plan:freezeQualityPlan({
+    ...makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE,'>=',5,[]),rule:undefined,
+    holdingVetoes:[makeQualityHoldingVeto(MIRROR_DEADLINE_KIND,'>=',1)],mirrorTakeProfit:{enabled:true,gainPct:2.5,sellPct:50}})};
+  const runner=createUsdtFollower(makeStore(file()),venue,owner,'hedge',clock,read,()=>clock);
+  const managed=(await runner.adopt(anchor,monitor))!,sample=binanceManualSample(managed),seed=binanceManualSeed(managed,sample);
+  clock=at+60*m;
+  const observed=await evaluateInstantMonitor(sample,monitor,clock,async(_row,from,to,p)=>Array.from({length:(to-from)/p.step},(_,i)=>({
+    openTime:from+i*p.step,open:4,high:4,low:4,close:4,volume:1,takerBuyVolume:.5})),new AbortController().signal,seed,undefined,clock);
+  expect(observed.status,observed.reason).toBe('open');expect(observed.pendingExit?.cause?.kind).toBe(MIRROR_DEADLINE_KIND);
+  const advanced=binanceManualAdvance(managed,seed,observed)!;
+  expect(advanced.decision?.kind).toBe('close');
+  runner.updateManaged(binanceManualId(anchor),managed.revision,advanced.checkpoint,advanced.decision);
+  venue.order.mockImplementationOnce(async(_market,_mode,order,send)=>{
+    expect(send).toBe(true);expect(order.side).toBe('SELL');expect(order.quantity).toBe('10.000');expect(order.limitPrice).toBeUndefined();
+    const fill:UsdtCampaignFill={...opener,id:'803',orderId:'802',side:'SELL',at:clock+1,price:'3.999',action:'reduce'};
+    actual.fills.push(fill);actual.quantity='0';actual.closedAt=fill.at;
+    return {exchangeId:fill.orderId,terminal:true,fills:[{...fill,quantity:10000,price:3.999}]};
+  });
+  await runner.tick();expect(venue.order).toHaveBeenCalledTimes(1);
+  await runner.tick();expect(venue.order).toHaveBeenCalledTimes(1);
+});
 
 it('接手币安手动首仓后用冻结卖出条件，按实际部分成交续算，重启后平掉实际余仓', async () => {
   const m = 60_000, at = Math.floor(Date.now() / m) * m;

@@ -1,6 +1,6 @@
 /** One limit take-profit per paper position, measured from its original entry. */
 export interface QualityMirrorTakeProfit { enabled: boolean; gainPct: number; sellPct: number }
-export interface QualityMirrorFill { at: number; price: number; fraction: number; gainPct: number; atOpen: boolean }
+export interface QualityMirrorFill { at: number; price: number; fraction: number; gainPct: number; atOpen: boolean; /** Exchange execution timestamp, separate from the original strategy observation. */ executedAt?:number }
 export const defaultQualityMirror = (): QualityMirrorTakeProfit => ({ enabled: true, gainPct: 5, sellPct: 50 });
 export const mirrorIdentity = (rule?: QualityMirrorTakeProfit): unknown[] => rule?.enabled ? ['mirror-limit-v1', rule.gainPct, rule.sellPct] : [];
 export function validateQualityMirror(rule?: QualityMirrorTakeProfit): void {

@@ -1,4 +1,6 @@
 import { qualityAdditionFills } from './qualityAddition';
+import {instantMonitorExitDue,instantMonitorSale} from './instantMonitorExecution';
+import {MIRROR_DEADLINE_KIND,MIRROR_DEADLINE_VERSION} from './qualityMirrorDeadline';
 import { qualityResultKey, type QualityResult, type QualitySample } from './quality';
 import { MANAGED_MINUTE, binanceManualId, initialBinanceManualCheckpoint, type BinanceManualDecision, type BinanceManualPosition } from './binanceManualMonitor';
 
@@ -24,6 +26,13 @@ export function binanceManualAdvance(position: BinanceManualPosition, prior: Qua
   const after = prior.endTime!;
   const actions: { decision: BinanceManualDecision; priority: number }[] = [];
   const through = (at: number) => Math.ceil(at / MANAGED_MINUTE) * MANAGED_MINUTE + MANAGED_MINUTE;
+  // A due clock stop must not be delayed by replayed, still-unexecuted additions
+  // or mirror proposals. The unchanged prior checkpoint contains actual fills.
+  const deadlineCause=observed.pendingExit?.cause??observed.exitSnapshot?.cause;
+  if(deadlineCause?.kind===MIRROR_DEADLINE_KIND&&deadlineCause.mirrorDeadlineVersion===MIRROR_DEADLINE_VERSION&&instantMonitorExitDue(observed)){
+    const at=instantMonitorSale(observed).at;
+    return {checkpoint:prior,decision:{kind:'close' as const,reason:observed.reason||'镜像限时终止',through:through(at),action:{id,action:'close' as const,at}}};
+  }
 
   for (const evidence of qualityAdditionFills(observed).slice(qualityAdditionFills(prior).length)) {
     const impulse = evidence.structureEvidence?.guardPlus?.early_impulse_event;
@@ -46,10 +55,11 @@ export function binanceManualAdvance(position: BinanceManualPosition, prior: Qua
   if (mirror && !prior.mirrorFill && mirror.fraction < 1) actions.push({ priority: mirror.atOpen ? 1 : 4,
     decision: { kind: 'mirror', evidence: mirror, through: through(mirror.at),
       action: { id, action: 'mirror', at: mirror.at, fraction: mirror.fraction, atOpen: mirror.atOpen } } });
-  if (observed.status === 'closed' && observed.endTime) {
-    actions.push({ priority: observed.exitSnapshot?.atOpen ? 0 : 5,
-      decision: { kind: 'close', reason: observed.reason || '持仓策略触发平仓', through: through(observed.endTime),
-        action: { id, action: 'close', at: observed.endTime } } });
+  if (instantMonitorExitDue(observed) && observed.endTime) {
+    const exitAt=instantMonitorSale(observed).at;
+    actions.push({ priority: observed.pendingExit?.atOpen || observed.exitSnapshot?.atOpen ? 0 : 5,
+      decision: { kind: 'close', reason: observed.reason || '持仓策略触发平仓', through: through(exitAt),
+        action: { id, action: 'close', at: exitAt } } });
   }
 
   const decision = actions.filter(value => value.decision.action.at >= after)

@@ -7,7 +7,16 @@ import { freezeQualityPlan } from '../qualityPlanVersions';
 import { makeQualitySellPlan } from '../qualitySellPlans';
 import { STATIC_DRAWDOWN_SELL_CHOICE } from '../qualityStaticDrawdownSell';
 import { QUALITY_POSITION_MANAGEMENT_VERSION } from '../qualityPositionManagement';
+import {MIRROR_DEADLINE_KIND,MIRROR_DEADLINE_VERSION} from '../qualityMirrorDeadline';
 const at=Math.floor(Date.now()/60000)*60000;
+it('镜像时限到期不等待下一分钟模拟成交价格，交接端仍立即产生同一全仓退出动作',async()=>{
+ const {campaign,checkpoint}=fixture(),deadline=at-60000;
+ const next=await advanceFrozenUsdtFollow(campaign,at,async()=>({...checkpoint,status:'open',evaluatedAt:at,endTime:deadline,endPrice:10,
+   pendingExit:{at:deadline,reading:1,atOpen:true,cause:{id:'deadline',label:'未实现镜像平衡减仓',kind:MIRROR_DEADLINE_KIND,direction:'>=',threshold:1,mirrorDeadlineVersion:MIRROR_DEADLINE_VERSION}}}),vi.fn());
+ expect(next?.actions).toContainEqual({id:'close',at:deadline,action:'close'});
+ expect(next?.frozenMonitor?.checkpoint?.status).toBe('open');
+ expect(await advanceFrozenUsdtFollow(next!,at,vi.fn(),vi.fn())).toBeUndefined();
+});
 function fixture(){
   const plan=freezeQualityPlan({...makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE,'>=',3,[]),
     positionManagement:{version:QUALITY_POSITION_MANAGEMENT_VERSION,notional:100,leverage:5}});

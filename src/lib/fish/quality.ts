@@ -36,6 +36,7 @@ import { loadQualityScanChunk } from './qualityScanChunk';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
 import { initialPayoffRiskThreshold, isStaticDrawdownSell, qualityExitAlgorithmLabel, qualityExitThresholdText, validateQualityExitRule } from './qualityStaticDrawdownSell';
+import {MIRROR_DEADLINE_KIND,mirrorDeadlineAt,mirrorCompletedBy} from './qualityMirrorDeadline';
 import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVetoIdentity, LIMITED_PAYOFF_RISK_VERSION, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
@@ -750,7 +751,18 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       advantageChecks.push(advantageState);
       return {confirmed:met&&advantageState.count>=required,evidence:advantageState};
     }:undefined;
-    if (since >= end && !prior?.pendingExit) return { ...prior!, evaluatedAt: now };
+    if (since >= end && !prior?.pendingExit) {
+      // Exchange reconciliation can already have advanced this checkpoint to
+      // the latest candle. A due clock stop still acts now, without another bar.
+      const started=sample.source.timeMs;
+      const due=sample.binanceEntry&&prior&&activeHoldingVetoes(group.holdingVetoes)
+        .filter(v=>v.kind===MIRROR_DEADLINE_KIND).sort((a,b)=>a.threshold-b.threshold)
+        .find(v=>mirrorDeadlineAt(started,v.threshold)<=end&&!mirrorCompletedBy(prior.mirrorFill,started,mirrorDeadlineAt(started,v.threshold)));
+      if(due){validateHoldingVeto(due);return {...prior!,evaluatedAt:now,pendingExit:{at:since,barOpenTime:since,atOpen:true,reading:(since-started)/3_600_000,
+        cause:{id:due.id,label:holdingVetoName(due),kind:due.kind,direction:due.direction,threshold:due.threshold,mirrorDeadlineVersion:due.mirrorDeadlineVersion,...(due.mirrorStage?{mirrorStage:due.mirrorStage}:{})}},
+        reason:`持仓达到 ${due.threshold} 小时，尚未实现镜像平衡减仓；立即发出市价清仓指令`};}
+      return { ...prior!, evaluatedAt: now };
+    }
     let trigger: QualityTrigger | undefined = prior?.pendingExit;
     let replayedPrices: ResearchBar[] | undefined;
     let mirrorFill = prior?.mirrorFill;
@@ -780,7 +792,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         }
         const conditions:QualityIntrabarCondition[]=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),...(v.activation?{activation:v.activation}:{}),...(v.mirrorStage?{mirrorStage:v.mirrorStage}:{}),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:holdingVetoName(v),kind:v.kind,direction:v.direction,threshold:v.threshold}}));
         if (combo && !afterStaticSell) conditions.push({ ...qualityMetricPlan(combo.after.snapshot, combo.after.rule.metric), rule: { direction: combo.after.rule.direction, threshold: combo.after.rule.threshold }, stage: 'after' as const });
-        const replay = await findQualityIntrabarExit({ row,plan,scale,rule:indicatorRule,staticSell,afterStaticSell,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,boxStopStates,mirror:group.mirrorTakeProfit,mirrorFill,ordinaryUntil,conditionsUntil,confirmOrdinary,sellerPeak:prior?.entryPrice?prior.entryPrice*(1+(prior.peakPct??0)/100):undefined,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
+        const replay = await findQualityIntrabarExit({ row,plan,scale,rule:indicatorRule,staticSell,afterStaticSell,entry,holdingStartedAt:sample.binanceEntry?sample.source.timeMs:sample.enteredAt,actualMirrorFillOnly:!!sample.binanceEntry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,boxStopStates,mirror:group.mirrorTakeProfit,mirrorFill,ordinaryUntil,conditionsUntil,confirmOrdinary,sellerPeak:prior?.entryPrice?prior.entryPrice*(1+(prior.peakPct??0)/100):undefined,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
           ...(combo ? { ruleStage: 'before' as const, switchPct: combo.switchPct } : {}) });
         trigger = replay.trigger; boxStopStates = replay.boxStopStates; boxStopStateAt = replay.boxStopStateAt; replayedPrices = replay.prices; mirrorFill = replay.mirrorFill;
       } else if (indicatorRule) {
@@ -931,6 +943,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         : closed && trigger?.cause?.boxBreakEvidence?.version===BOX_SECOND_EXIT_VERSION ? '持仓期间第二次箱体断裂已确认（两次独立防守线红叉），按下一分钟开盘价卖出全部持仓；本条件未在首次断裂时停止加仓'
         : closed && trigger?.cause?.boxBreakEvidence?.version===BOX_SECOND_BREAK_VERSION ? '第二次箱体断裂已确认（两次独立防守线红叉），按下一分钟开盘价卖出全部持仓；第一次断裂后已停止加仓'
         : closed && trigger?.cause?.boxBreakEvidence ? `一票否决：${trigger.cause.boxBreakEvidence.event==='darvas_5m_guard_broken'?'DBL-5-5mins':trigger.cause.label.split(' ')[0]} 防守线断裂（红叉已确认），按下一分钟开盘价卖出全部持仓`
+        : trigger?.cause?.kind===MIRROR_DEADLINE_KIND ? `持仓达到 ${trigger.cause.threshold} 小时，尚未实现镜像平衡减仓；${closed?'按到期时点的首个可用成交价清仓':'立即发出市价清仓指令，模拟成交等待下一分钟价格'}`
         : closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${['indicator','box-stop'].includes(trigger.cause.kind)?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? mirrorFill ? `镜像止盈已卖出初始币数 ${mirrorFill.fraction * 100}%，剩余 ${(1 - mirrorFill.fraction) * 100}% 持有中` : '持有中' : '观察期结束仍持有，记录期末浮盈' };
   } catch (error) {
     abort(signal);

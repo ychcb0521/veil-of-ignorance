@@ -15,7 +15,7 @@ export interface PreEntryConditions {
   hardVetoes: QualityHoldingVeto[];
 }
 export const emptyPreEntryConditions = (): PreEntryConditions => ({ version: PRE_ENTRY_CONDITIONS_VERSION, entryVetoes: [], sellVetoes: [], hardVetoes: [] });
-export const preEntryPositionOnly = (kind: string) => kind === 'addition-geometric-profit' || kind === 'payoff-ratio';
+export const preEntryPositionOnly = (kind: string) => kind === 'addition-geometric-profit' || kind === 'payoff-ratio' || kind === 'mirror-deadline';
 export function validatePreEntryConditions(value?: PreEntryConditions) {
   if (!value) return;
   if (value.version !== PRE_ENTRY_CONDITIONS_VERSION) throw Error('动态筛选条件版本不可用，请保留旧方案');
@@ -25,7 +25,7 @@ export function validatePreEntryConditions(value?: PreEntryConditions) {
     if(veto.activation||veto.mirrorStage)throw Error('镜像减仓后启动只适用于实际持仓，不能用于买前筛选');
     if(veto.boxStop&&isBoxSecondBreakExitOnly(veto.boxStop))throw Error('持仓期间二次断裂终止只适用于实际持仓，不能用于买前筛选');
     if(veto.boxStop&&isBoxSecondBreak(veto.boxStop))throw Error('首次断裂停加仓、二次断裂终止只适用于实际持仓，不能用于买前筛选');
-    if (preEntryPositionOnly(veto.kind)) throw Error('买前筛选没有实际持仓，不能启用加仓仓位或盈亏比条件');
+    if (preEntryPositionOnly(veto.kind)) throw Error('买前筛选没有实际持仓，不能启用加仓仓位、盈亏比或镜像限时终止条件');
     validateHoldingVeto(veto);
   }
 }
