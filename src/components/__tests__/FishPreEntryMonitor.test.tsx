@@ -46,6 +46,8 @@ it.each([true,false])('opens the ready screening library with saved-template ren
  fireEvent.click(screen.getByRole('button',{name:'载入所选目录'}));
  expect(await screen.findByText('BTCUSDT')).toBeVisible();
  expect(archive.page).toHaveBeenCalledTimes(1);
+ expect(screen.queryByRole('button',{name:'查看当前筛选轮次'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'更多归档操作'}));
  fireEvent.click(screen.getByRole('button',{name:'查看当前筛选轮次'}));
  expect(screen.queryByText('BTCUSDT')).toBeNull();
  expect(retry).not.toHaveBeenCalled();

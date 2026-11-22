@@ -1,3 +1,4 @@
+import {Popover,PopoverTrigger,PopoverContent} from './ui/popover';
 import {DirectoryDeleteButton,DirectoryTrashPanel,purgeMarkedDirectory,useFishDirectoryTrash,type DirectoryCleanup} from './FishDirectoryTrash';
 import {changeDirectory,directoryAccount,type DirectoryRef,type DirectoryScope} from '@/lib/fish/directoryTrash';
 import {DirectoryImportContext,FilterDetectorContext,FishWorkspaceRows} from './FishWorkspaceSource';
@@ -329,9 +330,17 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
     setManagementOwner(browseArchive.owner);
     if(!browseArchive.fullReady)browseArchive.loadFull?.();
   };
-  const archiveManagement=browseArchive?.loadFull&&<button type="button" className={action} onClick={openFullDirectory}>
-    {browseArchive.scope==='screen'&&!loading&&!loadError?'查看当前筛选轮次':browseArchive.fullReady?'管理已载入档案':'载入完整库并管理'}
-  </button>;
+  const archiveManagement=browseArchive?.loadFull&&<Popover>
+    <PopoverTrigger asChild><button type="button" aria-label="更多归档操作" title="更多归档操作"
+      className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground/60 hover:bg-muted hover:text-foreground focus-visible:text-foreground">
+      <MoreHorizontal aria-hidden="true" className="h-4 w-4"/>
+    </button></PopoverTrigger>
+    <PopoverContent align="end" className="w-auto p-1">
+      <button type="button" className={action} onClick={openFullDirectory}>
+        {browseArchive.scope==='screen'&&!loading&&!loadError?'查看当前筛选轮次':browseArchive.fullReady?'管理已载入档案':'载入完整库并管理'}
+      </button>
+    </PopoverContent>
+  </Popover>;
   return <FishLibraryRowExportContext.Provider value={managedExports?registerExport:null}><Dialog open={open} onOpenChange={changeOpen}>
     <DialogTrigger asChild><button type="button" className={action} aria-label={picker?.triggerLabel ?? '打开'+name}><Database aria-hidden className="h-3 w-3"/>{picker?.triggerLabel ?? name}</button></DialogTrigger>
     <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-hidden p-4 sm:p-5">
@@ -341,9 +350,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
         <div className={'group/library-header flex min-h-7 flex-wrap items-center gap-1.5 '+(trashOwner&&!picker?'pr-14':'pr-6')}>
           <DialogTitle className="text-sm">{name}</DialogTitle>{!directoryOnly&&dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo>
           {!directoryOnly&&browseArchive?.owner&&browseArchive.scope==='screen'&&!picker&&<button type="button" className={action} onClick={()=>{resetDirectorySelection();setManage(false);setPurgeMode(false);setShowDeleted(false);setDeleteId('');setEditingId('');setTemplateQuery('');setManagementOwner(undefined);setCatalogOwner(browseArchive.owner);}}>查看归档目录</button>}
-          {directoryOnly ? (archiveManagement&&(selectBeforeLoad&&!browseArchive?.fullReady
-            ? <details className="ml-auto text-xs"><summary className="cursor-pointer text-muted-foreground">旧归档与整库管理</summary>{archiveManagement}</details>
-            : <div className="ml-auto">{archiveManagement}</div>)) : transferMenu || compactDirectory ? <div className="ml-auto">{transferMenu ? transferMenu(exportActions) : <FishLibraryTransferMenu name={name} actions={exportActions}/>}</div> :
+          {directoryOnly ? archiveManagement : transferMenu || compactDirectory ? <div className="ml-auto">{transferMenu ? transferMenu(exportActions) : <FishLibraryTransferMenu name={name} actions={exportActions}/>}</div> :
             <button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!canExport} onClick={handleExport}><Download aria-hidden className="h-3 w-3"/>{busy==='export'?'正在导出…':'导出数据'} <span className="font-mono tabular-nums">{recordCount}</span></button>}
         </div>
         {(managedExports&&(busy==='export'||selectedExport?.busy))&&<p role="status" className="text-xs text-muted-foreground">正在导出…</p>}
