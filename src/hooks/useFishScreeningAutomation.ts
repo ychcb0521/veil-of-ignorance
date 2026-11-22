@@ -17,6 +17,12 @@ import type { AutomaticScreeningMatch } from './usePreEntryMonitor';
 import type { FishQualityState } from './useFishQuality';
 import type { useFishNotify } from './useFishNotify';
 
+import { USDT_ENTRY_MAX_AGE_MS } from '@/lib/fish/usdtLiveEntry';
+
+function freshCapture(job: Job, now: number) {
+  return job.instantTrading && job.liveCapturedAt !== undefined && now >= job.liveCapturedAt && now - job.liveCapturedAt <= USDT_ENTRY_MAX_AGE_MS;
+}
+
 const MINUTE = 60_000;
 export const screenedFishMailLock = (owner: string) => screeningQueuePrefix(owner) + 'mail';
 
@@ -299,7 +305,12 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       const canScreen = (job: Job) => (!job.instantTrading || current.current.positionReady) && (monitor.ready || job.instantTrading) &&
         (records.has(job.id) || (job.settings ?? defaultSettings)?.plans.length || job.runner && !monitor.ready);
       const next = jobs.filter(job => canScreen(job) && !isMail(job) && (resumeJobs.has(job.key) || job.nextCheckAt <= now))
-        .reduce<Job | undefined>((first, job) => !first || job.nextCheckAt < first.nextCheckAt ? job : first, undefined);
+        .reduce<Job | undefined>((first, job) => {
+          if (!first) return job;
+          const fresh = !!freshCapture(job, now);
+          if (fresh !== !!freshCapture(first, now)) return fresh ? job : first;
+          return job.nextCheckAt < first.nextCheckAt ? job : first;
+        }, undefined);
       if (next && !paused && !(monitor.automaticRunning ?? monitor.running)) void exclusive('scan', async () => {
         const job = await readJob(next.key);
         const active = current.current.monitor;

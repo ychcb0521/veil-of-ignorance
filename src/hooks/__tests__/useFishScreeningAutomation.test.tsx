@@ -171,3 +171,17 @@ it('leaves an empty or paused queue dormant and wakes immediately when a queued 
  expect(monitor.startAutomatic).toHaveBeenCalledOnce();
  timeouts.mockRestore(); intervals.mockRestore();
 });
+
+it('screens a fresh live capture before overdue work, then processes the backlog', async () => {
+  vi.useFakeTimers({now:T});
+  const startAutomatic = vi.fn(async (_id:string, _source:TradeSignal) => {});
+  const monitor = {ready:true, running:true, library:{version:1,rounds:[],records:[],settings:{updatedAt:T,hours:48,plans:[{}]}},startAutomatic};
+  const view = renderHook(() => useFishScreeningAutomation('fresh-first', true, monitor as never, {config:{enabled:false}} as never));
+  await act(async () => {
+    view.result.current.enqueue(signal('BACKLOG'), T - 121_000);
+    view.result.current.enqueue(signal('FRESH'), T);
+  });
+  monitor.running = false;
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  expect(startAutomatic.mock.calls.map(([,source]) => source.symbol)).toEqual(['FRESH','BACKLOG']);
+});

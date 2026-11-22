@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishCdaTracking } from './useFishCdaTracking';
 import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { currentUsdtFollowCampaign, usdtFollowCampaigns, type UsdtFollowStatus } from '@/lib/fish/usdtFollow';
-import { USDT_EXECUTION_PATH, USDT_EXECUTION_SAFETY } from '@/lib/fish/usdtLiveEntry';
+import { USDT_ENTRY_MAX_AGE_MS, USDT_EXECUTION_PATH, USDT_EXECUTION_SAFETY } from '@/lib/fish/usdtLiveEntry';
 import { advanceFrozenUsdtFollow } from '@/lib/fish/usdtFrozenContinuation';
 import type { UsdtFollowCampaign } from '@/lib/fish/usdtFollow';
 import { usdtFollowBatches } from '@/lib/fish/usdtFollowBatches';
@@ -123,7 +123,7 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
       const now=Date.now();
       const current = latest.current
         .filter(row => known.has(row.id) || control.current.executionSafety === USDT_EXECUTION_SAFETY
-          && row.liveEntry && row.admittedAt >= startedAt && now - row.admittedAt <= 120_000)
+          && row.liveEntry && row.admittedAt >= startedAt && now - row.admittedAt <= USDT_ENTRY_MAX_AGE_MS)
         .flatMap(row => {
           const campaign = currentUsdtFollowCampaign(row, supportsGuardPlus, now);
           if (!campaign) return [];
@@ -315,6 +315,17 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     void tick();
     return () => { abort.abort(); clearInterval(timer); };
   },[owner,token,data.connected,data.handoff?.authorized,data.handoff?.stage,readMirror]);
-  return { ...data, owner, pairingReady: !!owner && pairing.owner === owner && (!!token || !!pairing.verified), paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns,
+  const entryReports = useMemo(() => {
+    const rows = data.statuses.filter(row => row.issue).map(row => ({ id: row.id, symbol: row.symbol, issue: row.issue!, orderId: row.orderId }));
+    const reported = new Set(data.statuses.map(row => row.id));
+    for (const campaign of campaigns) {
+      const open = campaign.actions[0];
+      if (!reported.has(campaign.id) && campaign.liveEntry && open?.action === 'open' && campaign.admittedAt - open.at > USDT_ENTRY_MAX_AGE_MS) {
+        rows.push({ id: campaign.id, symbol: campaign.source.symbol, issue: '筛选确认时已超过 2 分钟开仓时限', orderId: undefined });
+      }
+    }
+    return rows;
+  }, [campaigns, data.statuses]);
+  return { ...data, entryReports, owner, pairingReady: !!owner && pairing.owner === owner && (!!token || !!pairing.verified), paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns,
     readManualMonitor, adoptManualMonitor, switchManualMonitor, switchFollowMonitor, advanceManualMonitor, controlPosition, readDeskQuote, deskOpen, deskClose };
 }

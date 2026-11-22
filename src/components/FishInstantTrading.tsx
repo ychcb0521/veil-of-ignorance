@@ -194,6 +194,11 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
               ? '实时新鱼入选后，按币安可用余额、保证金比例与杠杆确定首仓，买后模板负责持仓监测。币安手动仓位须逐笔确认托管。'
               : '本机执行端待更新。新版页面暂缓发送实盘开仓和加仓，已有仓位可继续减仓和平仓。'
             : follow.issue || '在本机启动执行端，将它生成的配对码填在这里。'}</p>
+          {!!follow.entryReports?.length && <details>
+            <summary className="cursor-pointer">实盘跟随回报（{follow.entryReports.length}）</summary>
+            <ul className="mt-1 max-h-36 overflow-auto">{follow.entryReports.map(row =>
+              <li key={row.id}>{row.symbol} · {row.issue}{row.orderId && ' · 订单 ' + row.orderId}</li>)}</ul>
+          </details>}
           <p className="select-all break-all text-muted-foreground">账号 ID {follow.owner}</p>
           <form className="flex items-center gap-2" onSubmit={async event => {
             event.preventDefault();

@@ -8,11 +8,10 @@ import { usdtLiveCampaignId, type UsdtLiveCampaign } from '../src/lib/fish/usdtL
 import { createManagedUsdtLedger, matchesManualAnchor, mergeUsdtExitFills, settleManagedUsdtDecision, verifyManagedUsdtFills } from './usdt-managed-execution.ts';
 import { calculateHoldingLedgerAddition, HOLDING_LEDGER_ADDITION_VERSION, replayQualityHoldingLedger } from '../src/lib/fish/qualityHoldingLedger.ts';
 import type { UsdtMirrorSnapshot } from '../src/lib/fish/usdtPositionMirror.ts';
-import { validUsdtLiveEntry } from '../src/lib/fish/usdtLiveEntry.ts';
+import { validUsdtLiveEntry, USDT_ENTRY_MAX_AGE_MS as entryAgeMs } from '../src/lib/fish/usdtLiveEntry.ts';
 import { rebaseInstantMonitorCheckpoint } from '../src/lib/fish/instantMonitorSwitchCheckpoint.ts';
 import { USDT_FOLLOW_MONITOR_BASIS } from '../src/lib/fish/usdtFollowMonitorBasis.ts';
 
-const entryAgeMs = 120_000;
 const increaseAgeMs = 120_000;
 const positionTimeout = 45_000;
 const unsettledBuyIssue = '买单回报尚未核实，继续按原订单编号对账';

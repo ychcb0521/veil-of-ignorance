@@ -1,3 +1,4 @@
+export const USDT_ENTRY_MAX_AGE_MS = 120_000;
 export const USDT_EXECUTION_SAFETY = 2 as const;
 export const USDT_EXECUTION_PATH = '/api/usdt-follow/safe';
 
