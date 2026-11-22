@@ -62,7 +62,7 @@ it('screens from the normal capture entry point before the history opens and wai
     await act(async () => confirm(true)); await flush();
     expect(run).toHaveBeenCalledOnce();
     expect(run.mock.calls[0][0].preEntry?.round).toMatchObject({instantTrading:true,liveCapturedAt:T,hours:4,plans:[{id:'verified'}]});
-    expect(storage.screening).toHaveBeenCalledOnce();
+    expect(storage.screening).not.toHaveBeenCalled();
     expect(storage.load).not.toHaveBeenCalled();
   } finally {
     view.unmount(); finishArchive?.({version:1,rounds:[],records:[]}); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();

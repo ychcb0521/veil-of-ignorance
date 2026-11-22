@@ -82,15 +82,11 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
     return (usdtLive.snapshot?.positions ?? []).some(row => row.symbol.replace(/\//g, '').toUpperCase() === code && Number(row.quantity) > 0);
   }) : undefined, [owner, preEntry.ready, holdingsReady, usdtFollow.connected, usdtLive.snapshot, usdtLive.issue]);
   const needsArchive = automatic.needsHistory || notify.config.enabled && cdaTracking.hasPendingSaleMail;
-  // Reconcile historical and legacy jobs in the background once account preferences have had first access.
-  // Only jobs missing original inputs promote the archive ahead of other history.
-  const backgroundRestore = executionMonitor.library.rounds.length > 0 ||
-    preferenceStatus !== 'loading' && (automatic.pending > 0 || automatic.awaitingMail > 0 || positions.length > 0);
   useEffect(() => {
     if (owner) prioritizeInstantScreening(owner, !!needsArchive);
-    if (needsArchive || backgroundRestore) setScreeningRequested(true);
+    if (needsArchive) setScreeningRequested(true);
     return () => { if (owner) prioritizeInstantScreening(owner, false); };
-  }, [owner, needsArchive, backgroundRestore]);
+  }, [owner, needsArchive]);
   const sources = useCallback((fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[], researchOpen: boolean, screeningOpen: boolean) => {
     if (researchOpen) setRequested(true);
     if (screeningOpen) setScreeningRequested(true);
