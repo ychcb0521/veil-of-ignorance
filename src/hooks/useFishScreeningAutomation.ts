@@ -37,7 +37,7 @@ function createQueueSession(owner?: string) {
 type Monitor = NonNullable<FishQualityState['preEntry']>;
 
 /** The authenticated app shell owns capture work and email receipts across panel changes. */
-export function useFishScreeningAutomation(owner: string | undefined, ready: boolean, monitor: Monitor | undefined, notify: ReturnType<typeof useFishNotify>) {
+export function useFishScreeningAutomation(owner: string | undefined, ready: boolean, monitor: Monitor | undefined, notify: ReturnType<typeof useFishNotify>, positionReady = true) {
   const [saved, setSaved] = useState(() => ({ owner, value: owner ? readAutomaticScreeningSettings(owner) : undefined }));
   const settings = saved.owner === owner ? saved.value : owner ? readAutomaticScreeningSettings(owner) : undefined;
   useEffect(() => {
@@ -72,8 +72,8 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
   const [storageIssue, setStorageIssue] = useState(false);
   const [attemptIssues, setAttemptIssues] = useState({ scan: '', mail: '' });
   const [jobs, setJobs] = useState(() => [...queue.entries.values()].filter(isScreeningJob));
-  const current = useRef({ ready, monitor, notify, paused });
-  current.current = { ready, monitor, notify, paused };
+  const current = useRef({ ready, monitor, notify, paused, positionReady });
+  current.current = { ready, monitor, notify, paused, positionReady };
   const currentQueue = useRef(queue);
   currentQueue.current = queue;
   const wake = useRef<(resume?: boolean) => void>();
@@ -296,7 +296,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       const completed = new Set(monitor.library.rounds.filter(round => ids.has(round.id) && round.state === 'complete').map(round => round.id));
       const defaultSettings = readAutomaticScreeningSettings(owner) ?? monitor.library.settings;
       const isMail = (job: Job) => job.matched || completed.has(job.id) && records.get(job.id)?.status === 'matched';
-      const canScreen = (job: Job) => (monitor.ready || job.instantTrading) &&
+      const canScreen = (job: Job) => (!job.instantTrading || current.current.positionReady) && (monitor.ready || job.instantTrading) &&
         (records.has(job.id) || (job.settings ?? defaultSettings)?.plans.length || job.runner && !monitor.ready);
       const next = jobs.filter(job => canScreen(job) && !isMail(job) && (resumeJobs.has(job.key) || job.nextCheckAt <= now))
         .reduce<Job | undefined>((first, job) => !first || job.nextCheckAt < first.nextCheckAt ? job : first, undefined);
@@ -365,7 +365,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       queue.channel = undefined;
     };
   }, [owner, pauseKey, persist, prefix, publish, queue, save]);
-  useEffect(() => { wake.current?.(); }, [ready, monitor?.ready, monitor?.instantReady, monitor?.automaticRunning, monitor?.library.settings, paused, settings, notify.config, jobs.length, storageIssue]);
+  useEffect(() => { wake.current?.(); }, [ready, positionReady, monitor?.ready, monitor?.instantReady, monitor?.automaticRunning, monitor?.library.settings, paused, settings, notify.config, jobs.length, storageIssue]);
 
   const matchedIds = useMemo(() => {
     if (!jobs.length || !monitor) return undefined;
@@ -386,6 +386,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
   if (pending && !monitor?.automaticRunning && !paused) {
     if (!queue.ready) waitingReason = '正在读取待筛队列';
     else if (!monitor?.ready && queue.readFailed) waitingReason = '待筛队列读取失败，正在重试';
+    else if (!positionReady && pendingJobs.every(job => job.instantTrading)) waitingReason = '等待仓位设置';
     else if (needsHistory && pendingJobs.every(needsArchive)) {
       waitingReason = monitor?.missingCheckpoint ? '正在恢复该信号的原始筛选进度' : '正在恢复待处理信号的原始条件';
     }

@@ -40,6 +40,7 @@ export interface InstantPositionInput {
   buyAt: number;
   planLabel?: string;
   monitor?: InstantMonitorSettings;
+  instantPosition?: PreEntryRound['instantPosition'];
   metadata?: InstantCampaignMetadata;
   detectors: string[];
 }
@@ -69,6 +70,7 @@ export function instantPositionInput(record: PreEntryRecord, round: PreEntryRoun
     id: 'fish-instant-' + shortFishHash(record.id), recordId: record.id, buyAt: buyAt!,
     source: { id, symbol, market, exchange, underlying, binanceSymbol, timeMs: qualitySignalTime(record.sample.source) },
     planLabel: round.plans?.find(plan => plan.id === record.planId)?.label,
+    ...(round.instantPosition ? { instantPosition: round.instantPosition } : {}),
     ...(round.instantMonitor ? { monitor: round.instantMonitor } : {}),
     detectors: record.sample.source.fish ? fishCaughtBy(record.sample.source) : [],
     metadata: instantCampaignMetadata(record, round),
@@ -112,7 +114,7 @@ export async function freezeInstantPosition(input: InstantPositionInput, load: F
   validateFishBars(bars, end, 1, MINUTE);
   const entryPrice = bars[0].open;
   if (!(entryPrice > 0 && Number.isFinite(entryPrice))) throw Error('即时交易缺少有效买入价');
-  return { ...input, ...instantMonitorSize(input.monitor), entryPrice };
+  return { ...input, ...instantMonitorSize(input.monitor, input.instantPosition), entryPrice };
 }
 
 export async function readInstantMark(input: Pick<InstantPositionInput, 'source' | 'buyAt'>, now: number, load: FishReconstructionLoader, signal: AbortSignal) {
@@ -134,7 +136,7 @@ export async function freezeInstantCampaign(input: InstantCampaignInput, load: F
   if (input.monitor && !sell.manual) {
     if (!validScreenedSale(input.sell) || !validInstantMonitorClose(input)) throw Error('即时交易缺少持仓监测成交快照');
     const result = input.monitorResult!;
-    return { ...input, version: 2, ...instantMonitorSize(input.monitor), entryPrice: result.entryPrice!, exitPrice: result.endPrice!,
+    return { ...input, version: 2, ...instantMonitorSize(input.monitor, input.instantPosition), entryPrice: result.entryPrice!, exitPrice: result.endPrice!,
       peakPct: result.peakPct ?? 0, drawdown: qualityDrawdownPct(result, 'dynamic'),
       staticDrawdown: qualityDrawdownPct(result, 'static'), recordedAt: Date.now() };
   }
@@ -177,7 +179,7 @@ export async function freezeInstantCampaign(input: InstantCampaignInput, load: F
     exitPrice = bars[0].close;
   }
   if (!(exitPrice > 0 && Number.isFinite(exitPrice))) throw Error('即时交易缺少有效 CDA 卖出价');
-  const sizing = input.opened ?? instantMonitorSize(input.monitor);
+  const sizing = input.opened ?? instantMonitorSize(input.monitor, input.instantPosition);
   // Keep the simulation's observed execution prices even when a quote, and
   // not the minute's close, was used for a manual fill.
   for (const fill of sell.manual?.fills ?? []) {
@@ -195,7 +197,7 @@ export async function freezeInstantCampaign(input: InstantCampaignInput, load: F
 
 export function instantPositionValuation(position: InstantPositionFill, monitor?: QualityResult, legacyMirror?: QualityMirrorFill, mark?: number, manual?: InstantManualExecution) {
   const entryPrice = monitor?.entryPrice ?? position.entryPrice;
-  const notional = position.monitor?.plan.positionManagement?.notional ?? position.marginUsdt * position.leverage;
+  const notional = position.instantPosition ? position.marginUsdt * position.leverage : position.monitor?.plan.positionManagement?.notional ?? position.marginUsdt * position.leverage;
   const mirror = monitor?.mirrorFill ?? legacyMirror;
   const additions = qualityAdditionFills(monitor ?? {});
   const reductions = monitor?.additionReductions ?? [];
@@ -308,7 +310,8 @@ function buildTemplateInstantCampaignData(owner: string, position: InstantPositi
   const { id, source, buyAt, marginUsdt, leverage, recordId, metadata } = position;
   const switches = result.instantMonitorSwitches;
   const monitor = switches?.at(-1)?.to ?? position.monitor;
-  const notional = switches?.length ? result.initialNotional! : monitor?.plan.positionManagement?.notional ?? marginUsdt * leverage;
+  const notional = position.instantPosition ? marginUsdt * leverage
+    : switches?.length ? result.initialNotional! : monitor?.plan.positionManagement?.notional ?? marginUsdt * leverage;
   const sample: QualitySample = { id: recordId, source: { ...source, timeLabel: '', fallbackZone: '' },
     groups: [], enteredAt: buyAt, basis: 'signal', importedAt: buyAt };
   const data = buildQualityCampaignData(owner, { sample, plan: monitor!.plan, result,

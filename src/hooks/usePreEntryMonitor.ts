@@ -1,6 +1,7 @@
 import { signalDedupKey } from '@/lib/signalLibrary';
 import {readFishLibrary} from '@/lib/fish/libraryLoadQueue';
 import { reserveInstantAdmission } from '@/lib/fish/instantAdmission';
+import { freezeLivePositionBudget, readInstantPositionSettings } from '@/lib/fish/instantPositionSettings';
 import { readInstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
 import { createPreEntryCheckpoint } from '@/lib/fish/preEntryCheckpoint';
 import {newPreEntryHours, selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
@@ -200,6 +201,14 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     };
     let matchCheckpoint: Promise<boolean> | undefined, admittedRound: PreEntryRound | undefined;
     const checkpointMatch = (record: PreEntryRecord, completed: PreEntryRound): Promise<boolean> => (async () => {
+      completed = unconfirmedAdmissions.current.get(completed.id) ?? completed;
+      if (completed.instantPosition && completed.liveCapturedAt && owner) {
+        const instantPosition = await freezeLivePositionBudget(owner, completed.instantPosition, aborter.signal);
+        if (!live() || aborter.signal.aborted) return false;
+        completed = { ...completed, instantPosition };
+        admittedRound = completed;
+        unconfirmedAdmissions.current.set(completed.id, completed);
+      }
       const saved = await persistAdmission(record, completed, true);
       if (live()) {
         commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === completed.id ? completed : r),
@@ -239,6 +248,11 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     };
     const accept = (record: PreEntryRecord) => {
       if (!live()) return;
+      let instantPosition = round.instantPosition;
+      if (round.instantTrading && owner && record.status === 'matched' && !matchCheckpoint) {
+        try { instantPosition ??= readInstantPositionSettings(owner); } catch { /* Invalid settings cannot size a new trade. */ }
+        if (!instantPosition) record = { ...record, status: 'unmatched', matchedAt: undefined, detail: '入选时仓位设置不可用，本次未开仓' };
+      }
       const previous = automatic ? current.current.records.find(r => r.id === record.id) : undefined;
       if (previous && record.updatedAt <= previous.updatedAt) record = { ...record, updatedAt: previous.updatedAt + 1 };
       const next = { ...current.current, records: current.current.records.map(r => r.id === record.id ? record : r) };
@@ -250,7 +264,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       if (automatic && record.status === 'matched' && !matchCheckpoint) {
         clearTimeout(lane.timer); lane.timer = undefined;
         const instantMonitor = round.instantMonitor ?? (round.instantTrading && owner ? readInstantMonitorSettings(owner) : undefined);
-        admittedRound = { ...round, ...(instantMonitor ? { instantMonitor: structuredClone(instantMonitor) } : {}),
+        admittedRound = { ...round, ...(instantPosition ? { instantPosition } : {}), ...(instantMonitor ? { instantMonitor: structuredClone(instantMonitor) } : {}),
           state: 'complete', updatedAt: record.updatedAt };
         unconfirmedAdmissions.current.set(round.id, admittedRound);
         matchCheckpoint = checkpointMatch(record, admittedRound);
@@ -336,9 +350,19 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
           const generation = epoch.current;
           try {
             const frozen = unconfirmedAdmissions.current.get(existing.id) ?? existing;
-            const completed: PreEntryRound = { ...frozen,
+            const pendingAdmission = existing.state !== 'complete' || unconfirmedAdmissions.current.has(existing.id);
+            let completed: PreEntryRound = { ...frozen,
               state: 'complete', updatedAt: Math.max(existing.updatedAt, record.updatedAt) };
-            const saved = await persistAdmission(record, completed, existing.state !== 'complete' || unconfirmedAdmissions.current.has(existing.id));
+            if (pendingAdmission && owner && completed.instantTrading) {
+              const position = completed.instantPosition ?? readInstantPositionSettings(owner);
+              if (!position) throw Error('仓位设置不可用，等待恢复后核对入选');
+              const instantPosition = completed.liveCapturedAt
+                ? await freezeLivePositionBudget(owner, position, new AbortController().signal) : position;
+              if (generation !== epoch.current) return;
+              completed = { ...completed, instantPosition };
+              unconfirmedAdmissions.current.set(existing.id, completed);
+            }
+            const saved = await persistAdmission(record, completed, pendingAdmission);
             if (generation === epoch.current) {
               commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === completed.id ? completed : r),
                 records: current.current.records.map(r => r.id === record.id ? saved : r) });

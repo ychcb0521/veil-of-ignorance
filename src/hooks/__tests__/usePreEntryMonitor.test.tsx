@@ -1,3 +1,4 @@
+import { registerInstantBalanceReader } from '@/lib/fish/instantPositionSettings';
 import * as campaigns from '@/lib/fish/instantCampaignStore';
 import * as checkpoints from '@/lib/fish/preEntryPersistence';
 import * as admissions from '@/lib/fish/instantAdmission';
@@ -43,6 +44,8 @@ it.each(['recovered', 'failed'] as const)('keeps instant screening independent o
   vi.spyOn(campaigns, 'readActiveInstantRecordIds').mockResolvedValue([]);
   vi.spyOn(checkpoints, 'readAutomaticPreEntryCheckpoint').mockResolvedValue(undefined);
   const reserve = vi.spyOn(admissions, 'reserveInstantAdmission').mockResolvedValue(false);
+  const readBalance = vi.fn().mockResolvedValue('1234.56');
+  const unregister = registerInstantBalanceReader('priority', readBalance);
   const matched = vi.fn();
   const input = study(), filter = input.buyFilters[0];
   const plan = freezeQualityPlan({ id: 'p', label: '买前', metric: filter.metric, snapshot: filter.snapshot,
@@ -92,11 +95,13 @@ it.each(['recovered', 'failed'] as const)('keeps instant screening independent o
     act(() => task.preEntry!.onRecord({...task.preEntry!.records[0], status:'matched', matchedAt:t+60000, updatedAt:Date.now()+1}));
     endScan(); await act(() => running);
     expect(reserve).toHaveBeenCalledOnce();
+    expect(readBalance).toHaveBeenCalledOnce();
+    expect(reserve.mock.calls[0][2].instantPosition).toMatchObject({availableUsdt:1234.56, marginPct:5, leverage:5, balanceObservedAt:expect.any(Number)});
     expect(matched).not.toHaveBeenCalled();
     expect(view.result.current.automaticLibrary.records[0].status).toBe('unmatched');
     expect(settings).toEqual(frozen);
     expect(storage.save.mock.calls.every(([,value,immediate]) => immediate && !value.settings && value.rounds.every(r => r.id === 'fresh'))).toBe(true);
-  } finally { view.unmount(); vi.restoreAllMocks(); vi.unstubAllGlobals(); }
+  } finally { unregister(); view.unmount(); vi.restoreAllMocks(); vi.unstubAllGlobals(); }
 });
 
 describe('买前监测独立任务', () => {

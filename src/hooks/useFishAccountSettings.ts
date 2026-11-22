@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
 import { notifyPersistedStateHydrated, subscribePersistedStateHydration, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { hydrateSimState, pushSimStateImmediately } from '@/lib/simStateSync';
+import { FISH_INSTANT_POSITION_KEY } from '@/lib/fish/instantPositionSettings';
 import { FISH_INSTANT_MONITOR_KEY } from '@/lib/fish/instantMonitorSettings';
 import { FISH_AUTOMATIC_SCREENING_KEY } from '@/lib/fish/preEntryActivePlan';
 import { FISH_ACCOUNT_SETTINGS_KEY, FISH_CAPTURE_TEMPLATES_KEY, readFishAccountSettings, type FishAccountSettings } from '@/lib/fish/accountSettings';
@@ -25,7 +26,7 @@ export async function persistFishAccountPreference(userId: string, key: string, 
   }
 }
 
-const fishPreferenceKeys = [FISH_ACCOUNT_SETTINGS_KEY, FISH_CAPTURE_TEMPLATES_KEY, FISH_AUTOMATIC_SCREENING_KEY, FISH_INSTANT_MONITOR_KEY, FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY];
+const fishPreferenceKeys = [FISH_ACCOUNT_SETTINGS_KEY, FISH_CAPTURE_TEMPLATES_KEY, FISH_AUTOMATIC_SCREENING_KEY, FISH_INSTANT_MONITOR_KEY, FISH_INSTANT_POSITION_KEY, FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY];
 async function hydrateFishPreferences(owner: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);

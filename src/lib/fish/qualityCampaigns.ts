@@ -58,7 +58,7 @@ function projectInWorker(request: QualityCampaignReadRequest,signal?:AbortSignal
 function projectPendingTemplateSale(owner: string, sale: InstantCampaignInput) {
   const entryPrice = sale.monitorResult?.entryPrice;
   if (!sale.monitor || entryPrice == null || !Number.isFinite(entryPrice) || entryPrice <= 0) return;
-  return buildSettlingInstantCampaignData(owner, { ...sale, ...instantMonitorSize(sale.monitor), entryPrice }, sale);
+  return buildSettlingInstantCampaignData(owner, { ...sale, ...instantMonitorSize(sale.monitor, sale.instantPosition), entryPrice }, sale);
 }
 
 export async function listLocalInstantCampaignData(owner: string) {

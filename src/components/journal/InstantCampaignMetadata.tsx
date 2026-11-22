@@ -1,5 +1,5 @@
 import {useCampaignTemplateNames} from '@/contexts/QualityTemplateNamesContext';
-import { Activity, Filter, Waves } from 'lucide-react';
+import { Activity, Filter, Wallet, Waves } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { QualityMonitorSettingsButton } from '@/components/FishQualityMonitorSettingsView';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -46,6 +46,11 @@ export function InstantCampaignMetadataButtons({ campaign }: { campaign: TradeCa
     <MetadataButton label="动态筛选" icon={<Filter aria-hidden className="h-3.5 w-3.5"/>}>
       <FishFrozenScreeningSettings screening={screening} templateName={screening?.plan?names?.forPlan(screening.plan,'screen',screening.hours):undefined} label={comparison.monitorPlan ? undefined : comparison.planLabel}/>
     </MetadataButton>
+    {instant.metadata?.position && <MetadataButton label="仓位设置" icon={<Wallet aria-hidden className="h-3.5 w-3.5"/>}>
+      <p>{instant.metadata.position.balanceObservedAt ? '入选时币安可用资金' : '模拟可用资金'} {instant.metadata.position.availableUsdt} USDT · 保证金比例 {instant.metadata.position.marginPct}%</p>
+      <p>首仓保证金 {instant.marginUsdt} USDT · 杠杆 {campaign.initial_leverage} 倍 · 首仓名义仓位 {campaign.initial_main_size_usdt} USDT</p>
+      {instant.metadata.position.liveBalanceIssue && <p>本次实盘未开仓 · {instant.metadata.position.liveBalanceIssue}</p>}
+    </MetadataButton>}
     {comparison.monitorPlan ? <QualityMonitorSettingsButton plan={comparison.monitorPlan} campaign={campaign}/> :
       <MetadataButton label="持仓监测" icon={<Activity aria-hidden className="h-3.5 w-3.5"/>}>
         <p>{comparison.sellLabel}</p>

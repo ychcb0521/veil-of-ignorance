@@ -58,10 +58,11 @@ function followCampaign({ record, round }: ScreenedFishAdmission, tracking: Fish
   const sale = tracking.alerts.get(record.id);
   const manual = sale?.manual ?? tracking.manualPositions?.get(record.id);
   const mirror = monitor?.mirrorFill ?? sale?.mirror ?? tracking.mirrorFills?.get(record.id);
-  const size = instantMonitorSize(input.monitor);
-  const frozen = input.monitor, sizing = frozen?.plan.positionManagement;
+  const size = instantMonitorSize(input.monitor, input.instantPosition);
+  const frozen = input.monitor;
+  const sizing = 'notional' in size ? size : undefined;
   let liveEntry: UsdtLiveEntry | undefined;
-  if (round.instantTrading && round.liveCapturedAt !== undefined && frozen?.version === INSTANT_TEMPLATE_MONITOR &&
+  if ((!input.instantPosition || input.instantPosition.balanceObservedAt) && round.instantTrading && round.liveCapturedAt !== undefined && frozen?.version === INSTANT_TEMPLATE_MONITOR &&
     sizing && !isLegacyQualityPlan(frozen.plan)) {
     try {
       if (!instantMonitorTemplateIssue({ id: frozen.templateId, name: frozen.name, plan: frozen.plan })) {

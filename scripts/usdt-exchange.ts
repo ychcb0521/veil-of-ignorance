@@ -156,7 +156,7 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       return price;
     },
     async check(market: UsdtMarket, mode: UsdtPositionMode, held: number, entry: number, opening: boolean, leverage: number,
-      managed?: 'existing-position', knownProtection?: readonly string[], unsettledBuyId?: string, confirmOpening?: () => void) {
+      managed?: 'existing-position' | 'frozen-leverage', knownProtection?: readonly string[], unsettledBuyId?: string, confirmOpening?: () => void) {
       const { symbol } = market;
       const [positions, regular, algo, settings, modes] = await Promise.all([
         request('GET', '/fapi/v3/positionRisk', { symbol }),
@@ -178,7 +178,7 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
         || (held > 0 && (!Number.isFinite(Number(row.entryPrice)) || Math.abs(Number(row.entryPrice) - entry) > Math.max(1e-8, entry * 1e-5)))) {
         throw Error('币安实际仓位与本机成交记录不一致');
       }
-      if (leverage === 0 || managed) return; // Keep the existing exchange setup of an adopted position.
+      if (leverage === 0 || managed === 'existing-position') return; // Keep the existing exchange setup of an adopted position.
       const config = settings.find((item: Json) => item.symbol === symbol);
       if (!config) throw Error('币安合约配置不可用');
       if (opening) {

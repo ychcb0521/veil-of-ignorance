@@ -14,6 +14,7 @@ import { createFishReconstructionLoader } from '@/lib/fish/reconstructionLoader'
 import { collectFishQuality, evaluateQualitySample, newQualityStudy, qualityResultKey, type QualityGroup, type QualityResult, type QualitySample } from '@/lib/fish/quality';
 import { additionIdentity, qualityAdditionFills } from '@/lib/fish/qualityAddition';
 import { evaluateLegacyQualitySample, LEGACY_ENGINE_SHA256, LEGACY_QUALITY_ENGINE, legacyToEditablePlan, withLegacyEngine } from '@/lib/fish/qualityLegacyEngine';
+import { legacyPlanInEngineUnits, legacyResultInPositionUnits } from '@/lib/fish/instantLegacyPosition';
 import { activeQualityPlanTemplates, qualityPlanFromTemplate, type QualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import { backfillPlanVersions, freezeQualityPlan, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { replaceQualitySellPlans } from '@/lib/fish/qualitySellPlans';
@@ -27,7 +28,16 @@ const DAY = 86_400_000;
 // 与原运行同一个评估时刻；服务器时钟也固定，日后币安的数据保留期限不影响这条测试
 const now = Math.min(fixture.original.evaluatedAt, fixture.original.endTime + 3 * DAY);
 const offline: typeof fetch = async input => {
-  const body = fixture.responses[String(input)];
+  const url = new URL(String(input));
+  let body = fixture.responses[url.href];
+  if (body == null) {
+    // New clients request the exact number of candles in short windows. The
+    // recorded response is identical when only the limit changed and all rows fit.
+    const limit = Number(url.searchParams.get('limit'));
+    url.searchParams.set('limit', '1000');
+    const recorded = fixture.responses[url.href];
+    if (recorded && JSON.parse(recorded).length <= limit) body = recorded;
+  }
   if (body == null) throw new Error(`金样本不应请求夹具以外的数据：${String(input)}`);
   return new Response(body, { status: 200 });
 };
@@ -57,6 +67,19 @@ describe('2026-10-31 旧引擎', () => {
     const r = await evaluateLegacyQualitySample(fixture.sample, fixture.plan, fixture.observeHours, now, loader(), signal(), 'current-key');
     expectOriginal(r);
     expect(r.key).toBe('current-key');
+  }, 120_000);
+
+  it('按新首仓金额换算旧引擎的盈亏和每次成交，保留原模板', async () => {
+    const before = structuredClone(fixture.plan);
+    const execution = legacyPlanInEngineUnits(fixture.plan, 2);
+    const result = await evaluateLegacyQualitySample(fixture.sample, execution, fixture.observeHours, now, loader(), signal(), 'sized');
+    const sized = legacyResultInPositionUnits(result, 200);
+    expect(sized.initialNotional).toBe(200);
+    expect(sized.pnl).toBe(fixture.original.pnl * 2);
+    expect(qualityAdditionFills(sized).map(fill => fill.quantity)).toEqual(fixture.original.additionQuantities.map(value => value * 2));
+    expect(sized.endPrice).toBe(fixture.original.endPrice);
+    expect(sized.endTime).toBe(fixture.original.endTime);
+    expect(fixture.plan).toEqual(before);
   }, 120_000);
 
   it('完整流程：误记版本的模板 → 打开时标为旧引擎 → 新建方案并保存 → 运行，结果与原战役逐位一致', async () => {

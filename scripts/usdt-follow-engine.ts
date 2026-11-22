@@ -499,7 +499,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       symbol: market.symbol, positionSide: mode === 'hedge' ? 'LONG' : 'BOTH', direction: 'long',
       fills: [{ id:opening.id, orderId:opened.exchangeId }],
     }) : undefined;
-    const liveLeverage = readPositions && liveId ? store.positionLeverage(liveId)?.leverage : undefined;
+    const liveLeverage = !campaign.frozenMonitor?.admission.round.instantPosition && readPositions && liveId ? store.positionLeverage(liveId)?.leverage : undefined;
     const maySendBuy = () => {
       const checkedAt = Math.max(now, Date.now());
       return mayIncrease(row, action, checkedAt, row.managed ? managedClock() : checkedAt) &&
@@ -511,7 +511,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     if (action.action === 'open') await protection?.beforeOpening(market.symbol);
     await exchange.check(market, mode, current.held, current.entry, action.action === 'open',
       side === 'BUY' ? liveLeverage ?? campaign.leverage : 0,
-      row.managed ? 'existing-position' : undefined, liveId ? protectionIds?.(market.symbol, liveId) : undefined, unsettledBuyId,
+      row.managed ? campaign.frozenMonitor?.admission.round.instantPosition && row.managed.followBasis ? 'frozen-leverage' : 'existing-position' : undefined, liveId ? protectionIds?.(market.symbol, liveId) : undefined, unsettledBuyId,
       ...(action.action === 'open' ? [confirmOpening] as const : []));
     if (action.action !== 'open') {
       const actual = await readOriginalPosition(row, market);

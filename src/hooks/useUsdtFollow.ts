@@ -302,7 +302,7 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
           const next = await advanceFrozenUsdtFollow(saved.campaign,Date.now(), (state,end) => {
             const {record,round} = state.admission;
             const monitor = state.checkpoint?.instantMonitorSwitches?.at(-1)?.to ?? round.instantMonitor!;
-            return market.readPageInstantMonitor(record.sample,monitor,record.matchedAt!,end,abort.signal,state.checkpoint);
+            return market.readPageInstantMonitor(record.sample,monitor,record.matchedAt!,end,abort.signal,state.checkpoint,undefined,round.instantPosition);
           }, (from,to) => market.readPageInstantCampaignCandles(saved.campaign.frozenMonitor!.admission.record.sample.source,'1m',from,to,abort.signal));
           if (next) await readMirror({command:'handoff-monitor-update',epoch:frozen.epoch,revision:saved.revision,campaign:next},
             abort.signal,15_000,true);

@@ -328,7 +328,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     };
     const checkTemplate = async ({ record, round }: ScreenedFishAdmission, target: number, checkpoint?: Checkpoint) => {
       const monitor = checkpoint?.monitorResult?.instantMonitorSwitches?.at(-1)?.to ?? round.instantMonitor!;
-      const result = await readPageInstantMonitor(record.sample, monitor, record.matchedAt!, target, lifetime.signal, checkpoint?.monitorResult);
+      const result = await readPageInstantMonitor(record.sample, monitor, record.matchedAt!, target, lifetime.signal, checkpoint?.monitorResult, undefined, round.instantPosition);
       if (lifetime.signal.aborted) throw Error('持仓监测已取消');
       if (result.status === 'error') throw Error(result.reason || '持仓监测行情待重试');
       return result;
@@ -390,7 +390,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       let next = state;
       let lastConsumed = state.through;
       const notices: (() => void)[] = [];
-      const size = { ...input, ...instantMonitorSize(input.monitor), entryPrice: state.entryPrice };
+      const size = { ...input, ...instantMonitorSize(input.monitor, input.instantPosition), entryPrice: state.entryPrice };
       const mode = limitMode();
       for (const bar of bars) {
         if (!next.orders) break;
@@ -555,7 +555,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
           throw Error('原方案已触发卖出');
         }
         if (result.endTime !== target || target !== closedMinute() || lifetime.signal.aborted || hasManualIntent(recordId)) throw Error('最新行情或手动操作等待核对，请稍后再试');
-        const { marginUsdt, leverage } = instantMonitorSize(round.instantMonitor);
+        const { marginUsdt, leverage } = instantMonitorSize(round.instantMonitor, round.instantPosition);
         const sample = instantMonitorSample(record.sample, record.matchedAt!);
         const at = Date.now();
         const next = rebaseInstantMonitor(sample, result, result.initialNotional ?? marginUsdt * leverage, from, monitor, at);

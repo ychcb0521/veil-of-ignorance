@@ -29,8 +29,9 @@ import { FishQualityInfo } from './FishQualityModule';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { hasQualityExit, type QualityGroup } from '@/lib/fish/quality';
 import { holdingVetoDraft, planHoldingVetoDraft, parseHoldingVetoDraft } from '@/lib/fish/qualityFilters';
+import { FishInstantPositionSettings } from './FishInstantPositionSettings';
+import { sizeInstantEntry } from '@/lib/fish/instantPositionSettings';
 import { FishQualityPositionManagement, positionManagementDraft, parsePositionManagement, type PositionManagementDraft } from './FishQualityPositionManagement';
-import { INSTANT_POSITION } from '@/lib/fish/instantMonitorExecution';
 import { qualityPositionSize } from '@/lib/fish/qualityPositionManagement';
 
 const EMPTY_PLANS: readonly QualityGroup[] = [];
@@ -234,6 +235,7 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
     setVisitedPlans(previous=>new Set([...previous,id,activeId??plans[0]?.id].filter((value):value is string=>!!value)));
     onSelect(id);
   };
+  const newSimulationSize = state.instantPosition?.settings ? sizeInstantEntry(state.instantPosition.settings) : undefined;
   const [positions, setPositions] = useState<Record<string, PositionManagementDraft>>({});
   const [drafts,setDrafts]=useState<Record<string,{base:string;draft:MonitorDraft}>>({});
   const baselines=useRef(new Map<string,{base:string;draft:MonitorDraft;serialized:string}>());
@@ -253,7 +255,7 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
     const draft = positions[original.id];
     const isNewPlan = !original.frozenVersions && !plans.some(p => p.id === original.id);
     const positionManagement = draft ? parsePositionManagement(draft)
-      : original.positionManagement ?? (isNewPlan ? parsePositionManagement(positionManagementDraft()) : undefined);
+      : original.positionManagement ?? (isNewPlan ? parsePositionManagement(positionManagementDraft(newSimulationSize)) : undefined);
     const p = positionManagement && !isLegacyQualityPlan(original) ? { ...original, positionManagement } : original;
     // 【用户要求】2026-11-03 旧引擎方案不经过新版监测表单（表单会把加仓改写成箱体），原样保存
     if(p.router){
@@ -296,14 +298,18 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
         return <button type="button" role="tab" key={p.id} data-plan-id={p.id} aria-selected={active?.id===p.id} onClick={()=>choosePlan(p.id)} className={`inline-flex min-h-6 items-center gap-1 rounded px-2 py-1 ${active?.id===p.id?'bg-background font-medium shadow-sm':'text-muted-foreground hover:text-foreground'}`}><span className="text-muted-foreground">{i+1}.</span>{planName(p)}<span title="当前填写中已启用的监测条件数" className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{n} 项条件</span></button>;
       })}</div>}
       {!instant&&savedPlan&&hasQualityExit(savedPlan)&&<button type="button" className={button+' mb-2'} disabled={!state.ready} aria-pressed={state.study.selectedSellId===savedPlan.id} onClick={()=>state.selectSell(savedPlan.id)}>固定此方案，比较探测算法</button>}
-      {active && !isLegacyQualityPlan(active) && <div className="mb-3">
+      <FishInstantPositionSettings key={'position-settings-' + active?.id} control={state.instantPreferenceStatus && state.instantPreferenceStatus !== 'ready' ? undefined : state.instantPosition}
+        onApply={!instant && settingsReady && active && !isLegacyQualityPlan(active) ? settings => {
+          setPositions(current => ({ ...current, [active.id]: positionManagementDraft(sizeInstantEntry(settings)) }));
+        } : undefined}/>
+      {!instant && active && !isLegacyQualityPlan(active) && <div className="mb-3">
         <FishQualityPositionManagement
-          draft={positions[active.id] ?? positionManagementDraft(active.positionManagement ?? (!savedPlan ? undefined : instant ? { leverage: INSTANT_POSITION.leverage, notional: INSTANT_POSITION.leverage * INSTANT_POSITION.marginUsdt } : qualityPositionSize(active)))}
+          draft={positions[active.id] ?? positionManagementDraft(active.positionManagement ?? (!savedPlan ? newSimulationSize : qualityPositionSize(active)))}
           onChange={settingsReady ? draft => setPositions(current => ({ ...current, [active.id]: draft })) : undefined}
           note={savedPlan && !savedPlan.positionManagement && !positions[active.id]
             ? '保存后应用于新运行。' : undefined}/>
         {savedPlan && !savedPlan.positionManagement && !positions[active.id] && <button type="button" className={button}
-          disabled={!settingsReady} onClick={() => setPositions(current => ({ ...current, [active.id]: positionManagementDraft() }))}>采用默认仓位</button>}
+          disabled={!settingsReady} onClick={() => setPositions(current => ({ ...current, [active.id]: positionManagementDraft(newSimulationSize) }))}>采用默认仓位</button>}
       </div>}
       {view.plans.filter(p=>p.router&&(imageCapture||active?.id===p.id||visitedPlans.has(p.id))).map(p=><div key={p.id+':'+JSON.stringify(p.router)} hidden={active?.id!==p.id} data-settings-image-include="">
         <EditableQualityRouter plan={p} ready={settingsReady} controller={controllers.current[p.id]??(controllers.current[p.id]={current:null})} onDirtyChange={setRouterDirtyFlag}/>

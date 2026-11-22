@@ -5,13 +5,13 @@ import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { BriefcaseBusiness, Clock3, Filter, Pause, Pickaxe, Play, Settings2, Zap } from 'lucide-react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import type { FishQualityState } from '@/hooks/useFishQuality';
-import { INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue, type InstantMonitorPlanChoice } from '@/lib/fish/instantMonitorSettings';
+import { instantMonitorTemplateIssue, type InstantMonitorPlanChoice } from '@/lib/fish/instantMonitorSettings';
 import { activeQualityPlanTemplates } from '@/lib/fish/qualityPlanTemplates';
 import { isLegacyQualityPlan } from '@/lib/fish/qualityLegacyEngine';
 import { FishPopoverContent } from './FishPopoverContent';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { replaceQualitySellPlans } from '@/lib/fish/qualitySellPlans';
-import { instantMonitorSize } from '@/lib/fish/instantMonitorExecution';
+import { FishInstantPositionSettings } from './FishInstantPositionSettings';
 import { FishConditionDialogContent, FishConditionSettings } from './FishConditionSettings';
 import { HoldingMonitorSettings } from './FishHoldingMonitorSettings';
 import { FishPreEntrySettings } from './FishPreEntrySettings';
@@ -74,9 +74,9 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
     {saveNotice && <p role="status" className="p-3 text-xs text-muted-foreground">{saveNotice}</p>}
     {error && <p role="alert" className="p-3 text-xs text-destructive">{error}</p>}
   </FishConditionSettings>;
-  const size = instantMonitorSize(choice && { version: INSTANT_TEMPLATE_MONITOR, templateId: choice.id, name: choice.name, plan: choice.plan });
   return <FishConditionSettings dialog title="即时交易 · 买后设置" description="选择自动入选和币安手动开仓使用的监测模板。">
     <div className="space-y-3">
+    <FishInstantPositionSettings control={state.instantPosition}/>
     <label className="block space-y-1.5">
       <span className="block font-medium">持仓监测模板</span>
       <select className="w-full rounded-md border bg-background px-2 py-1.5" value={id} onChange={event => setId(event.target.value)} disabled={saving}>
@@ -88,9 +88,8 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
     </label>
     <p className="text-muted-foreground">{id
       ? '自动入选和已接手的币安手动多仓各自冻结当时的模板，按模板执行加仓、减仓和卖出。'
-      : '40 USDT 保证金、5 倍。CDA-5mins 原始值低于 −10 或 DBL-5-5mins 防守线断裂时，按 5 分钟收盘确认卖出。另有下跌 5% 止损，以及上涨 2% 时卖出原始数量的 71.5%。可在持仓监测模板中选择 CDA-1h 或 DBL-5-1h。'}</p>
+      : 'CDA-5mins 原始值低于 −10 或 DBL-5-5mins 防守线断裂时，按 5 分钟收盘确认卖出。另有下跌 5% 止损，以及上涨 2% 时卖出原始数量的 71.5%。可在持仓监测模板中选择 CDA-1h 或 DBL-5-1h。'}</p>
     {choiceName&&<p className="text-muted-foreground">原名：{choiceName.originalName}</p>}
-    {choice && <p className="text-muted-foreground">首仓名义仓位 {+(size.marginUsdt * size.leverage).toPrecision(12)} USDT · {size.leverage} 倍 · 保证金 {+size.marginUsdt.toPrecision(12)} USDT</p>}
     {saveNotice && <p role="status" className="text-muted-foreground">{saveNotice}</p>}
     {(error || issue) && <p role="alert" className="text-destructive">{error || issue}</p>}
     <div className="sticky bottom-0 -mx-4 flex flex-wrap justify-end gap-2 border-t px-4">
@@ -192,7 +191,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
           <p className="font-medium">币安 U 本位实盘</p>
           <p role="status" className="text-muted-foreground">{follow.connected
             ? follow.paused ? '已暂停开仓和加仓，现有实盘战役继续处理减仓和平仓。' : verifiedExecutor
-              ? '实时新鱼入选后按冻结的买后模板开仓。币安手动仓位须逐笔确认托管。'
+              ? '实时新鱼入选后，按币安可用余额、保证金比例与杠杆确定首仓，买后模板负责持仓监测。币安手动仓位须逐笔确认托管。'
               : '本机执行端待更新。新版页面暂缓发送实盘开仓和加仓，已有仓位可继续减仓和平仓。'
             : follow.issue || '在本机启动执行端，将它生成的配对码填在这里。'}</p>
           <p className="select-all break-all text-muted-foreground">账号 ID {follow.owner}</p>

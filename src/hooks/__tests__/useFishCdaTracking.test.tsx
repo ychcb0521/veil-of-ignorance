@@ -68,7 +68,7 @@ it('stores the switch for one screened fish, reads it after reload, and only eva
     await act(async () => {});
     await act(() => vi.advanceTimersByTimeAsync(2 * minute + 2000));
     expect(readPageInstantMonitor).toHaveBeenLastCalledWith(sample, target, start, start + 4 * minute, expect.any(AbortSignal),
-      expect.objectContaining({ endTime: effectiveAt }));
+      expect.objectContaining({ endTime: effectiveAt }), undefined, undefined);
     expect(preferences.get(instantMonitorCheckpointKey(key))).toMatchObject({ after: start + 4 * minute });
     expect(round.instantMonitor).toEqual(monitor);
   } finally {

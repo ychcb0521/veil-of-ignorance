@@ -10,8 +10,12 @@ import type { InstantMonitorSettings } from './instantMonitorSettings';
 import type { ScreenedCdaTrigger } from './screenedCda';
 import { INSTANT_TEMPLATE_MONITOR } from './instantMonitorSettings';
 
+import { legacyPlanInEngineUnits, legacyResultInPositionUnits } from './instantLegacyPosition';
+import { sizeInstantEntry, type InstantPositionSettings } from './instantPositionSettings';
+
 export const INSTANT_POSITION = { marginUsdt: 40, leverage: 5 } as const;
-export function instantMonitorSize(monitor?: InstantMonitorSettings) {
+export function instantMonitorSize(monitor?: InstantMonitorSettings, position?: InstantPositionSettings) {
+  if (position) return sizeInstantEntry(position);
   if (monitor?.plan.positionManagement && !isLegacyQualityPlan(monitor.plan)) return qualityPositionSize(monitor.plan);
   return isLegacyQualityPlan(monitor?.plan)
     ? { ...INSTANT_POSITION, marginUsdt: QUALITY_NOTIONAL / INSTANT_POSITION.leverage }
@@ -23,21 +27,25 @@ export function instantMonitorSample(sample: QualitySample, buyAt: number): Qual
 }
 
 export async function evaluateInstantMonitor(sample: QualitySample, monitor: InstantMonitorSettings, end: number,
-  load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult, marketStart?: number, liveAt?:number) {
+  load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult, marketStart?: number, liveAt?:number, position?: InstantPositionSettings) {
   const { plan } = monitor;
   if (!plan.frozenVersions?.length || planVersionChanges(plan).length) throw new Error('即时交易的持仓模板执行版本无法核验');
   const tradeLoad = preEntryWindowLoader(load, end);
   if (isLegacyQualityPlan(plan)) {
     if (sample.binanceEntry) throw Error('该历史引擎无法以真实首仓执行');
-    return evaluateLegacyQualitySample(sample, plan, 0, end, tradeLoad, signal, qualityResultKey(sample, plan, 0));
+    const notional = position ? sizeInstantEntry(position).notional : QUALITY_NOTIONAL;
+    const normalized = legacyPlanInEngineUnits(plan, notional / QUALITY_NOTIONAL);
+    const result = await evaluateLegacyQualitySample(sample, normalized, 0, end, tradeLoad, signal, qualityResultKey(sample, plan, 0));
+    return legacyResultInPositionUnits(result, notional);
   }
   const initialized = plan.initialization ? withTuringInitialization(tradeLoad, sample.source.symbol, marketStart ?? NaN) : tradeLoad;
-  const { marginUsdt, leverage } = instantMonitorSize(monitor);
+  const size = instantMonitorSize(monitor, position);
   if (previous?.instantMonitorSwitches && end < previous.endTime!) return previous;
   const notional = previous?.instantMonitorSwitches ? previous.initialNotional! : sample.binanceEntry
-    ? sample.binanceEntry.quantity * sample.binanceEntry.price : plan.positionManagement?.notional ?? marginUsdt * leverage;
+    ? sample.binanceEntry.quantity * sample.binanceEntry.price : 'notional' in size ? size.notional : size.marginUsdt * size.leverage;
   const result = await evaluateQualitySampleWithMarketRepair(sample, plan, 0, end, initialized, signal, previous, notional,liveAt);
-  return initialized.turingInitialization ? { ...result, initialization: initialized.turingInitialization } : result;
+  return { ...result, ...(position ? { initialNotional: notional } : {}),
+    ...(initialized.turingInitialization ? { initialization: initialized.turingInitialization } : {}) };
 }
 
 export function instantMonitorSale(result: QualityResult): ScreenedCdaTrigger {
@@ -47,7 +55,7 @@ export function instantMonitorSale(result: QualityResult): ScreenedCdaTrigger {
 
 export function manualInstantMonitorClose(result: QualityResult, monitor: InstantMonitorSettings, at: number, price: number): QualityResult {
   const { marginUsdt, leverage } = instantMonitorSize(monitor);
-  const position = additionPosition(monitor.plan.positionManagement?.notional ?? marginUsdt * leverage, result.entryPrice!, price, true, qualityAdditionFills(result),
+  const position = additionPosition(result.initialNotional ?? monitor.plan.positionManagement?.notional ?? marginUsdt * leverage, result.entryPrice!, price, true, qualityAdditionFills(result),
     result.mirrorFill, result.additionReductions ?? [], result.entryTime);
   const peakPct = Math.max(result.peakPct ?? 0, (price / result.entryPrice! - 1) * 100);
   return { ...result, status: 'closed', complete: true, evaluatedAt: Date.now(), endTime: at, endPrice: price,

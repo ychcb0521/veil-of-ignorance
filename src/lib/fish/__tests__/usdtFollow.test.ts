@@ -110,6 +110,13 @@ it('requires both realtime capture provenance and a sized, valid frozen template
   expect(rows({ ...round, instantMonitor })[0].liveEntry).toBeUndefined();
   expect(rows({ ...round, liveCapturedAt: at, instantMonitor })[0].liveEntry)
     .toMatchObject({ capturedAt: at, notional: 333, leverage: 7, templateId: 'frozen-plan' });
+  const instantPosition = { version: 1 as const, availableUsdt: 2000, marginPct: 5, leverage: 8 };
+  const paper = { ...round, instantPosition, liveCapturedAt: at, instantMonitor };
+  expect(rows(paper)[0]).toMatchObject({ notional: 800, leverage: 8 });
+  expect(rows(paper)[0].liveEntry).toBeUndefined();
+  const live = { ...paper, instantPosition: { ...instantPosition, availableUsdt: 1234, balanceObservedAt: at } };
+  expect(rows(live)[0].liveEntry).toMatchObject({ notional: 1234 * 0.05 * 8, leverage: 8 });
+  expect(rows({ ...live, liveCapturedAt: undefined })[0].liveEntry).toBeUndefined();
   const altered = { ...instantMonitor, plan: { ...plan, positionManagement: { ...plan.positionManagement!, notional: 400 } } };
   expect(rows({ ...round, liveCapturedAt: at, instantMonitor: altered })[0].liveEntry).toBeUndefined();
 });

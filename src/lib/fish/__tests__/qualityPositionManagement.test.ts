@@ -58,4 +58,10 @@ it('freezes the configured sizing, applies it to mirror and stop fills, and carr
   expect(instantMonitorSize(monitor)).toMatchObject({ marginUsdt: 66.6, leverage: 5 });
   const instant = await evaluateInstantMonitor(sample, monitor, entry + 3 * minute, load, new AbortController().signal);
   expect(instant.pnl).toBeCloseTo(result.pnl!);
+  const configured = { version: 1 as const, availableUsdt: 2000, marginPct: 5, leverage: 8 };
+  const sized = await evaluateInstantMonitor(sample, monitor, entry + 3 * minute, load, new AbortController().signal, undefined, undefined, undefined, configured);
+  expect(sized).toMatchObject({ status: 'closed', initialNotional: 800, endPrice: 97 });
+  expect(sized.pnl).toBeCloseTo(-2);
+  expect(sized.mirrorRealizedPnl).toBeCloseTo(10);
+  expect(planVersionChanges(plan)).toEqual([]);
 });

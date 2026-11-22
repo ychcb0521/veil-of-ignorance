@@ -34,6 +34,20 @@ it('opens the separate verified instant settings while research and screening ar
   expect(screen.getByRole('combobox')).toBeEnabled();
   expect(screen.getByRole('button',{name:'保存设置'})).toBeEnabled();
 });
+it('edits position sizing inside after-buy settings and resets only simulated capital', async () => {
+  const save = vi.fn().mockResolvedValue(undefined);
+  render(view(setup({instantPreferenceStatus:'ready', instantPosition: {settings:{version:1,availableUsdt:1234,marginPct:5,leverage:8},save}})));
+  openAfter();
+  expect(screen.getByRole('checkbox',{name:'仓位设置'})).not.toBeChecked();
+  fireEvent.click(screen.getByRole('checkbox',{name:'仓位设置'}));
+  fireEvent.change(screen.getByLabelText('模拟可用资金（USDT）'),{target:{value:'2000'}});
+  expect(screen.getByText(/模拟首仓保证金 100 USDT · 首仓名义仓位 800 USDT/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button',{name:'重置模拟资金'}));
+  fireEvent.click(screen.getByRole('button',{name:'保存仓位设置'}));
+  expect(await screen.findByText('仓位设置已保存，下次入选时生效。')).toBeVisible();
+  expect(save).toHaveBeenCalledWith({version:1,availableUsdt:800,marginPct:5,leverage:8});
+});
+
 it('exposes a retry without an editable default when instant settings could not be read', () => {
   const retry=vi.fn();
   render(view(setup({instantPreferenceStatus:'error',retryInstantPreferences:retry})));

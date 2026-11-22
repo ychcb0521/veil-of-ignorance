@@ -268,13 +268,13 @@ export class FishScanner {
   }
 
   async trackInstantMonitor(sample: QualitySample, monitor: InstantMonitorSettings, buyAt: number,
-    target: number, signal: AbortSignal, previous?: QualityResult, exchangeAt?: number) {
+    target: number, signal: AbortSignal, previous?: QualityResult, exchangeAt?: number, position?: import('./fish/instantPositionSettings').InstantPositionSettings) {
     return this.instant(signal, async signal => {
       const { symbol } = sample.source;
       const { now, load, marketEnd, marketStart } = await this.qualityMarket([symbol], signal);
       const end = Math.min(target, await marketEnd?.(symbol) ?? now);
       const start = monitor.plan.initialization ? await marketStart?.(symbol) : undefined;
-      return evaluateInstantMonitor(instantMonitorSample(sample, buyAt), monitor, end, load, signal, previous, start,exchangeAt??Date.now());
+      return evaluateInstantMonitor(instantMonitorSample(sample, buyAt), monitor, end, load, signal, previous, start,exchangeAt??Date.now(),position);
     });
   }
 
