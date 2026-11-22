@@ -18,6 +18,14 @@ export const fullBrowseKey=(scope:BrowseScope,revisions:Record<string,string>)=>
 export const filterDetectorCatalogKey=(revisions:Record<string,string>)=>fullBrowseKey('filter',revisions)+'/detectors-v1';
 export const browsePageKey = (hash: string) => prefix + 'page/' + hash;
 type Entry = {key: string; revision: string | null; removed: string | null; document: unknown};
+class BrowseReadError extends Error {
+  readonly transient:boolean;
+  constructor(status:number,code?:string) {
+    const detail=status?`HTTP ${status}`:code&&/^[A-Z0-9_]{1,20}$/.test(code)?code:'网络连接失败';
+    super(`目录读取失败（${detail}），请重试`);
+    this.transient=status===0||status===429||status>=500;
+  }
+}
 function validGroup(group: BrowseGroup) {
   return group && typeof group.id === 'string' && typeof group.title === 'string' && Number.isFinite(group.at) &&
     Number.isSafeInteger(group.count) && group.count >= 0 && Array.isArray(group.pages) &&
@@ -29,8 +37,8 @@ async function read(owner: string, scope: BrowseScope, key: string, signal: Abor
   const columns:string='key,revision:value->>rev,removed:value->>deleted,document:value->browse';
   const query = supabase.from('user_sim_state').select(columns)
     .eq('user_id',owner).in('key',[key,...extra,...guards[scope]]);
-  const {data,error} = await query.abortSignal(signal);
-  if(error) throw Error('近期记录读取失败，请重试');
+  const {data,error,status} = await query.abortSignal(signal);
+  if(error) throw new BrowseReadError(status??0,error.code);
   const rows = new Map(((data ?? []) as unknown as Entry[]).map(row => [row.key,row]));
   return {rows, doc:rows.get(key)?.document};
 }
@@ -54,10 +62,22 @@ export async function readBrowseCatalog(owner:string,scope:BrowseScope,signal:Ab
   };
   const catalog=validate(result.doc,result.rows);
   const revisions=revisionsOf(scope,result.rows);
-  if(!revisions||scope!=='filter'&&catalog&&!catalog.recent)return catalog;
+  if(!revisions||catalog&&!catalog.recent&&(scope!=='filter'||catalog.detectorPreview))return catalog;
   const fullKey=fullBrowseKey(scope,revisions),recentKey=recentBrowseKey(scope,revisions);
   const detectorKey=scope==='filter'?filterDetectorCatalogKey(revisions):undefined;
-  const next=await read(owner,scope,fullKey,signal,detectorKey?[recentKey,detectorKey]:[recentKey]);
+  let next:Awaited<ReturnType<typeof read>>;
+  const optional=catalog&&!catalog.recent?new AbortController():undefined;
+  const timer=optional?setTimeout(()=>optional.abort(),3000):undefined;
+  try {
+    next=await read(owner,scope,fullKey,optional?AbortSignal.any([signal,optional.signal]):signal,detectorKey?[recentKey,detectorKey]:[recentKey]);
+  } catch(cause) {
+    // The optional rich preview must not make an already verified complete
+    // directory unavailable. Page reads still recheck every revision guard.
+    if(catalog&&!catalog.recent&&!signal.aborted&&cause instanceof BrowseReadError&&cause.transient)return catalog;
+    throw cause;
+  } finally {
+    clearTimeout(timer);
+  }
   const enhanced=detectorKey&&validate(next.rows.get(detectorKey)?.document,next.rows);
   if(enhanced?.detectorPreview)return enhanced;
   if(catalog&&!catalog.recent)return validate(catalog,next.rows);

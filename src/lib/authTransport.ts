@@ -1,6 +1,7 @@
 /** Bound auth connection + body reads. Other database/storage requests retain their existing behavior. */
 import {authGatewayUrl,instantCampaignGatewayUrl,INSTANT_CAMPAIGN_HEADER,productionAuthOrigin} from './authGateway';
 import {authServiceFailure} from './authErrorText';
+import {fetchLibraryRead} from './libraryReadTransport';
 /** The installed SDK serializes a 5xx Response itself instead of reading its
  * JSON body, yielding "{}". Supply a safe message while preserving status,
  * headers and body, so retry/session handling retains its original semantics. */
@@ -44,6 +45,7 @@ export function createAuthFetch(fetcher:typeof fetch=(input,init)=>fetch(input,i
       headers.delete(INSTANT_CAMPAIGN_HEADER);
       const gateway = instantCampaignGatewayUrl(url, siteOrigin);
       if (gateway) {
+        if(libraryRead)return fetchLibraryRead(fetcher,input,{...init,headers},gateway);
         const request = input instanceof Request ? new Request(gateway, input) : gateway;
         return fetcher(request, { ...init, headers, cache: 'no-store', credentials: 'omit' });
       }

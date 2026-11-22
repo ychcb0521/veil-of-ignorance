@@ -173,7 +173,7 @@ export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSele
       if(!active)return;
       if(result)setDirectory(result);
       else setIssue('当前版本尚无独立目录，可载入完整库。');
-    },()=>{if(active)setIssue('目录读取失败');}).finally(()=>clearTimeout(timer));
+    },cause=>{if(active)setIssue(controller.signal.aborted?'目录读取超时，请重试':cause instanceof Error?cause.message:'目录读取失败');}).finally(()=>clearTimeout(timer));
     return ()=>{active=false;clearTimeout(timer);controller.abort();};
   },[owner,scope,attempt,historicalOnly,edits]);
   const groups=useMemo(()=>{

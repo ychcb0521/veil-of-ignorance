@@ -119,6 +119,17 @@ vi.mock('@/lib/fish/preEntryPersistence',async original=>({...(await original<ty
 vi.mock('@/lib/fish/historicalScreenBrowse',()=>({rebuildHistoricalScreenCatalog:calls.rebuild}));
 afterEach(()=>{cleanup();vi.resetAllMocks();vi.unstubAllGlobals();});
 
+it('shows the safe directory failure reason and retries metadata without loading a full archive or records',async()=>{
+  calls.directory.mockRejectedValueOnce(Error('目录读取失败（HTTP 503），请重试'))
+    .mockResolvedValueOnce({groups:[{id:'retry',title:'已恢复目录',at:1,count:1,pages:['page']}]});
+  render(<FishArchiveBrowse owner="alice" scope="filter" query="" selectBeforeLoad/>);
+  expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 503');
+  fireEvent.click(screen.getByRole('button',{name:'重新读取目录'}));
+  expect(await screen.findByRole('button',{name:/已恢复目录/})).toBeVisible();
+  expect(calls.directory).toHaveBeenCalledTimes(2);
+  expect(calls.body).not.toHaveBeenCalled();expect(calls.rebuild).not.toHaveBeenCalled();
+});
+
 it('falls back from an empty local index and rebuilds missing v5 history only on demand',async()=>{
   vi.stubGlobal('indexedDB',{});
   calls.local.mockResolvedValue({id:'empty',groups:[]});
