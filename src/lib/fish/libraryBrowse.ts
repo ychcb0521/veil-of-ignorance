@@ -7,12 +7,14 @@ const guards: Record<BrowseScope, string[]> = {
   screen: ['idb:pre-entry-monitor-v5', 'idb:pre-entry-table-clears-v1', 'idb:fish-quality'],
 };
 export type BrowseRow = [symbol: string, signalTime: number, detail: string, recordId: string, detectors?:import('./filterDetectorReadings').FilterDetectorReading[]];
-export interface BrowseGroup { id: string; title: string; at: number; count: number; pages: string[]; }
+export interface BrowseGroup { id: string; title: string; at: number; count: number; pages: string[]; children?:BrowseGroup[]; }
 export interface BrowseCatalog {
-  detectorPreview?:boolean; recent?: boolean; version: 1; owner: string; scope: BrowseScope; revisions: Record<string,string>; groups: BrowseGroup[];
+  miningSeries?:boolean; detectorPreview?:boolean; recent?: boolean; version: 1; owner: string; scope: BrowseScope; revisions: Record<string,string>; groups: BrowseGroup[];
 }
 const prefix = 'idb:fish-library-browse-v1/';
 export const browseCatalogKey = (scope: BrowseScope) => prefix + scope;
+export const miningSeriesCatalogKey=()=>browseCatalogKey('mining')+'/series-v1';
+export const miningSeriesRevisionKey=(revisions:Record<string,string>)=>fullBrowseKey('mining',revisions)+'/series-v1';
 export const recentBrowseKey=(scope:BrowseScope,revisions:Record<string,string>)=>prefix+'recent/'+scope+'/'+guards[scope].map(key=>encodeURIComponent(revisions[key])).join('/');
 export const fullBrowseKey=(scope:BrowseScope,revisions:Record<string,string>)=>recentBrowseKey(scope,revisions).replace('/recent/','/full/');
 export const filterDetectorCatalogKey=(revisions:Record<string,string>)=>fullBrowseKey('filter',revisions)+'/detectors-v1';
@@ -26,10 +28,11 @@ class BrowseReadError extends Error {
     this.transient=status===0||status===429||status>=500;
   }
 }
-function validGroup(group: BrowseGroup) {
+function validGroup(group: BrowseGroup,depth=0):boolean {
   return group && typeof group.id === 'string' && typeof group.title === 'string' && Number.isFinite(group.at) &&
     Number.isSafeInteger(group.count) && group.count >= 0 && Array.isArray(group.pages) &&
-    group.pages.every(hash => /^[a-f0-9]{64}$/.test(hash));
+    group.pages.every(hash => /^[a-f0-9]{64}$/.test(hash)) &&
+    (group.children===undefined||depth===0&&Array.isArray(group.children)&&group.children.every(child=>validGroup(child,1))&&new Set(group.children.map(child=>child.id)).size===group.children.length);
 }
 async function read(owner: string, scope: BrowseScope, key: string, signal: AbortSignal, extra:string[] = []) {
   // Project only the revision from archive heads. Each directory/page and all its
@@ -54,17 +57,19 @@ export async function readBrowseRevisions(owner:string,scope:BrowseScope,signal:
   return revisionsOf(scope,(await read(owner,scope,browseCatalogKey(scope),signal)).rows);
 }
 export async function readBrowseCatalog(owner:string,scope:BrowseScope,signal:AbortSignal) {
-  const result=await read(owner,scope,browseCatalogKey(scope),signal);
+  const result=await read(owner,scope,browseCatalogKey(scope),signal,scope==='mining'?[miningSeriesCatalogKey()]:[]);
   const validate=(doc:unknown,rows:Map<string,Entry>)=>{
     const catalog=doc as BrowseCatalog|undefined;
     if(catalog?.owner===owner&&catalog.scope===scope&&catalog.version===1&&current(scope,catalog.revisions,rows)&&
-      Array.isArray(catalog.groups)&&catalog.groups.every(validGroup))return catalog;
+      Array.isArray(catalog.groups)&&catalog.groups.every(group=>validGroup(group)))return catalog;
   };
+  const series=scope==='mining'&&validate(result.rows.get(miningSeriesCatalogKey())?.document,result.rows);
+  if(series?.miningSeries&&!series.recent)return series;
   const catalog=validate(result.doc,result.rows);
   const revisions=revisionsOf(scope,result.rows);
   if(!revisions||catalog&&!catalog.recent&&(scope!=='filter'||catalog.detectorPreview))return catalog;
   const fullKey=fullBrowseKey(scope,revisions),recentKey=recentBrowseKey(scope,revisions);
-  const detectorKey=scope==='filter'?filterDetectorCatalogKey(revisions):undefined;
+  const detectorKey=scope==='filter'?filterDetectorCatalogKey(revisions):scope==='mining'?miningSeriesRevisionKey(revisions):undefined;
   let next:Awaited<ReturnType<typeof read>>;
   const optional=catalog&&!catalog.recent?new AbortController():undefined;
   const timer=optional?setTimeout(()=>optional.abort(),3000):undefined;
@@ -79,7 +84,7 @@ export async function readBrowseCatalog(owner:string,scope:BrowseScope,signal:Ab
     clearTimeout(timer);
   }
   const enhanced=detectorKey&&validate(next.rows.get(detectorKey)?.document,next.rows);
-  if(enhanced?.detectorPreview)return enhanced;
+  if(enhanced&&(scope==='mining'?enhanced.miningSeries:enhanced.detectorPreview))return enhanced;
   if(catalog&&!catalog.recent)return validate(catalog,next.rows);
   const saved=validate(next.doc,next.rows)??validate(next.rows.get(recentKey)?.document,next.rows)??validate(catalog,next.rows);
   if(saved||scope==='filter')return saved;
@@ -88,7 +93,7 @@ export async function readBrowseCatalog(owner:string,scope:BrowseScope,signal:Ab
   return validate(data,next.rows);
 }
 export async function readBrowsePage(catalog: BrowseCatalog, hash: string, signal: AbortSignal): Promise<BrowseRow[]> {
-  if(!catalog.groups.some(group=>group.pages.includes(hash)))throw Error('该页不在当前目录内');
+  if(!catalog.groups.some(group=>group.pages.includes(hash)||group.children?.some(child=>child.pages.includes(hash))))throw Error('该页不在当前目录内');
   const {rows,doc} = await read(catalog.owner,catalog.scope,browsePageKey(hash),signal);
   if(!current(catalog.scope,catalog.revisions,rows))throw Error('目录已更新，请重新读取');
   const packed=(doc as {gzip?:unknown}|null)?.gzip;

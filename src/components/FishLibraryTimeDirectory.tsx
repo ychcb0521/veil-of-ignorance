@@ -22,6 +22,7 @@ import {qualityComparisonRows,type FishQualityStudy,type QualityResult} from '@/
 import {combineDirectoryStudies} from '@/lib/fish/qualityDirectorySelection';
 
 export interface FishDirectoryItem {
+  children?:FishDirectoryItem[];
   id:string; at:number; label:string; summary:string; note?:string; sourceRoundId?:string;
   revision?:unknown;
   renderStudy?:(study:FishQualityStudy,close:()=>void)=>ReactNode;
@@ -170,7 +171,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const roundsView=canSwitchView&&(browseByRound??(confirmBodyLoad||browseArchive?.scope==='screen'||trashScope!=='monitor'&&items.some(item=>!edits?.[item.id]?.hidden&&
     (!!edits?.[item.id]?.name||!item.templateGroup?.savedTemplate))));
   const templateView=kind==='template'&&!!renderTemplate&&!picker&&!manage&&!purgeMode&&!showDeleted&&!roundsView;
-  const selected=items.find(item=>item.id===selectedId&&(showDeleted||!edits?.[item.id]?.hidden)),itemRef=useRef(selected);itemRef.current=selected;
+  const selected=items.flatMap(item=>[item,...(item.children??[])]).find(item=>item.id===selectedId&&(showDeleted||!edits?.[item.id]?.hidden)),itemRef=useRef(selected);itemRef.current=selected;
   const openCallback=useRef(onOpenChange);openCallback.current=onOpenChange;const requestRef=useRef(openRequest);requestRef.current=openRequest;
   useEffect(()=>{const request=requestRef.current;if(request){setPicked(undefined);selectionEpoch.current++;setCatalogOwner(browseArchive?.directoryOnly?browseArchive.owner:undefined);setOpen(true);setImportSelection(!!request.importSelection);if(request.importSelection)setBrowseByRound(true);if(request.selectedId||request.selectedIds!==undefined)setManage(true);setSelectedId(request.selectedId??'');setBodyId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
   useEffect(()=>{
@@ -217,7 +218,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
     const group=item.templateGroup;
     if(templateView&&!group?.savedTemplate)return false;
     if((roundsView||searchAlgorithms)&&query){
-      const fields=[item.id,edits?.[item.id]?.name,item.label,formatUTC8(item.at),group?.title,group?.originalTitle];
+      const fields=[item.id,edits?.[item.id]?.name,item.label,formatUTC8(item.at),group?.title,group?.originalTitle,...(item.children??[]).map(child=>child.label)];
       if(!fields.some(field=>field&&normalizeTemplateQuery(field).includes(query)))return false;
     }
     return compactDirectory ? hidden===showDeleted : showDeleted||!hidden;
@@ -337,11 +338,12 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const settingsEntry = (item: FishDirectoryItem): DirectorySettingsEntry[] => item.settings ? [{
     id:item.id, name:formatUTC8(item.at)+' '+(edits?.[item.id]?.name||item.label), load:item.settings,
   }] : [];
-  const renderItem = (item: FishDirectoryItem) => <div key={item.id} className={'group/archive rounded-lg border border-border/60 '+(edits?.[item.id]?.hidden?'opacity-60':'')} data-testid={prefix+'-archive-item'}>
-          <div className="flex items-center">{(onSelectDirectory||purgeMode)&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||confirmPurge||(purgeMode ? !item.purgeable : !!edits?.[item.id]?.hidden)} checked={checkedSet.has(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={selectedId===item.id} onClick={()=>{setPicked(undefined);setBodyId('');setSelectedId(selectedId===item.id?'':item.id);}}><ChevronDown className={'h-3 w-3 '+(selectedId===item.id?'rotate-180':'')}/>{kind!=='algorithm'&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span>{roundsView&&browseArchive?.scope==='screen'&&item.templateGroup&&<span>{item.templateGroup.title}</span>}<span className="text-muted-foreground">{item.summary}</span></button>
-            {trashOwner&&!picker&&!edits?.[item.id]?.hidden&&<DirectoryDeleteButton item={{id:item.id,at:item.at,title:edits?.[item.id]?.name||item.label}} onChoose={setTrashSelection}/>}
+  const expandedItem=(item:FishDirectoryItem)=>selectedId===item.id||!!item.children?.some(child=>selectedId===child.id);
+  const renderItem = (item: FishDirectoryItem,nested=false):ReactNode => <div key={item.id} className={'group/archive rounded-lg border border-border/60 '+(edits?.[item.id]?.hidden?'opacity-60':'')} data-testid={prefix+'-archive-item'}>
+          <div className="flex items-center">{!nested&&(onSelectDirectory||purgeMode)&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||confirmPurge||(purgeMode ? !item.purgeable : !!edits?.[item.id]?.hidden)} checked={checkedSet.has(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={expandedItem(item)} onClick={()=>{setPicked(undefined);setBodyId('');setSelectedId(expandedItem(item)?'':item.id);}}><ChevronDown className={'h-3 w-3 '+(expandedItem(item)?'rotate-180':'')}/>{kind!=='algorithm'&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span>{roundsView&&browseArchive?.scope==='screen'&&item.templateGroup&&<span>{item.templateGroup.title}</span>}<span className="text-muted-foreground">{item.summary}</span></button>
+            {!nested&&trashOwner&&!picker&&!edits?.[item.id]?.hidden&&<DirectoryDeleteButton item={{id:item.id,at:item.at,title:edits?.[item.id]?.name||item.label}} onChoose={setTrashSelection}/>}
             {item.settings&&<FishDirectorySettingsButton name={settingsEntry(item)[0].name} entries={settingsEntry(item)} disabled={!!busy}/>}
-            {(onSetHidden||onRename||onDeleteRecords)&&<DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={'管理'+noun+' '+item.id} disabled={loading||!!loadError||!!busy} className="mr-2 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted group-hover/archive:opacity-100 group-focus-within/archive:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"><MoreHorizontal className="h-3.5 w-3.5"/></button></DropdownMenuTrigger><DropdownMenuContent align="end">{onRename&&<DropdownMenuItem onSelect={()=>{setEditingId(item.id);setDraftName(edits?.[item.id]?.name??'');setDeleteId('');setError('');}}><Pencil className="mr-2 h-3 w-3"/>编辑名称</DropdownMenuItem>}{onDeleteRecords&&<DropdownMenuItem className="text-destructive" onSelect={()=>onDeleteRecords(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录记录</DropdownMenuItem>}{onSetHidden&&(!trashOwner||edits?.[item.id]?.hidden)&&(edits?.[item.id]?.hidden?<DropdownMenuItem onSelect={()=>void hide(item.id,false)}><Undo2 className="mr-2 h-3 w-3"/>恢复目录</DropdownMenuItem>:<DropdownMenuItem className="text-destructive" onSelect={()=>setDeleteId(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
+            {!nested&&(onSetHidden||onRename||onDeleteRecords)&&<DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={'管理'+noun+' '+item.id} disabled={loading||!!loadError||!!busy} className="mr-2 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted group-hover/archive:opacity-100 group-focus-within/archive:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"><MoreHorizontal className="h-3.5 w-3.5"/></button></DropdownMenuTrigger><DropdownMenuContent align="end">{onRename&&<DropdownMenuItem onSelect={()=>{setEditingId(item.id);setDraftName(edits?.[item.id]?.name??'');setDeleteId('');setError('');}}><Pencil className="mr-2 h-3 w-3"/>编辑名称</DropdownMenuItem>}{onDeleteRecords&&<DropdownMenuItem className="text-destructive" onSelect={()=>onDeleteRecords(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录记录</DropdownMenuItem>}{onSetHidden&&(!trashOwner||edits?.[item.id]?.hidden)&&(edits?.[item.id]?.hidden?<DropdownMenuItem onSelect={()=>void hide(item.id,false)}><Undo2 className="mr-2 h-3 w-3"/>恢复目录</DropdownMenuItem>:<DropdownMenuItem className="text-destructive" onSelect={()=>setDeleteId(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
           </div>
           {editingId===item.id&&<form className="flex flex-wrap items-center gap-2 border-t px-3 py-3 text-[11px]" onSubmit={e=>{e.preventDefault();void rename();}}>
             <label className="flex min-w-0 flex-1 items-center gap-2">目录名称<input autoFocus aria-label="目录名称" className="h-8 min-w-40 flex-1 rounded-md border bg-background px-2 text-xs" value={draftName} maxLength={DIRECTORY_NAME_MAX_LENGTH} placeholder={item.label} disabled={loading||!!loadError||!!busy} onChange={e=>setDraftName(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'&&!busy){e.stopPropagation();setEditingId('');}}}/></label>
@@ -349,6 +351,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             <p className="w-full text-muted-foreground">留空保存可恢复默认名称；原保存时间和目录内容保留。</p>
           </form>}
           {deleteId===item.id&&<div role="alert" className="flex flex-wrap items-center gap-2 border-t px-3 py-2 text-[11px]"><span>删除这项目录？可在已删除目录中恢复。</span><button type="button" disabled={loading||!!loadError||!!busy} className={action+' text-destructive'} onClick={()=>void hide(item.id,true)}>确认删除目录</button><button type="button" className={action} onClick={()=>setDeleteId('')}>取消</button></div>}
+          {item.children&&expandedItem(item)&&<div className="space-y-2 border-t p-2">{item.children.map(child=>renderItem(child,true))}</div>}
           {selectedId===item.id&&confirmBodyLoad&&bodyId!==item.id&&<div className="border-t px-4 py-2">
             <button type="button" className={action} onClick={()=>setBodyId(item.id)}>载入所选目录</button>
           </div>}
@@ -466,9 +469,9 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             </div>
             {expanded&&(templateView&&renderTemplate?<div className="min-w-0" data-testid={prefix+'-template-content'}>
               <FishTemplateDirectoryTable key={group.id} importSelection={importSelection||!!workspaceImport&&!picker} members={members} renderTemplate={renderTemplate} close={()=>changeOpen(false)}/>
-            </div>:<div className="space-y-2 p-2">{members.map(renderItem)}</div>)}
+            </div>:<div className="space-y-2 p-2">{members.map(item=>renderItem(item))}</div>)}
           </section>;
-        }):visible.map(renderItem)}
+        }):visible.map(item=>renderItem(item))}
         {more}
       </div></>}
       </div>

@@ -7,6 +7,24 @@ import {importQualityWorkspaceRows} from '@/lib/fish/qualityWorkspace';
 import {FishArchiveBrowse} from '../FishArchiveBrowse';
 import type {BrowseRow,BrowseScope} from '@/lib/fish/libraryBrowse';
 
+it('expands mining families without reading bodies, loads only a selected subtype and imports checked information',async()=>{
+  calls.directory.mockResolvedValue({miningSeries:true,groups:[{id:'family',title:'BSS 系列',at:1,count:2,pages:[],children:[
+    {id:'raw',title:'原值',at:0,count:0,pages:[]},{id:'avg',title:'avg',at:1,count:1,pages:['avg-page']},{id:'avg2',title:'avg-2',at:1,count:2,pages:['avg2-page']},
+  ]}]});
+  calls.body.mockResolvedValue([['BTCUSDT',1,'avg_BSS_2 0','chosen'],['UNPICKED',2,'avg_BSS_2 1','other']]);
+  const pick=vi.fn(),onDelete=vi.fn();
+  render(<FishArchiveBrowse owner="alice" scope="mining" query="" selectBeforeLoad legacySelection pickRecords onSelectRecords={pick} onDelete={onDelete}/>);
+  fireEvent.click(await screen.findByRole('button',{name:/^BSS 系列 ·/}));
+  expect(screen.getByRole('button',{name:'原值 0 条'})).toBeVisible();expect(calls.body).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'avg-2 2 条'}));expect(calls.body).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'载入所选目录'}));
+  fireEvent.click(await screen.findByRole('checkbox',{name:/勾选 BTCUSDT/}));fireEvent.click(screen.getByRole('button',{name:'导入至组合表'}));
+  expect(calls.body.mock.calls.map(call=>call[1])).toEqual(['avg2-page']);
+  expect(pick).toHaveBeenCalledWith('avg2',new Set(['chosen']),[['BTCUSDT',1,'avg_BSS_2 0','chosen']]);
+  fireEvent.click(screen.getByRole('button',{name:'原值 0 条'}));expect(screen.getByText('本目录没有记录')).toBeVisible();
+  expect(calls.body).toHaveBeenCalledOnce();
+});
+
 it.each([{picker:true,readyBeforeClick:false},{picker:false,readyBeforeClick:false},{picker:false,readyBeforeClick:true}])('imports checked information directly without loading the original archive or workspace (%j)',async({picker,readyBeforeClick})=>{
   calls.directory.mockResolvedValue({detectorPreview:true,groups:[
     {id:'one',title:'BSS 95',at:1,count:536,pages:['a']},

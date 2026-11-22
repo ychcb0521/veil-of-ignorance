@@ -1,5 +1,6 @@
 import {miningHitSnapshots,miningFamilySnapshot,capturedReading} from './libraryConditions';
 import {miningAlgorithmFamily} from './miningLibraryDirectory';
+import {miningSeries} from './miningSeries';
 import type {FishMiningRecord,FishMiningRun} from './miningLibrary';
 import type {QualityFilterRecord} from './qualityFilterLibrary';
 import type {BrowseRow} from './libraryBrowse';
@@ -22,6 +23,18 @@ export function miningBrowseRows(record:FishMiningRecord,run?:FishMiningRun) {
   }
   if(!families.size)families.set('未分类',['捕捞信号']);
   return [...families].map(([family,details])=>({family,row:[record.signal.symbol,record.signal.timeMs,details.join(' · '),record.id] as BrowseRow}));
+}
+
+export function miningBrowseSeriesRows(record:FishMiningRecord,run?:FishMiningRun) {
+  const groups=new Map<string,{family:string;series:ReturnType<typeof miningSeries>;details:string[]}>();
+  for(const snapshot of miningHitSnapshots(record,run)){
+    const resolved=miningFamilySnapshot(snapshot),family=miningAlgorithmFamily(resolved),series=miningSeries(snapshot);
+    const key=JSON.stringify([family,series.id]),value=capturedReading(snapshot);
+    const detail=[resolved.featureShort??resolved.featureId??family,resolved.statistic,value.reading??(value.rawReading!=null?'原始值 '+value.rawReading:undefined)].filter(v=>v!=null).join(' ');
+    const group=groups.get(key)??{family,series,details:[]};group.details.push(detail);groups.set(key,group);
+  }
+  if(!groups.size)groups.set('unknown',{family:'未分类',series:{id:'unknown',label:'序列未记录'},details:['捕捞信号']});
+  return [...groups.values()].map(({family,series,details})=>({family,series,row:[record.signal.symbol,record.signal.timeMs,details.join(' · '),record.id] as BrowseRow}));
 }
 
 export function selectedDirectoryRecords<T extends {id:string}>(records:readonly T[], ids:ReadonlySet<string>):T[] {

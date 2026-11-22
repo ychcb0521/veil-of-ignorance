@@ -3,6 +3,7 @@ import {emptyMiningLibrary,miningRecordSignal,type FishMiningLibrary,type FishMi
 import {newQualityStudy,importQualityFish,qualityComparisonRows,qualityMembers,qualityGroupId,qualityMiningEntryKey} from './quality';
 import {fishMetricLabel} from './records';
 import type {FishSnapshot} from './algorithm';
+import {miningSeries,miningSeriesTypes,miningSeriesDirectoryId} from './miningSeries';
 export function miningAlgorithmFamily(snapshot:Pick<FishSnapshot,'featureId'|'featureShort'|'statistic'>):string{
  const text=(snapshot.featureId??snapshot.featureShort??snapshot.statistic??'').toLowerCase().replace(/[_\s-]/g,'');
  const families:[RegExp,string][]=[[/^cbi2|^avgcbi2/,'CBI-2'],[/^cda|^avgcda/,'CDA'],[/^bss|^avgbss/,'BSS'],[/^cba|^avgcba/,'CBA'],[/^cbi|^avgcbi/,'CBI'],[/^state|^s\d*$|^avgstate/,'S'],[/^driftspeed|^dsp|^az$/,'DSP'],[/^dbl5/,'DBL-5'],[/^sbs5/,'SBS-5M'],[/^prs6/,'PRS-6H']];
@@ -21,8 +22,28 @@ export function miningFamilyLibrary(library:FishMiningLibrary,records:FishMining
  const ids=new Set(records.map(r=>r.id)),runIds=new Set(records.map(r=>r.runId));
  return {...emptyMiningLibrary(),runs:library.runs.filter(r=>runIds.has(r.id)),records,anchors:library.anchors.filter(a=>runIds.has(a.runId)).map(a=>({...a,recordIds:a.recordIds.filter(id=>ids.has(id))}))};
 }
+export function miningSeriesDirectories(library:FishMiningLibrary){
+ const runs=new Map(library.runs.map(run=>[run.id,run]));
+ return miningAlgorithmDirectories(library).map(parent=>{
+  const children=new Map(miningSeriesTypes.map(type=>[type.id as string,{id:miningSeriesDirectoryId(parent.id,type.id),series:type.id as string,label:type.label as string,records:[] as FishMiningRecord[]}]));
+  for(const record of parent.records){
+   const seen=new Set<string>();
+   for(const snapshot of miningHitSnapshots(record,runs.get(record.runId))){
+    if(miningAlgorithmFamily(miningFamilySnapshot(snapshot))!==parent.family)continue;
+    const series=miningSeries(snapshot);
+    if(seen.has(series.id))continue;
+    seen.add(series.id);
+    const child=children.get(series.id)??{id:miningSeriesDirectoryId(parent.id,series.id),series:series.id,label:series.label,records:[]};
+    child.records.push(record);children.set(series.id,child);
+   }
+   if(!seen.size){const child=children.get('unknown')??{id:miningSeriesDirectoryId(parent.id,'unknown'),series:'unknown',label:'序列未记录',records:[]};child.records.push(record);children.set('unknown',child);}
+  }
+  return {...parent,children:[...children.values()]};
+ });
+}
 export interface MiningDirectoryEvidence {
  family:string;
+ series?:string;
  records:readonly FishMiningRecord[];
  runs:ReadonlyMap<string,FishMiningRun>;
 }
@@ -34,7 +55,7 @@ export interface MiningDetectorReading {
  percentile?:number;
  sampleCount?:number;
 }
-export function miningReadingsByEntry({family,records,runs}:MiningDirectoryEvidence) {
+export function miningReadingsByEntry({family,series,records,runs}:MiningDirectoryEvidence) {
  const byEntry=new Map<string,MiningDetectorReading[]>();
  const distributions=new Map<string,MiningDetectorReading[]>();
  // A frozen formula can be several KB. Keep it once when identifying comparable series.
@@ -45,7 +66,7 @@ export function miningReadingsByEntry({family,records,runs}:MiningDirectoryEvide
   const readings=byEntry.get(entry)??[];
   for(const member of members){
    const feature=miningFamilySnapshot(member);
-   if(miningAlgorithmFamily(feature)!==family)continue;
+   if(miningAlgorithmFamily(feature)!==family||series&&miningSeries(member).id!==series)continue;
    const metric=fishMetricLabel(member), {reading,rawReading,scale}=capturedReading(member);
    const definition=member.definitionKey??'';
    if(!definitions.has(definition))definitions.set(definition,definitions.size);
@@ -76,9 +97,9 @@ export function miningReadingsByEntry({family,records,runs}:MiningDirectoryEvide
  }
  return byEntry;
 }
-export function miningDirectoryStudy(records:readonly FishMiningRecord[],family:string){
+export function miningDirectoryStudy(records:readonly FishMiningRecord[],family:string,series?:string){
  const out=importQualityFish({...newQualityStudy(0),independentFilters:true,sellPlans:[]},records.map(miningRecordSignal),0,'mined');
- const ids=new Set(records.flatMap(r=>qualityMembers(r.signal).filter(s=>miningAlgorithmFamily(s)===family).map(qualityGroupId)));
+ const ids=new Set(records.flatMap(r=>qualityMembers(r.signal).filter(s=>miningAlgorithmFamily(s)===family&&(!series||miningSeries(s).id===series)).map(qualityGroupId)));
  out.groups=out.groups.filter(g=>ids.has(g.id));out.samples=out.samples.map(s=>({...s,groups:s.groups.filter(id=>ids.has(id))}));
  out.selectedRowIds=qualityComparisonRows(out).map(r=>r.id);return out;
 }

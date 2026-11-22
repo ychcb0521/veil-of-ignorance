@@ -2,15 +2,15 @@ import {retiredDirectoryIds} from './directoryTrash';
 import {supabase} from '@/integrations/supabase/client';
 import {syncedImmutableAccountBlobRevision} from '../accountBlobSync';
 import {runAccountSyncRequest} from '../accountSyncTransport';
-import {browsePageKey,filterDetectorCatalogKey,readBrowseCatalog,readBrowseRevisions,fullBrowseKey,recentBrowseKey,type BrowseRow,type BrowseGroup,type BrowseScope} from './libraryBrowse';
-import {filterBrowseRow,miningBrowseRows} from './libraryBrowseProjection';
+import {browsePageKey,filterDetectorCatalogKey,miningSeriesCatalogKey,miningSeriesRevisionKey,readBrowseCatalog,readBrowseRevisions,fullBrowseKey,recentBrowseKey,type BrowseRow,type BrowseGroup,type BrowseScope} from './libraryBrowse';
+import {filterBrowseRow} from './libraryBrowseProjection';
+import {miningBrowseSeriesGroups,type BrowseGroupRows} from './miningSeriesBrowse';
 import {createFilterDirectoryReader} from './qualityLibraryDirectory';
-import {miningRecordSavedAt} from './libraryDeletion';
 import {readRecentMonitorDirectory} from './qualityRecentLibraryStore';
 import type {FishQualityStudy} from './quality';
 import type {FishMiningLibrary} from './miningLibrary';
 
-type GroupRows={id:string;title:string;at:number;rows:BrowseRow[]};
+type GroupRows=BrowseGroupRows;
 const inflight=new Map<string,Promise<void>>();
 const byTime=(a:BrowseRow,b:BrowseRow)=>b[1]-a[1]||b[3].localeCompare(a[3]);
 const digest=async(raw:Uint8Array<ArrayBuffer>)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',raw)),b=>b.toString(16).padStart(2,'0')).join('');
@@ -26,12 +26,12 @@ export async function writeBrowsePage(owner:string,rows:BrowseRow[],signal?:Abor
  },{bytes:gzip.length,current:()=>!signal?.aborted});
  return saved&&!saved.error?hash:undefined;
 }
-async function publish(owner:string,scope:BrowseScope,revision:string,source:(revisions:Record<string,string>)=>Promise<GroupRows[]|undefined>){
+async function publish(owner:string,scope:BrowseScope,revision:string,source:(revisions:Record<string,string>)=>Promise<GroupRows[]|undefined>,miningSeries=false){
  const key=owner+'|'+scope+'|'+revision;
  if(inflight.has(key))return inflight.get(key);
  const task=(async()=>{
    const existing=await readBrowseCatalog(owner,scope,AbortSignal.timeout(15000));
-   if(existing&&!existing.recent&&(scope!=='filter'||existing.detectorPreview))return;
+   if(existing&&!existing.recent&&(scope!=='filter'||existing.detectorPreview)&&(!miningSeries||existing.miningSeries))return;
    const revisions=await readBrowseRevisions(owner,scope,AbortSignal.timeout(15000));
    if(!revisions)return;
    const main=scope==='filter'?'fish-quality':'fish-mining-library';
@@ -44,6 +44,28 @@ async function publish(owner:string,scope:BrowseScope,revision:string,source:(re
    // Publish immutable pages first. Losing the network cannot expose a partial catalog.
    for(const {rows,...group} of input.sort((a,b)=>b.at-a.at)){
      if(retired.has(group.id))continue;
+     if(group.children){
+       const children:BrowseGroup[]=[];
+       for(const child of group.children){
+         const pages:string[]=[];
+         child.rows.sort(byTime);
+         for(let start=0;start<child.rows.length;start+=350){
+           const hash=await writeBrowsePage(owner,child.rows.slice(start,start+350));
+           if(!hash)return;
+           pages.push(hash);
+         }
+         children.push({id:child.id,title:child.title,at:child.at,count:child.rows.length,pages});
+       }
+       const pages:string[]=[];
+       rows.sort(byTime);
+       for(let start=0;start<rows.length;start+=350){
+         const hash=await writeBrowsePage(owner,rows.slice(start,start+350));
+         if(!hash)return;
+         pages.push(hash);
+       }
+       groups.push({id:group.id,title:group.title,at:group.at,count:rows.length,pages,children});
+       continue;
+     }
      const pages:string[]=[], detectorPages:string[]=[];
      const withDetectors=rows.some(row=>row[4]?.length);
      rows.sort(byTime);
@@ -58,18 +80,28 @@ async function publish(owner:string,scope:BrowseScope,revision:string,source:(re
          detectorPages.push(richHash);
        }
      }
-     groups.push({...group,count:rows.length,pages});
-     if(scope==='filter')detectorGroups.push({...group,count:rows.length,pages:withDetectors?detectorPages:pages});
+     const metadata={id:group.id,title:group.title,at:group.at,count:rows.length};
+     groups.push({...metadata,pages});
+     if(scope==='filter')detectorGroups.push({...metadata,pages:withDetectors?detectorPages:pages});
    }
    const latest=await readBrowseRevisions(owner,scope,AbortSignal.timeout(15000));
    if(JSON.stringify(latest)!==JSON.stringify(revisions)||await syncedImmutableAccountBlobRevision(receipt,owner)!==revision)return;
-   const value={browse:{version:1,scope,owner,revisions,groups}};
-   const catalogs=[fullBrowseKey(scope,revisions),recentBrowseKey(scope,revisions)].map(key=>({user_id:owner,key,value}));
+   const value={browse:{version:1,scope,owner,revisions,groups,...(miningSeries?{miningSeries:true}:{})}};
+   const catalogs=(miningSeries?[miningSeriesRevisionKey(revisions)]:[fullBrowseKey(scope,revisions),recentBrowseKey(scope,revisions)]).map(key=>({user_id:owner,key,value}));
    if(scope==='filter'){
      const browse={...value.browse,detectorPreview:true,groups:detectorGroups};
      catalogs.push({user_id:owner,key:filterDetectorCatalogKey(revisions),value:{browse}});
    }
-   await runAccountSyncRequest(()=>supabase.from('user_sim_state').upsert(catalogs as never,{onConflict:'user_id,key',ignoreDuplicates:true}),{bytes:JSON.stringify(catalogs).length});
+   if(miningSeries){
+     // The existing purge RPC tracks each parent's flat page references. Keep a
+     // reference ledger for child pages without exposing it as a legacy catalog.
+     const references={browse:{groups:groups.map(group=>({id:group.id,pages:[...new Set(group.children?.flatMap(child=>child.pages)??[])]}))}};
+     const saved=await runAccountSyncRequest(()=>supabase.from('user_sim_state').upsert({user_id:owner,key:miningSeriesRevisionKey(revisions)+'/refs',value:references} as never,{onConflict:'user_id,key',ignoreDuplicates:true}),{bytes:JSON.stringify(references).length});
+     if(!saved||saved.error)return;
+   }
+   const saved=await runAccountSyncRequest(()=>supabase.from('user_sim_state').upsert(catalogs as never,{onConflict:'user_id,key',ignoreDuplicates:true}),{bytes:JSON.stringify(catalogs).length});
+   if(!saved||saved.error)return;
+   if(miningSeries)await runAccountSyncRequest(()=>supabase.from('user_sim_state').upsert({user_id:owner,key:miningSeriesCatalogKey(),value} as never,{onConflict:'user_id,key'}),{bytes:JSON.stringify(value).length});
  })().finally(()=>inflight.delete(key));
  inflight.set(key,task);return task;
 }
@@ -91,15 +123,6 @@ export async function publishMiningBrowse(owner:string,library:FishMiningLibrary
    const directory=await readRecentMonitorDirectory(owner);
    if(!directory||directory.sourceRevision!==revisions?.['idb:fish-quality']||
      (await syncedImmutableAccountBlobRevision('fish-mining-deletions-v1',owner)??'')!==revisions['idb:fish-mining-deletions-v1'])return;
-   const groups=new Map<string,GroupRows>(),runs=new Map(library.runs.map(r=>[r.id,r]));
-   for(const record of library.records){
-     for(const {family,row} of miningBrowseRows(record,runs.get(record.runId))){
-       const id='mining-family-'+family,edit=directory.edits?.[id];
-       if(edit?.hidden&&miningRecordSavedAt(record)<=edit.at)continue;
-       const group=groups.get(id)??{id,at:0,title:edit?.name??family+' 系列',rows:[]};
-       group.rows.push(row);group.at=Math.max(group.at,row[1]);groups.set(id,group);
-     }
-   }
-   return [...groups.values()];
- });
+   return miningBrowseSeriesGroups(library,directory.edits);
+ },true);
 }

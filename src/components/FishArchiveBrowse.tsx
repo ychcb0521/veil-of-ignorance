@@ -1,7 +1,7 @@
-import {useEffect,useMemo,useRef,useState} from 'react';
+import {useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {percentilePosition} from '@/lib/fish/filterDetectorReadings';
 import {formatUTC8} from '@/lib/timeFormat';
-import {readBrowseCatalog,readBrowsePage,type BrowseCatalog,type BrowseRow,type BrowseScope} from '@/lib/fish/libraryBrowse';
+import {readBrowseCatalog,readBrowsePage,type BrowseCatalog,type BrowseGroup,type BrowseRow,type BrowseScope} from '@/lib/fish/libraryBrowse';
 import {mergeLibraryDirectoryEdits,type LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {readScreenCatalog,readScreenPage,type LocalScreenCatalog} from '@/lib/fish/preEntryPersistence';
 
@@ -176,7 +176,7 @@ export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSele
     },cause=>{if(active)setIssue(controller.signal.aborted?'目录读取超时，请重试':cause instanceof Error?cause.message:'目录读取失败');}).finally(()=>clearTimeout(timer));
     return ()=>{active=false;clearTimeout(timer);controller.abort();};
   },[owner,scope,attempt,historicalOnly,edits]);
-  const groups=useMemo(()=>{
+  const groups=useMemo<BrowseGroup[]>(()=>{
     if(!directory)return [];
     const local='local' in directory?directory.local:undefined;
     const changes=mergeLibraryDirectoryEdits(local?.edits,edits);
@@ -192,24 +192,31 @@ export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSele
   if(issue)return <><p role="alert" className="text-xs">{issue} <button type="button" className="underline" onClick={reload}>重新读取目录</button></p>{backToLocal||legacyIndex}{scope==='screen'&&<RebuildHistoricalIndex owner={owner} onReady={reload}/>}</>;
   if(!directory)return <p role="status" className="text-xs">正在读取目录…</p>;
   const historical='cloud' in directory&&scope==='screen';
-  const matching=groups.filter(item=>(item.title+' '+item.id+' '+formatUTC8(item.at)).toLowerCase().includes(query.trim().toLowerCase()));
+  const matches=(item:BrowseGroup)=>(item.title+' '+item.id+' '+formatUTC8(item.at)).toLowerCase().includes(query.trim().toLowerCase());
+  const matching=groups.filter(item=>matches(item)||item.children?.some(matches));
+  const renderGroup=(item:BrowseGroup,nested=false):ReactNode=>{
+    const expanded=selected===item.id||!!item.children?.some(child=>child.id===selected);
+    return <div key={item.id} className="rounded border">
+      <div className="flex items-center"><button type="button" aria-expanded={expanded} className="flex w-full items-center justify-between gap-4 p-2 text-left" onClick={()=>{setOpened('');setSelected(expanded?'':item.id);}}>
+        <span>{item.title}{!nested&&<> · {formatUTC8(item.at)}</>}</span><span>{item.count} 条</span>
+      </button>{onDelete&&!nested&&<DirectoryDeleteButton item={item} onChoose={onDelete}/>}</div>
+      {expanded&&<div className="space-y-2 border-t p-2">
+        {item.children?item.children.map(child=>renderGroup(child,true)):<>
+          {selectBeforeLoad&&opened!==item.id&&item.pages.length>0&&<button type="button" className="rounded-md border px-2 py-1 hover:bg-muted"
+            onClick={()=>setOpened(item.id)}>载入所选目录</button>}
+          {onViewDetectors&&'cloud' in directory&&!directory.cloud.detectorPreview&&item.count>0&&<button type="button" className="underline" onClick={()=>onViewDetectors(item.id)}>{legacySelection?'载入旧版完整档案查看探测值和百分位':'查看原始探测值和百分位'}</button>}
+          {onSelectRecords&&!legacySelection&&item.count>0&&<button type="button" className="rounded-md border px-2 py-1 text-primary hover:bg-muted" onClick={()=>onSelectRecords(item.id)}>选取本目录记录</button>}
+          {item.pages.length ? (!selectBeforeLoad||opened===item.id)&&<ArchiveRecords key={JSON.stringify([owner,item.id,'local' in directory?directory.local.id:directory.cloud.revisions,item.pages])}
+            owner={owner} directory={directory} filter={scope==='filter'} pages={item.pages} reload={reload} pick={pickRecords&&onSelectRecords?(ids,rows)=>onSelectRecords(item.id,ids,rows):undefined}/> : <p>{item.count?'该目录尚未建立记录索引':'本目录没有记录'}</p>}
+        </>}
+      </div>}
+    </div>;
+  };
   return <section aria-label="归档记录浏览" className="space-y-2 text-xs">
     <p className="text-muted-foreground">{'local' in directory?'本机 v6 筛选快照':historical?'账号 v5 历史筛选归档':'账号归档'} · {groups.length} 个目录{'cloud' in directory&&directory.cloud.recent?' · 近期索引，每项目录最多显示 100 条':''}</p>
     {'local' in directory&&<button type="button" className="underline" onClick={()=>switchSource(true)}>查看 v5 历史目录</button>}
     {historical&&(backToLocal||legacyIndex)}
-    {matching.map(item=><div key={item.id} className="rounded border">
-      <div className="flex items-center"><button type="button" aria-expanded={selected===item.id} className="flex w-full items-center justify-between gap-4 p-2 text-left" onClick={()=>{setOpened('');setSelected(selected===item.id?'':item.id);}}>
-        <span>{item.title} · {formatUTC8(item.at)}</span><span>{item.count} 条</span>
-      </button>{onDelete&&<DirectoryDeleteButton item={item} onChoose={onDelete}/>}</div>
-      {selected===item.id&&<div className="space-y-2 border-t p-2">
-        {selectBeforeLoad&&opened!==item.id&&item.pages.length>0&&<button type="button" className="rounded-md border px-2 py-1 hover:bg-muted"
-          onClick={()=>setOpened(item.id)}>载入所选目录</button>}
-        {onViewDetectors&&'cloud' in directory&&!directory.cloud.detectorPreview&&item.count>0&&<button type="button" className="underline" onClick={()=>onViewDetectors(item.id)}>{legacySelection?'载入旧版完整档案查看探测值和百分位':'查看原始探测值和百分位'}</button>}
-        {onSelectRecords&&!legacySelection&&item.count>0&&<button type="button" className="rounded-md border px-2 py-1 text-primary hover:bg-muted" onClick={()=>onSelectRecords(item.id)}>选取本目录记录</button>}
-        {item.pages.length ? (!selectBeforeLoad||opened===item.id)&&<ArchiveRecords key={JSON.stringify([owner,item.id,'local' in directory?directory.local.id:directory.cloud.revisions,item.pages])}
-          owner={owner} directory={directory} filter={scope==='filter'} pages={item.pages} reload={reload} pick={pickRecords&&onSelectRecords?(ids,rows)=>onSelectRecords(item.id,ids,rows):undefined}/> : <p>{item.count?'该目录尚未建立记录索引':'本轮没有记录'}</p>}
-      </div>}
-    </div>)}
+    {matching.map(item=>renderGroup(item))}
     {!matching.length&&<p>{groups.length?'没有匹配的归档目录。':'这个版本尚无可显示的归档目录。'}</p>}
   </section>;
 }

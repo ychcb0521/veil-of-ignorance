@@ -46,10 +46,10 @@ export function FishWorkspaceRows(props:WorkspaceRowsProps){
   return renderBoard?renderBoard(props):<StandaloneWorkspaceRows {...props}/>;
 }
 export function useDirectoryDetectorReadings(mining?:MiningDirectoryEvidence, samples?:FishQualityStudy['samples']){
-  const {family,records,runs}=mining??{};
+  const {family,series,records,runs}=mining??{};
   const filterRecords=useContext(FilterDetectorContext);
   return useMemo(()=>{
-    if(family&&records&&runs)return miningReadingsByEntry({family,records,runs});
+    if(family&&records&&runs)return miningReadingsByEntry({family,series,records,runs});
     if(!filterRecords&&!samples?.some(sample=>sample.directoryInformation?.detectors?.length))return;
     const byEntry=new Map<string,FilterDetectorReading[]>();
     for(const sample of samples??[]){
@@ -64,7 +64,7 @@ export function useDirectoryDetectorReadings(mining?:MiningDirectoryEvidence, sa
       list.push(...filterDetectorReadings(record));byEntry.set(key,list);
     }
     return byEntry;
-  },[family,records,runs,filterRecords,samples]);
+  },[family,series,records,runs,filterRecords,samples]);
 }
 function StandaloneWorkspaceRows({snapshot,onImport,onDone,mining,prepareImport,initiallySelected=false}:WorkspaceRowsProps){
   const [query,setQuery] = useState('');

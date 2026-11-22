@@ -2,7 +2,7 @@
 import {gzipSync} from 'node:zlib';
 import {createHash} from 'node:crypto';
 import {expect,it,vi,beforeEach,afterEach} from 'vitest';
-import {browseCatalogKey,filterDetectorCatalogKey,fullBrowseKey,recentBrowseKey,browsePageKey,readBrowseCatalog,readBrowsePage,type BrowseCatalog} from '../libraryBrowse';
+import {browseCatalogKey,miningSeriesCatalogKey,filterDetectorCatalogKey,fullBrowseKey,recentBrowseKey,browsePageKey,readBrowseCatalog,readBrowsePage,type BrowseCatalog} from '../libraryBrowse';
 
 const mock=vi.hoisted(()=>({rows:new Map<string,unknown>(),requests:[] as string[][],owner:'a',compatible:vi.fn(),failure:vi.fn()}));
 vi.mock('@/integrations/supabase/client',()=>({supabase:{rpc:()=>({abortSignal:mock.compatible}),from:()=>({select:()=>({
@@ -93,4 +93,18 @@ it('rejects a directory when a successful optional read observes a newer source 
   mock.failure.mockImplementation(keys=>keys.includes(filterDetectorCatalogKey(catalog.revisions))
     ?{data:[{key:source,revision:'r2'}],error:null,status:200}:undefined);
   expect(await readBrowseCatalog('a','filter',signal)).toBeUndefined();
+});
+
+it('reads mining subtype metadata in one guarded query and authorizes only its selected immutable pages',async()=>{
+ const revisions={'idb:fish-mining-library':'m1','idb:fish-mining-deletions-v1':'d1',[source]:'r1'};
+ for(const [key,revision] of Object.entries(revisions))mock.rows.set(key,{key,revision});
+ const child={id:'family/series/avg-2',title:'avg-2',at:1,count:1,pages:[hash]};
+ const mining:BrowseCatalog={...catalog,scope:'mining',miningSeries:true,revisions,groups:[{id:'family',title:'BSS 系列',at:1,count:1,pages:[],children:[child]}]};
+ put(browseCatalogKey('mining'),{...mining,miningSeries:undefined,groups:[]});put(miningSeriesCatalogKey(),mining);
+ const actual=await readBrowseCatalog('a','mining',signal);
+ expect(actual).toEqual(mining);expect(mock.requests).toHaveLength(1);
+ expect(mock.requests[0]).toContain(miningSeriesCatalogKey());
+ expect(await readBrowsePage(actual!,hash,signal)).toEqual(rows);
+ mock.rows.set('idb:fish-mining-deletions-v1',{key:'idb:fish-mining-deletions-v1',revision:'d2'});
+ await expect(readBrowsePage(actual!,hash,signal)).rejects.toThrow('目录已更新');
 });
