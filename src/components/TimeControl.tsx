@@ -247,7 +247,7 @@ export function TimeControl({
     ) : EMPTY_SIGNALS;
     return replaySamples.length ? mergeSignals(saved, replaySamples) : saved;
   }, [savedTuringSignals, replaySamples, replayIds]);
-  const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs, workspaceRequested || (signalLibOpen && !entryPeriod), workspaceRequested);
+  const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs, workspaceRequested || (signalLibOpen && !entryPeriod), false);
   const panelQuality = {
     ...fishQuality,
     ...(!workspaceRequested ? { requestWorkspace: () => setWorkspaceRequested(true) } : {}),

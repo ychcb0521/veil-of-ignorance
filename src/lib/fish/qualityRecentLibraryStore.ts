@@ -92,18 +92,19 @@ export async function readRecentMonitorBody(directory:RecentMonitorDirectory,ent
 }
 
 const publishing=new Map<string,Promise<void>>();
-export function publishRecentMonitorDirectory(owner:string,sourceRevision:string,study:FishQualityStudy,complete=false):Promise<void>{
+export function publishRecentMonitorDirectory(owner:string,sourceRevision:string,source:FishQualityStudy|(()=>FishQualityStudy),complete=false):Promise<void>{
  const key=owner+'\0'+sourceRevision+'\0'+complete,active=publishing.get(key);if(active)return active;
- const task=publish(owner,sourceRevision,study,complete).finally(()=>{if(publishing.get(key)===task)publishing.delete(key);});
+ const task=publish(owner,sourceRevision,source,complete).finally(()=>{if(publishing.get(key)===task)publishing.delete(key);});
  publishing.set(key,task);return task;
 }
-async function publish(owner:string,sourceRevision:string,study:FishQualityStudy,complete:boolean){
+async function publish(owner:string,sourceRevision:string,source:FishQualityStudy|(()=>FishQualityStudy),complete:boolean){
  if(!await sameRevision(owner,sourceRevision))return;
  const key=complete?fullMonitorDirectoryKey(sourceRevision):recentMonitorDirectoryKey(sourceRevision);
  const existing=(await readRows(owner,[key])).get(key);
  if(validRecentMonitorDirectory(existing,owner,sourceRevision)&&existing.entries.length===existing.total)return;
  const {retiredDirectoryIds}=await import('./directoryTrash');
  const retired=await retiredDirectoryIds(owner,'monitor',AbortSignal.timeout(15000));
+ const study=typeof source==='function'?source():source;
  const snapshots=recentMonitorSnapshots(study).filter(s=>!retired.has(s.entry.id)),entries:RecentMonitorEntry[]=[];
  const deletionsKey=recentMonitorDeletionsKey(sourceRevision);
  const {encoded}=await prepareAccountBlobEncoding({deletedSources:study.deletedSources,deletedReadings:study.deletedReadings,resolvedLegacySources:study.resolvedLegacySources});

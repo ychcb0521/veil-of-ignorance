@@ -44,7 +44,8 @@ export function importQualityWorkspaceRows(study: FishQualityStudy, snapshot: Fi
   const activeGroups = new Set(study.groups.map(group => group.id));
   const selected = new Set(study.selectedRowIds);
   const next = {...study,samples:[...samples.values()],groups:[...study.groups,...structuredClone(snapshot.groups.filter(group => pickedGroups.has(group.id) && !activeGroups.has(group.id)))]};
-  for (const row of qualityDisplayRows(next)) if (pickedEntries.has(qualityEntryIdentity(row.source,row.enteredAt))) selected.add(row.id);
+  const affected = next.samples.filter(row => pickedEntries.has(qualityEntryIdentity(row.source,row.enteredAt)));
+  for (const row of qualityDisplayRows({samples:affected})) selected.add(row.id);
   return {...next,selectedRowIds:[...selected]};
 }
 

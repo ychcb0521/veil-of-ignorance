@@ -73,7 +73,7 @@ export function loadQualityStudy(owner?: string): Promise<{ study: FishQualitySt
     if(owner&&!loaded.warning)void syncedImmutableAccountBlobRevision('fish-quality',owner).then(async revision=>{
       if(revision){
         void import('./libraryBrowsePublisher').then(m=>m.publishFilterBrowse(owner,revision,loaded.study)).catch(()=>{});
-        await (await import('./qualityRecentLibraryStore')).publishRecentMonitorDirectory(owner,revision,recentMonitorSource(loaded.study,Infinity),true);
+        await (await import('./qualityRecentLibraryStore')).publishRecentMonitorDirectory(owner,revision,()=>recentMonitorSource(loaded.study,Infinity),true);
       }
     }).catch(()=>{});
   }, () => {});
