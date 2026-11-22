@@ -47,6 +47,15 @@ it('supports custom hours, disabled conditions and a disabled mirror strategy',a
  const disabled={...plan(),holdingVetoes:[rule(1,false)]};expect((await run(disabled,90)).status).toBe('open');
  expect(await run({...plan(),mirrorTakeProfit:undefined},61)).toMatchObject({status:'closed',endTime:T+60*M});
 });
+it('checks the 0.5-hour setting at 30 minutes, without waiting for the next candle price',async()=>{
+ const g=plan(.5),before=await run(g,29);
+ expect(before.status).toBe('open');expect(before.pendingExit).toBeUndefined();
+ const due=await run(g,30,loader(),before);
+ expect(due.pendingExit).toMatchObject({at:T+30*M,cause:{kind:KIND,threshold:.5}});
+ expect(instantMonitorExitDue(due)).toBe(true);
+ const completed=await run(g,60,loader(t=>t===T+29*M?bar(t,100,103,100):bar(t)));
+ expect(completed.status).toBe('open');expect(completed.pendingExit).toBeUndefined();
+});
 it('resumes using original entry time despite a later actual addition and preserves the checkpoint',async()=>{
  const g=plan(),prior=await run(g,45);
  prior.additionFill={at:T+40*M,price:100,notional:100,quantity:1,scanFrom:T,reading:1,threshold:0,direction:'>',metric:'raw',label:'已成交加仓',barOpenTime:T+40*M};
