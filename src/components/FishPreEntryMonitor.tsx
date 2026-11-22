@@ -2,7 +2,8 @@ import {createQualityTemplateDirectory} from '@/lib/fish/qualityTemplateDirector
 import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { FishConditionDialogContent } from './FishConditionSettings';
 import { Dialog, DialogDescription, DialogTitle, DialogTrigger } from './ui/dialog';
-import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
+import {readResearchDirectoryEdits} from '@/lib/fish/qualityRecentLibraryStore';
+import {mergeLibraryDirectoryEdits,type LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {newPreEntryHours} from '@/lib/fish/preEntryActivePlan';
 import {FishPreEntryProgress,latestScreeningRound} from './FishPreEntryProgress';
 import {FishDeferredDetails,FishLibraryTimeDirectory,type FishDirectoryItem,type FishTemplateRenderer,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
@@ -11,7 +12,7 @@ import {FishEntryLibraryDataActions} from './FishEntryLibraryDataActions';
 import {entryDirectoryGroups,entryDirectoryStudy,downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
 import type {FishQualityStudy} from '@/lib/fish/quality';
 import { FishPreEntrySettings } from './FishPreEntrySettings';
-import { useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { useMemo, useState, useEffect, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { ChevronDown, Filter, Pause, RotateCcw, Settings2 } from 'lucide-react';
 import { libraryCell } from './FishLibraryDialog';
 import { qualitySettingsAction, qualitySplitPrimaryAction, qualitySplitPauseAction, qualitySplitMenuAction } from './FishQualityModule';
@@ -59,9 +60,29 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
   const setSelected = samplePicker?.setSelected ?? setLocalSelection;
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const rounds = useMemo(() => new Map(archived?.rounds.map(round => [round.id, round])), [archived?.rounds]);
-  const directoryEdits=useMemo(()=>mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived?.directoryEdits),[state.study?.monitorLibrary?.directoryEdits,archived?.directoryEdits]);
+  const [open,setOpen]=useState(false),[attempt,setAttempt]=useState(0);
+  const [visibility,setVisibility]=useState<{owner:string;edits?:LibraryDirectoryEdits;error?:string}>();
+  const coldOwner=!state.ready?state.account:undefined;
+  useEffect(()=>{
+    if(!open||!coldOwner)return;
+    let active=true;
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+    void readResearchDirectoryEdits(coldOwner,controller.signal).then(
+      edits=>{if(active)setVisibility({owner:coldOwner,edits});},
+      cause=>{if(active)setVisibility({owner:coldOwner,error:controller.signal.aborted?'轮次隐藏状态核对超时':cause instanceof Error?cause.message:'无法核对轮次隐藏状态'});}
+    ).finally(()=>clearTimeout(timer));
+    return ()=>{active=false;clearTimeout(timer);controller.abort();};
+  },[open,coldOwner,attempt]);
+  const checked=coldOwner&&visibility?.owner===coldOwner?visibility:undefined;
+  const studyEdits=state.study?.monitorLibrary?.directoryEdits;
+  const directoryEdits=useMemo(()=>mergeLibraryDirectoryEdits(mergeLibraryDirectoryEdits(checked?.edits,studyEdits),archived?.directoryEdits),[checked?.edits,studyEdits,archived?.directoryEdits]);
+  const directoryStatus=coldOwner&&!checked?.edits ? checked?.error
+    ? <div role="alert" className="text-xs">{checked.error} <button type="button" className="underline" onClick={()=>{setVisibility(undefined);setAttempt(n=>n+1);}}>重试核对</button>{state.requestStudyArchive&&<button type="button" className="ml-2 underline" onClick={state.requestStudyArchive}>载入研究工作区核对</button>}</div>
+    : <p role="status" className="text-xs">正在核对轮次隐藏状态…</p> : undefined;
+  const changeOpen=(value:boolean)=>{if(!value)setVisibility(undefined);setOpen(value);samplePicker?.onOpenChange(value);};
   const records = archived?.records ?? [];
   const admittedCount = useMemo(() => archived?.records.reduce((n,r)=>n+Number(r.status==='matched'),0) ?? 0,[archived?.records]);
+  const visibleAdmitted=useMemo(()=>open?archived?.records.reduce((n,r)=>n+Number(r.status==='matched'&&!directoryEdits[r.roundId]?.hidden),0)??0:0,[open,archived?.records,directoryEdits]);
   if (!monitor || !archived) return null;
   const stagesFor=(r:typeof records[number])=>rounds.get(r.roundId)?.plans?.find(p=>p.id===r.planId)?.preEntryThreeStage;
   const filtersFor = (r: typeof records[number]) => { const round=rounds.get(r.roundId), plan=round?.plans?.find(p=>p.id===r.planId);return plan?.preEntryThreeStage?plan.preEntryThreeStage.required:plan?preEntryPlanFilters(plan):round?.filters??[]; };
@@ -94,7 +115,8 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
       </tr>;})}</tbody></table></div></>;
   }}</FishDeferredDetails>;
   const getDirectoryItems = (): FishDirectoryItem[] => {
-    const templates = createQualityTemplateDirectory({planTemplates:state.study?.planTemplates},true);
+    const plans = state.ready ? state.study?.planTemplates : state.templateCatalog??state.study?.planTemplates;
+    const templates = createQualityTemplateDirectory({planTemplates:plans},true);
     return templates.withHistoricalNames(entryDirectoryGroups(archived).map(({ round, records, label, summary }) => ({
       id: round.id, at: round.startedAt, label, summary, revision: archived,
       templateGroup: templates.groupPlans(round.plans ?? [], round),
@@ -102,10 +124,10 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
       study: () => entryDirectoryStudy(archived,round,records), preview:()=>entryDirectoryStudy(archived,round,records,false), details: close => renderEvidence(round.id, close),
     })),'screen');
   };
-  return <FishLibraryTimeDirectory browseArchive={{owner:state.account,scope:'screen',directoryOnly:!monitor.ready,loadFull:monitor.error?monitor.retry:state.requestScreeningArchive??monitor.retry}} renderTemplate={renderTemplate} picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
-    onOpenChange={samplePicker?.onOpenChange} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" kind="template" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={getDirectoryItems} edits={directoryEdits} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admittedCount}
-    description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复模板目录与入选记录…'):items=>`${admittedCount} 条入选记录 · ${items.length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
-    transferMenu={!samplePicker ? actions=><FishEntryLibraryDataActions actions={actions} onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...archived,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)}} onImport={monitor.importLibrary}/>:undefined}
+  return <FishLibraryTimeDirectory browseArchive={{owner:state.account,scope:'screen',directoryOnly:!monitor.ready || (!samplePicker && !admittedCount && !archived.rounds.some(round=>round.workspaceSaved)),loadFull:()=>{if(!monitor.ready)(monitor.error?monitor.retry:state.requestScreeningArchive??monitor.retry)?.();}}} browseRounds renderTemplate={renderTemplate} picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
+    directoryStatus={directoryStatus} onOpenChange={changeOpen} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" kind="template" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={getDirectoryItems} edits={directoryEdits} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admittedCount}
+    description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复模板目录与入选记录…'):items=>`${visibleAdmitted} 条入选记录 · ${items.filter(item=>!directoryEdits[item.id]?.hidden).length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
+    transferMenu={!samplePicker ? actions=><FishEntryLibraryDataActions actions={actions} onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...archived,directoryEdits}} onImport={monitor.importLibrary}/>:undefined}
     download={()=>downloadDirectoryTables('筛选库',getDirectoryItems().map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
     info={<><p>按冻结模板整理筛选轮次，按轮次保存入选组合表，目录菜单可编辑并保存名称。手动保存的轮次包含各标的的判定结果，自动筛选照常记录入选。</p><p>v8 在原信号时点判定一次必要条件。v7 支持多条准入取“或”和否决后重建起点，总截止时间不变。旧方案 v6 保留固定起点：⓪ 必要条件、① 防守线新事件、② 排除门槛（加仓否决／卖出／硬终止）同刻通过才入选；v5 旧轮次沿用原顺序，旧版筛选引擎已下线。</p><p>展开目录后，可选择记录导入组合表。下载和导入保留各版本历史。</p></>}
     empty="暂无入选记录。满足全部条件后才会进入筛选库。"/>;

@@ -1,14 +1,67 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { FishPreEntryMonitor } from '../FishPreEntryMonitor';
+import { FishPreEntryLibrary, FishPreEntryMonitor } from '../FishPreEntryMonitor';
 import {newQualityStudy} from '@/lib/fish/quality';
 import { TooltipProvider } from '../ui/tooltip';
 import { emptyPreEntryLibrary, PRE_ENTRY_INTRABAR_VERSION, PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
+import type {LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { qualitySplitPrimaryAction, qualitySplitPauseAction } from '../FishQualityModule';
 import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 
-afterEach(cleanup);
+const archive=vi.hoisted(()=>({read:vi.fn(),page:vi.fn(),visibility:vi.fn()}));
+vi.mock('@/lib/fish/libraryBrowse',async original=>({...await original<typeof import('@/lib/fish/libraryBrowse')>(),readBrowseCatalog:archive.read,readBrowsePage:archive.page}));
+vi.mock('@/lib/fish/qualityRecentLibraryStore',async original=>({...await original<typeof import('@/lib/fish/qualityRecentLibraryStore')>(),readResearchDirectoryEdits:archive.visibility}));
+afterEach(()=>{cleanup();vi.clearAllMocks();});
+
+it.each([true,false])('opens the ready screening library with saved-template rendering and native rounds=%s',async native=>{
+ const retry=vi.fn(),time=Date.UTC(2026,10,19);
+ const rounds=native?[{id:'unlinked-round',startedAt:time,updatedAt:time,workspaceSaved:true,state:'complete',plans:[],filters:[]}]:[];
+ const library={...emptyPreEntryLibrary(),rounds:native?[...rounds,{...rounds[0],id:'hidden-round'}]:rounds};
+ let verify!:(value:LibraryDirectoryEdits)=>void;
+ archive.visibility.mockImplementation(()=>new Promise(resolve=>{verify=resolve;}));
+ const state={account:'owner',ready:false,study:newQualityStudy(),preEntry:{ready:true,retry,library,savedLibrary:library}} as unknown as FishQualityState;
+ archive.read.mockResolvedValue({groups:[{id:'history',at:time,title:'历史入选轮次',count:1,pages:['one']}]});
+ archive.page.mockResolvedValue([['BTCUSDT',time,'已入选','original-id']]);
+ render(<TooltipProvider><FishPreEntryLibrary state={state} renderTemplate={()=>null}/></TooltipProvider>);
+ fireEvent.click(screen.getByRole('button',{name:'打开筛选库'}));
+ expect(screen.getByText('正在核对轮次隐藏状态…')).toBeVisible();
+ expect(screen.queryByLabelText('打开筛选归档 hidden-round')).toBeNull();
+ expect(archive.read).not.toHaveBeenCalled();
+ await act(async()=>verify({'hidden-round':{at:123,hidden:true}}));
+ expect(screen.queryByLabelText('打开筛选归档 hidden-round')).toBeNull();
+ if(native){
+   expect(screen.getByRole('button',{name:'按轮次'})).toHaveAttribute('aria-pressed','true');
+   const round=screen.getByRole('button',{name:'打开筛选归档 unlinked-round'});
+   expect(round).toHaveAttribute('aria-expanded','false');
+   expect(archive.read).not.toHaveBeenCalled();
+   fireEvent.click(screen.getByRole('button',{name:'按模板'}));
+   expect(screen.getByText(/可切换到“按轮次”/)).toBeVisible();
+   fireEvent.click(screen.getByRole('button',{name:'查看归档目录'}));
+ }
+ const entry=await screen.findByRole('button',{name:/历史入选轮次/});
+ expect(archive.page).not.toHaveBeenCalled();
+ fireEvent.click(entry);
+ expect(await screen.findByText('BTCUSDT')).toBeVisible();
+ expect(archive.page).toHaveBeenCalledTimes(1);
+ fireEvent.click(screen.getByRole('button',{name:'查看当前筛选轮次'}));
+ expect(screen.queryByText('BTCUSDT')).toBeNull();
+ expect(retry).not.toHaveBeenCalled();
+});
+it('keeps ready rounds closed when visibility cannot be verified and retries without loading research',async()=>{
+ const round={id:'hidden-round',workspaceSaved:true,startedAt:1,updatedAt:1,state:'complete',plans:[],filters:[]};
+ const state={account:'owner',ready:false,study:newQualityStudy(),requestStudyArchive:vi.fn(),preEntry:{ready:true,library:{...emptyPreEntryLibrary(),rounds:[round]}}} as unknown as FishQualityState;
+ archive.visibility.mockRejectedValueOnce(Error('暂时无法核对')).mockResolvedValueOnce({'hidden-round':{at:12,hidden:true}});
+ render(<TooltipProvider><FishPreEntryLibrary state={state} renderTemplate={()=>null}/></TooltipProvider>);
+ fireEvent.click(screen.getByRole('button',{name:'打开筛选库'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('暂时无法核对');
+ expect(screen.queryByRole('button',{name:'打开筛选归档 hidden-round'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'重试核对'}));
+ await screen.findByText(/目录均已删除/);
+ expect(screen.queryByRole('button',{name:'打开筛选归档 hidden-round'})).toBeNull();
+ expect(state.requestStudyArchive).not.toHaveBeenCalled();
+ expect(archive.page).not.toHaveBeenCalled();
+});
 it.each(['loading','failed'])('distinguishes an unfinished %s recovery from a truly empty library',state=>{
   const retry=vi.fn(),api={ready:true,study:newQualityStudy(),preEntry:{ready:false,running:false,error:state==='failed'?'历史读取超时':'',retry,library:emptyPreEntryLibrary()}} as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={api} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);

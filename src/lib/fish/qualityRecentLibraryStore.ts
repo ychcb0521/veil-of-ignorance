@@ -7,6 +7,7 @@ import {RECENT_MONITOR_PAGE_SIZE,fullMonitorDirectoryKey,recentMonitorDirectoryK
 import {runAccountSyncRequest} from '../accountSyncTransport';
 import {setTemplateCampaignPath} from './qualityTemplateTable';
 import type {FishQualityStudy} from './quality';
+import {validLibraryDirectoryEdits,type LibraryDirectoryEdits} from './libraryDirectoryEdits';
 import type {RecentMonitorSource} from './qualityRecentSource';
 
 async function signedIn(owner:string){return (await supabase.auth.getSession()).data.session?.user.id===owner;}
@@ -19,6 +20,31 @@ async function readRows(owner:string,keys:string[],signal?:AbortSignal,headOnly=
   const entries=(response.data??[]) as unknown as {key:string;value?:unknown;revision?:string;removed?:string}[];
   return new Map(entries.map(row=>[row.key,headOnly?{rev:row.revision,deleted:row.removed==='true'}:row.value]));
  }finally{clearTimeout(timer);}
+}
+/** The screening dialog can open before the research study. Read only the
+ * visibility metadata and recheck its revision in the same query. */
+export async function readResearchDirectoryEdits(owner:string,signal:AbortSignal):Promise<LibraryDirectoryEdits>{
+ if(!await signedIn(owner))throw Error('账号已切换，请重新打开筛选库');
+ const headKey='idb:fish-quality';
+ const first=await readRows(owner,[headKey],signal,true);
+ if(!first.has(headKey))return {};
+ const head=first.get(headKey) as {rev?:string;deleted?:boolean};
+ if(!head.rev||head.deleted)throw Error('研究目录版本不可用');
+ const keys=[fullMonitorDirectoryKey(head.rev),recentMonitorDirectoryKey(head.rev)];
+ const columns:string='key,revision:value->>rev,removed:value->>deleted,owner:value->>owner,source:value->>sourceRevision,version:value->>version,edits:value->edits';
+ const {data,error}=await supabase.from('user_sim_state').select(columns).eq('user_id',owner).in('key',[headKey,...keys]).abortSignal(signal);
+ if(error)throw Error('无法读取筛选轮次的隐藏状态');
+ const rows=(data??[]) as unknown as {key:string;revision?:string;removed?:string;owner?:string;source?:string;version?:string;edits?:unknown}[];
+ const current=rows.find(row=>row.key===headKey);
+ if(current?.revision!==head.rev||current.removed==='true')throw Error('研究目录已更新，请重新核对');
+ for(const key of keys){
+   const row=rows.find(item=>item.key===key);
+   if(row?.owner===owner&&row.source===head.rev&&row.version==='1'){
+     if(row.edits==null)return {};
+     if(validLibraryDirectoryEdits(row.edits))return row.edits;
+   }
+ }
+ throw Error('当前版本的轮次隐藏状态尚未核验');
 }
 const directoryReads=new Map<string,Promise<RecentMonitorDirectory|undefined>>();
 export function readRecentMonitorDirectory(owner:string):Promise<RecentMonitorDirectory|undefined>{

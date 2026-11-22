@@ -88,9 +88,9 @@ export interface FishDirectoryPicker {
   footer: (close: () => void) => ReactNode;
 }
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
-export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more,browseArchive}:{
+export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more,browseArchive,directoryStatus}:{
   browseArchive?:{owner?:string;scope:BrowseScope;directoryOnly?:boolean;loadFull?:()=>void};
-  notice?:ReactNode;more?:ReactNode;browseRounds?:boolean;loadingStatus?:ReactNode;loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
+  directoryStatus?:ReactNode;notice?:ReactNode;more?:ReactNode;browseRounds?:boolean;loadingStatus?:ReactNode;loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
   picker?:FishDirectoryPicker;
   onRename?:(id:string,name:string)=>Promise<boolean>;
@@ -125,12 +125,12 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   useEffect(()=>()=>{selectionEpoch.current++;},[]);
   const [managementOwner,setManagementOwner]=useState<string>(),[catalogOwner,setCatalogOwner]=useState<string>();
   const directoryOnly = !!browseArchive?.owner && (browseArchive.directoryOnly || catalogOwner===browseArchive.owner) && managementOwner!==browseArchive.owner;
-  const items = useMemo(() => open && !directoryOnly ? (typeof itemsSource === 'function' ? itemsSource() : itemsSource) : NO_DIRECTORY_ITEMS, [open,directoryOnly,itemsSource]);
+  const items = useMemo(() => open && !directoryOnly && !directoryStatus ? (typeof itemsSource === 'function' ? itemsSource() : itemsSource) : NO_DIRECTORY_ITEMS, [open,directoryOnly,directoryStatus,itemsSource]);
   // Named rounds may share a template, or have no corresponding saved template at all.
-  const roundsView=canSwitchView&&(browseByRound??items.some(item=>!edits?.[item.id]?.hidden&&
-    (!!edits?.[item.id]?.name||!item.templateGroup?.savedTemplate)));
+  const roundsView=canSwitchView&&(browseByRound??(browseArchive?.scope==='screen'||items.some(item=>!edits?.[item.id]?.hidden&&
+    (!!edits?.[item.id]?.name||!item.templateGroup?.savedTemplate))));
   const templateView=kind==='template'&&!!renderTemplate&&!picker&&!manage&&!purgeMode&&!showDeleted&&!roundsView;
-  const selected=items.find(item=>item.id===selectedId),itemRef=useRef(selected);itemRef.current=selected;
+  const selected=items.find(item=>item.id===selectedId&&(showDeleted||!edits?.[item.id]?.hidden)),itemRef=useRef(selected);itemRef.current=selected;
   const openCallback=useRef(onOpenChange);openCallback.current=onOpenChange;const requestRef=useRef(openRequest);requestRef.current=openRequest;
   useEffect(()=>{const request=requestRef.current;if(request){selectionEpoch.current++;setCatalogOwner(browseArchive?.directoryOnly?browseArchive.owner:undefined);setOpen(true);setImportSelection(!!request.importSelection);if(request.selectedId||request.selectedIds!==undefined)setManage(true);setSelectedId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
   useEffect(()=>{
@@ -154,7 +154,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
     const group=item.templateGroup;
     if(templateView&&!group?.savedTemplate)return false;
     if(roundsView&&query){
-      const fields=[edits?.[item.id]?.name,item.label,formatUTC8(item.at),group?.title,group?.originalTitle];
+      const fields=[item.id,edits?.[item.id]?.name,item.label,formatUTC8(item.at),group?.title,group?.originalTitle];
       if(!fields.some(field=>field&&normalizeTemplateQuery(field).includes(query)))return false;
     }
     return compactDirectory ? hidden===showDeleted : showDeleted||!hidden;
@@ -241,16 +241,16 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   </> : undefined;
   let emptyMessage=empty;
   if(showDeleted&&compactDirectory)emptyMessage='没有已删除的目录。';
-  else if(roundsView&&query)emptyMessage='没有匹配的过滤轮次。';
-  else if(browseRounds&&items.length&&deleted===items.length)emptyMessage='过滤目录均已删除，可在右上角菜单查看。';
-  else if(templateView&&items.length)emptyMessage='暂无与已保存模板对应的记录。';
+  else if(roundsView&&query)emptyMessage=`没有匹配的${name.slice(0,-1)}轮次。`;
+  else if(browseRounds&&items.length&&deleted===items.length)emptyMessage=`${name.slice(0,-1)}目录均已删除，可在右上角菜单查看。`;
+  else if(templateView&&items.length)emptyMessage=canSwitchView&&browseArchive?.scope==='screen'?'当前没有与已保存模板对应的记录，可切换到“按轮次”查看。':'暂无与已保存模板对应的记录。';
 
   const exportActions={exportLibrary:handleExport,canExportLibrary:canExport,selected:selectedExport,busy:!!busy,directoryActions};
   const settingsEntry = (item: FishDirectoryItem): DirectorySettingsEntry[] => item.settings ? [{
     id:item.id, name:formatUTC8(item.at)+' '+(edits?.[item.id]?.name||item.label), load:item.settings,
   }] : [];
   const renderItem = (item: FishDirectoryItem) => <div key={item.id} className={'group/archive rounded-lg border border-border/60 '+(edits?.[item.id]?.hidden?'opacity-60':'')} data-testid={prefix+'-archive-item'}>
-          <div className="flex items-center">{(onSelectDirectory||purgeMode)&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||confirmPurge||(purgeMode ? !item.purgeable : !!edits?.[item.id]?.hidden)} checked={checkedSet.has(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={selectedId===item.id} onClick={()=>setSelectedId(selectedId===item.id?'':item.id)}><ChevronDown className={'h-3 w-3 '+(selectedId===item.id?'rotate-180':'')}/>{kind!=='algorithm'&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span><span className="text-muted-foreground">{item.summary}</span></button>
+          <div className="flex items-center">{(onSelectDirectory||purgeMode)&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||confirmPurge||(purgeMode ? !item.purgeable : !!edits?.[item.id]?.hidden)} checked={checkedSet.has(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={selectedId===item.id} onClick={()=>setSelectedId(selectedId===item.id?'':item.id)}><ChevronDown className={'h-3 w-3 '+(selectedId===item.id?'rotate-180':'')}/>{kind!=='algorithm'&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span>{roundsView&&browseArchive?.scope==='screen'&&item.templateGroup&&<span>{item.templateGroup.title}</span>}<span className="text-muted-foreground">{item.summary}</span></button>
             {item.settings&&<FishDirectorySettingsButton name={settingsEntry(item)[0].name} entries={settingsEntry(item)} disabled={!!busy}/>}
             {(onSetHidden||onRename||onDeleteRecords)&&<DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={'管理'+noun+' '+item.id} disabled={loading||!!loadError||!!busy} className="mr-2 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted group-hover/archive:opacity-100 group-focus-within/archive:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"><MoreHorizontal className="h-3.5 w-3.5"/></button></DropdownMenuTrigger><DropdownMenuContent align="end">{onRename&&<DropdownMenuItem onSelect={()=>{setEditingId(item.id);setDraftName(edits?.[item.id]?.name??'');setDeleteId('');setError('');}}><Pencil className="mr-2 h-3 w-3"/>编辑名称</DropdownMenuItem>}{onDeleteRecords&&<DropdownMenuItem className="text-destructive" onSelect={()=>onDeleteRecords(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录记录</DropdownMenuItem>}{onSetHidden&&(edits?.[item.id]?.hidden?<DropdownMenuItem onSelect={()=>void hide(item.id,false)}><Undo2 className="mr-2 h-3 w-3"/>恢复目录</DropdownMenuItem>:<DropdownMenuItem className="text-destructive" onSelect={()=>setDeleteId(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
           </div>
@@ -272,14 +272,16 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   return <FishLibraryRowExportContext.Provider value={managedExports?registerExport:null}><Dialog open={open} onOpenChange={changeOpen}>
     <DialogTrigger asChild><button type="button" className={action} aria-label={picker?.triggerLabel ?? '打开'+name}><Database aria-hidden className="h-3 w-3"/>{picker?.triggerLabel ?? name}</button></DialogTrigger>
     <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-hidden p-4 sm:p-5">
+      {directoryStatus?<><DialogHeader><DialogTitle className="text-sm">{name}</DialogTitle><DialogDescription className="sr-only">核对目录显示状态</DialogDescription></DialogHeader>{directoryStatus}</>:<>
       <DialogHeader className="shrink-0 space-y-1 text-left">
         <div className="group/library-header flex flex-wrap items-center gap-1.5 pr-6">
           <DialogTitle className="text-sm">{name}</DialogTitle>{!directoryOnly&&dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo>
-          {directoryOnly ? (browseArchive?.loadFull && <button type="button" className={action+' ml-auto'} onClick={()=>{setManagementOwner(browseArchive.owner);browseArchive.loadFull?.();}}>载入完整库并管理</button>) : transferMenu || compactDirectory ? <div className="ml-auto">{transferMenu ? transferMenu(exportActions) : <FishLibraryTransferMenu name={name} actions={exportActions}/>}</div> :
+          {!directoryOnly&&browseArchive?.owner&&browseArchive.scope==='screen'&&!picker&&<button type="button" className={action} onClick={()=>{resetDirectorySelection();setManage(false);setPurgeMode(false);setShowDeleted(false);setDeleteId('');setEditingId('');setTemplateQuery('');setManagementOwner(undefined);setCatalogOwner(browseArchive.owner);}}>查看归档目录</button>}
+          {directoryOnly ? (browseArchive?.loadFull && <button type="button" className={action+' ml-auto'} onClick={()=>{setManagementOwner(browseArchive.owner);browseArchive.loadFull?.();}}>{browseArchive.scope==='screen'&&!loading&&!loadError?'查看当前筛选轮次':'载入完整库并管理'}</button>) : transferMenu || compactDirectory ? <div className="ml-auto">{transferMenu ? transferMenu(exportActions) : <FishLibraryTransferMenu name={name} actions={exportActions}/>}</div> :
             <button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!canExport} onClick={handleExport}><Download aria-hidden className="h-3 w-3"/>{busy==='export'?'正在导出…':'导出数据'} <span className="font-mono tabular-nums">{recordCount}</span></button>}
         </div>
         {(managedExports&&(busy==='export'||selectedExport?.busy))&&<p role="status" className="text-xs text-muted-foreground">正在导出…</p>}
-        {canSwitchView&&!!items.length&&<div role="group" aria-label="过滤库查看方式" className="flex gap-1 text-xs">
+        {canSwitchView&&!!items.length&&<div role="group" aria-label={name+'查看方式'} className="flex gap-1 text-xs">
           {(['按模板','按轮次'] as const).map(label=><button key={label} type="button" aria-pressed={roundsView===(label==='按轮次')}
             className={action+(roundsView===(label==='按轮次')?' bg-muted text-foreground':'')} disabled={!!busy} onClick={()=>{
               setBrowseByRound(label==='按轮次');setTemplateQuery('');resetDirectorySelection();
@@ -290,7 +292,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
           <input type="search" value={templateQuery} onChange={event=>setTemplateQuery(event.target.value)} aria-label={'搜索'+name+(roundsView?'轮次':'模板')}
             placeholder={roundsView?"搜索轮次名称或日期…":"搜索模板编号、原名或日期…"} className="h-8 w-full rounded-md border border-border/60 bg-background pl-8 pr-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"/>
         </div>}
-        <DialogDescription className={compactDirectory&&(!browseRounds||loading||loadError)?"sr-only":"text-[11px] text-muted-foreground"}>{directoryOnly ? '选择目录查看归档记录' : browseRounds&&(loading||loadError) ? '读取账号保存的过滤轮次' : typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
+        <DialogDescription className={compactDirectory&&(!browseRounds||loading||loadError)?"sr-only":"text-[11px] text-muted-foreground"}>{directoryOnly ? '选择目录查看归档记录' : browseRounds&&(loading||loadError) ? `读取账号保存的${name.slice(0,-1)}轮次` : typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
       </DialogHeader>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-testid={prefix+'-directory-scroll'}>
       {directoryOnly && open && browseArchive?.owner ? <FishArchiveBrowse key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/> : <>
@@ -355,6 +357,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       </div></>}
       </div>
       {picker && <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background p-2 text-[11px]">{picker.footer(()=>changeOpen(false))}</div>}
+      </>}
     </DialogContent>
   </Dialog></FishLibraryRowExportContext.Provider>;
 }

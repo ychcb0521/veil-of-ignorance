@@ -7,14 +7,19 @@ import {readScreenCatalog,readScreenPage,type LocalScreenCatalog} from '@/lib/fi
 type Directory = {local:LocalScreenCatalog} | {cloud:BrowseCatalog};
 type Props = {owner:string;scope:BrowseScope;query:string;edits?:LibraryDirectoryEdits};
 
-async function readDirectory(owner:string, scope:BrowseScope, signal:AbortSignal, historicalOnly:boolean):Promise<Directory|undefined>{
+async function readDirectory(owner:string, scope:BrowseScope, signal:AbortSignal, historicalOnly:boolean, edits?:LibraryDirectoryEdits):Promise<Directory|undefined>{
+  let emptyLocal:LocalScreenCatalog|undefined;
   if(!historicalOnly&&scope==='screen'&&typeof indexedDB!=='undefined'){
     const local=await readScreenCatalog(owner).catch(()=>undefined);
     if(signal.aborted)return;
-    if(local)return {local};
+    if(local){
+      const visibility=mergeLibraryDirectoryEdits(local.edits,edits);
+      if(local.groups.some(group=>!visibility[group.id]?.hidden))return {local};
+    }
+    emptyLocal=local;
   }
   const cloud=await readBrowseCatalog(owner,scope,signal);
-  return cloud?{cloud}:undefined;
+  return cloud?{cloud}:emptyLocal?{local:emptyLocal}:undefined;
 }
 
 function ArchivePage({owner,directory,pageKey,reload}:{owner:string;directory:Directory;pageKey:string;reload:()=>void}){
@@ -59,6 +64,27 @@ function LegacyScreenIndex({owner,onReady}:{owner:string;onReady:()=>void}){
   return <div className="text-xs"><button type="button" className="underline" disabled={busy} onClick={build}>{busy?'正在建立本机目录…':'从已有 v6 快照建立本机目录'}</button>{message&&<p role="status">{message}</p>}</div>;
 }
 
+function RebuildHistoricalIndex({owner,onReady}:{owner:string;onReady:()=>void}){
+  const request=useRef<AbortController>(),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  useEffect(()=>()=>request.current?.abort(),[]);
+  const rebuild=async()=>{
+    if(request.current)return;
+    const controller=new AbortController();
+    request.current=controller;setBusy(true);setError('');
+    try{
+      const {rebuildHistoricalScreenCatalog}=await import('@/lib/fish/historicalScreenBrowse');
+      await rebuildHistoricalScreenCatalog(owner,controller.signal);
+      if(!controller.signal.aborted)onReady();
+    }catch(cause){
+      if(!controller.signal.aborted)setError(cause instanceof Error?cause.message:'历史目录建立失败');
+    }finally{
+      request.current=undefined;
+      if(!controller.signal.aborted)setBusy(false);
+    }
+  };
+  return <div className="text-xs"><button type="button" className="underline" disabled={busy} onClick={()=>void rebuild()}>{busy?'正在核验 v5 归档并建立目录…':'从账号 v5 归档重建目录'}</button>{error&&<p role="alert">{error}</p>}</div>;
+}
+
 export function FishArchiveBrowse({owner,scope,query,edits}:Props){
   const [historicalOnly,setHistoricalOnly]=useState(false);
   const [directory,setDirectory]=useState<Directory>(),[issue,setIssue]=useState(''),[attempt,setAttempt]=useState(0);
@@ -67,13 +93,13 @@ export function FishArchiveBrowse({owner,scope,query,edits}:Props){
   useEffect(()=>{
     let active=true;
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
-    void readDirectory(owner,scope,controller.signal,historicalOnly).then(result=>{
+    void readDirectory(owner,scope,controller.signal,historicalOnly,edits).then(result=>{
       if(!active)return;
       if(result)setDirectory(result);
       else setIssue('当前版本尚无独立目录，可载入完整库。');
     },()=>{if(active)setIssue('目录读取失败');}).finally(()=>clearTimeout(timer));
     return ()=>{active=false;clearTimeout(timer);controller.abort();};
-  },[owner,scope,attempt,historicalOnly]);
+  },[owner,scope,attempt,historicalOnly,edits]);
   const groups=useMemo(()=>{
     if(!directory)return [];
     const local='local' in directory?directory.local:undefined;
@@ -86,10 +112,10 @@ export function FishArchiveBrowse({owner,scope,query,edits}:Props){
   const legacyIndex=scope==='screen'?<LegacyScreenIndex owner={owner} onReady={reload}/>:null;
   const switchSource=(historical:boolean)=>{setHistoricalOnly(historical);reload();};
   const backToLocal=historicalOnly&&<button type="button" className="underline" onClick={()=>switchSource(false)}>返回本机目录</button>;
-  if(issue)return <><p role="alert" className="text-xs">{issue} <button type="button" className="underline" onClick={reload}>重新读取目录</button></p>{backToLocal||legacyIndex}</>;
+  if(issue)return <><p role="alert" className="text-xs">{issue} <button type="button" className="underline" onClick={reload}>重新读取目录</button></p>{backToLocal||legacyIndex}{scope==='screen'&&<RebuildHistoricalIndex owner={owner} onReady={reload}/>}</>;
   if(!directory)return <p role="status" className="text-xs">正在读取目录…</p>;
   const historical='cloud' in directory&&scope==='screen';
-  const matching=groups.filter(item=>(item.title+' '+formatUTC8(item.at)).toLowerCase().includes(query.trim().toLowerCase()));
+  const matching=groups.filter(item=>(item.title+' '+item.id+' '+formatUTC8(item.at)).toLowerCase().includes(query.trim().toLowerCase()));
   return <section aria-label="归档记录浏览" className="space-y-2 text-xs">
     <p className="text-muted-foreground">{'local' in directory?'本机 v6 筛选快照':historical?'账号 v5 历史筛选归档':'账号归档'} · {groups.length} 个目录{'cloud' in directory&&directory.cloud.recent?' · 近期索引，每项目录最多显示 100 条':''}</p>
     {'local' in directory&&<button type="button" className="underline" onClick={()=>switchSource(true)}>查看 v5 历史目录</button>}
@@ -103,6 +129,6 @@ export function FishArchiveBrowse({owner,scope,query,edits}:Props){
         {item.pages.length>1&&<div className="mt-2 flex items-center gap-3"><button type="button" disabled={!page} onClick={()=>setPage(n=>n-1)}>上一页</button><span>{page+1} / {item.pages.length}</span><button type="button" disabled={page+1>=item.pages.length} onClick={()=>setPage(n=>n+1)}>下一页</button></div>}
       </div>}
     </div>)}
-    {!matching.length&&<p>没有匹配的归档目录。</p>}
+    {!matching.length&&<p>{groups.length?'没有匹配的归档目录。':'这个版本尚无可显示的归档目录。'}</p>}
   </section>;
 }

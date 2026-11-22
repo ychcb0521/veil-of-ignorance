@@ -16,11 +16,11 @@ export function screenBrowse(library:PreEntryLibrary,marks:PreEntryTableClears,d
   }
   const pages:Record<string,BrowseRow[]>={},groups:BrowseGroup[]=[];
   for(const round of library.rounds){
-    if(edits[round.id]?.hidden)continue;
-    const rows=byRound.get(round.id);
-    if(!rows?.length)continue;
+    if(round.workspaceDraft||edits[round.id]?.hidden)continue;
+    const rows=byRound.get(round.id)??[];
+    if(!rows.length&&!round.workspaceSaved)continue;
     rows.sort((a,b)=>b[1]-a[1]||b[3].localeCompare(a[3]));
-    const group={id:round.id,at:round.startedAt,title:edits[round.id]?.name??'入选轮次',count:rows.length,pages:[] as string[]};
+    const group={id:round.id,at:round.startedAt,title:edits[round.id]?.name??(round.workspaceSaved?'筛选轮次':'入选轮次'),count:rows.length,pages:[] as string[]};
     for(let offset=0;offset<rows.length;offset+=350){
       const key=round.id+'/'+offset;group.pages.push(key);pages[key]=rows.slice(offset,offset+350);
     }

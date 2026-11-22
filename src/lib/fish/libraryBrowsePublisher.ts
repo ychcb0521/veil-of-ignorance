@@ -13,6 +13,18 @@ type GroupRows={id:string;title:string;at:number;rows:BrowseRow[]};
 const inflight=new Map<string,Promise<void>>();
 const byTime=(a:BrowseRow,b:BrowseRow)=>b[1]-a[1]||b[3].localeCompare(a[3]);
 const digest=async(raw:Uint8Array<ArrayBuffer>)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',raw)),b=>b.toString(16).padStart(2,'0')).join('');
+export async function writeBrowsePage(owner:string,rows:BrowseRow[],signal?:AbortSignal){
+ const raw=new TextEncoder().encode(JSON.stringify(rows)),hash=await digest(raw);
+ const bytes=new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+ const gzip=btoa(Array.from(bytes,b=>String.fromCharCode(b)).join(''));
+ const row={user_id:owner,key:browsePageKey(hash),value:{browse:{gzip}}};
+ const saved=await runAccountSyncRequest(()=>{
+   signal?.throwIfAborted();
+   const query=supabase.from('user_sim_state').upsert(row as never,{onConflict:'user_id,key',ignoreDuplicates:true});
+   return signal?query.abortSignal(signal):query;
+ },{bytes:gzip.length,current:()=>!signal?.aborted});
+ return saved&&!saved.error?hash:undefined;
+}
 async function publish(owner:string,scope:BrowseScope,revision:string,source:(revisions:Record<string,string>)=>Promise<GroupRows[]|undefined>){
  const key=owner+'|'+scope+'|'+revision;
  if(inflight.has(key))return inflight.get(key);
@@ -32,12 +44,8 @@ async function publish(owner:string,scope:BrowseScope,revision:string,source:(re
      const pages:string[]=[];
      rows.sort(byTime);
      for(let start=0;start<rows.length;start+=350){
-       const raw=new TextEncoder().encode(JSON.stringify(rows.slice(start,start+350))),hash=await digest(raw);
-       const bytes=new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
-       const gzip=btoa(Array.from(bytes,b=>String.fromCharCode(b)).join(''));
-       const row={user_id:owner,key:browsePageKey(hash),value:{browse:{gzip}}};
-       const saved=await runAccountSyncRequest(()=>supabase.from('user_sim_state').upsert(row as never,{onConflict:'user_id,key',ignoreDuplicates:true}),{bytes:gzip.length});
-       if(!saved||saved.error)return;
+       const hash=await writeBrowsePage(owner,rows.slice(start,start+350));
+       if(!hash)return;
        pages.push(hash);
      }
      groups.push({...group,count:rows.length,pages});
