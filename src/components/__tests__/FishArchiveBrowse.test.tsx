@@ -3,30 +3,42 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {FishFilterLibrary} from '../FishFilterLibrary';
 import {DirectoryImportContext,FishWorkspaceRows} from '../FishWorkspaceSource';
 import {newQualityStudy, type FishQualityStudy} from '@/lib/fish/quality';
+import {importQualityWorkspaceRows} from '@/lib/fish/qualityWorkspace';
 import {FishArchiveBrowse} from '../FishArchiveBrowse';
 import type {BrowseRow,BrowseScope} from '@/lib/fish/libraryBrowse';
 
-it.each([true,false])('keeps cold archives read-only and imports checked records after viewing the complete round (source picker %s)',async picker=>{
-  calls.directory.mockResolvedValue({groups:[
+it.each([{picker:true,readyBeforeClick:false},{picker:false,readyBeforeClick:false},{picker:false,readyBeforeClick:true}])('imports only checked preview records once the original archive and workspace are ready (%j)',async({picker,readyBeforeClick})=>{
+  calls.directory.mockResolvedValue({detectorPreview:true,groups:[
     {id:'one',title:'BSS 95',at:1,count:536,pages:['a']},
     {id:'two',title:'BSS 90',at:2,count:1251,pages:['b']},
   ]});
-  calls.body.mockResolvedValue([['PIEVERSEUSDT',2,'不过滤','saved']]);
+  calls.body.mockResolvedValue([
+    ['PIEVERSEUSDT',2,'不过滤','saved',[{metric:'BSS · avg_BSS_2',reading:0.13146699636353357,percentile:90.453877893559,sampleCount:14299}]],
+    ['UNPICKEDUSDT',3,'不过滤','unpicked'],
+  ]);
   const configure=vi.fn();
-  const onImport=vi.fn(()=>true);
+  let destination=newQualityStudy(100);
+  const onImport=vi.fn((snapshot:FishQualityStudy,ids:readonly string[])=>{
+    const next=importQualityWorkspaceRows(destination,snapshot,ids);
+    const changed=next!==destination;destination=next;return changed;
+  });
   const snapshot=newQualityStudy(2);
   const source={id:'signal',symbol:'PIEVERSEUSDT',timeMs:2,timeLabel:'',fallbackZone:''};
+  const existing={id:'existing',source:{...source,id:'existing-signal',symbol:'EXISTINGUSDT'},enteredAt:1,basis:'capture' as const,importedAt:1,groups:[]};
+  destination.samples=[existing];
   const complete:FishQualityStudy={...snapshot,filterLibrary:{
     version:1,settings:[{id:'f',signature:'f',filters:[],plans:[]}],
     records:[
       {id:'saved',sourceSelection:{family:'BSS',readings:[{metric:'avg_BSS_2',reading:0.13146699636353357,percentile:90.453877893559,sampleCount:14299}]},settingId:'f',source,enteredAt:9,basis:'capture',readings:[],status:{state:'none',detail:'不过滤'},firstSavedAt:2,updatedAt:2},
       {id:'other',settingId:'f',source:{...source,id:'other-signal',symbol:'OTHERUSDT'},enteredAt:8,basis:'capture',readings:[],status:{state:'none',detail:'不过滤'},firstSavedAt:1,updatedAt:1},
+      {id:'unpicked',settingId:'f',source:{...source,id:'unpicked-signal',symbol:'UNPICKEDUSDT',timeMs:3},enteredAt:8,basis:'capture',readings:[],status:{state:'none',detail:'不过滤'},firstSavedAt:1,updatedAt:1},
     ],rounds:[
       {id:'one',startedAt:1,updatedAt:1,state:'complete',recordIds:['other']},
-      {id:'two',startedAt:2,updatedAt:2,state:'complete',recordIds:['saved']},
+      {id:'two',startedAt:2,updatedAt:2,state:'complete',recordIds:['saved','unpicked']},
     ],
   }};
-  const panel=(ready:boolean)=><DirectoryImportContext.Provider value={picker?undefined:{onImport}}><FishFilterLibrary account="alice" study={ready?complete:snapshot} ready={ready}
+  const original=structuredClone(complete);
+  const panel=(ready:boolean)=><DirectoryImportContext.Provider value={{onImport,prepareImport:ready?undefined:{label:'载入组合表',onClick:configure}}}><FishFilterLibrary account="alice" study={ready?complete:snapshot} ready={ready}
     openRequest={picker?{key:1,importSelection:true}:undefined} requestWorkspace={configure}
     renderStudy={(selected,close)=><FishWorkspaceRows snapshot={selected} onImport={onImport} onDone={close}/>}/></DirectoryImportContext.Provider>;
   const view=render(panel(false));
@@ -38,21 +50,72 @@ it.each([true,false])('keeps cold archives read-only and imports checked records
   expect(configure).not.toHaveBeenCalled();
   expect(screen.queryByText('旧归档导入')).toBeNull();
   expect(screen.queryByRole('button',{name:/载入旧版完整档案并/})).toBeNull();
-  expect(screen.queryByRole('checkbox',{name:/勾选 PIEVERSE/})).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'载入旧版完整档案查看探测值和百分位'}));
-  expect(configure).toHaveBeenCalledOnce();
-  view.rerender(panel(true));
-  const checkbox=await screen.findByRole('checkbox',{name:/选取 PIEVERSEUSDT/});
   expect(screen.getByText('BSS · avg_BSS_2')).toBeInTheDocument();
   expect(screen.getByText('0.13146699636353357')).toBeInTheDocument();
   expect(screen.getByText('90.453877893559%（12934/14299）')).toBeInTheDocument();
-  expect(checkbox).not.toBeChecked();fireEvent.click(checkbox);
-  expect(screen.queryByRole('checkbox',{name:/选取 OTHERUSDT/})).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'导入组合表'}));
+  const importButton=screen.getByRole('button',{name:'导入至组合表'});
+  expect(importButton).toBeDisabled();
+  fireEvent.click(screen.getByRole('checkbox',{name:'全选目录预览记录'}));
+  fireEvent.click(screen.getByRole('checkbox',{name:/勾选 UNPICKEDUSDT/}));
+  if(readyBeforeClick)view.rerender(panel(true));
+  fireEvent.click(screen.getByRole('button',{name:'导入至组合表'}));
+  if(readyBeforeClick)expect(configure).not.toHaveBeenCalled();
+  else {expect(configure).toHaveBeenCalledOnce();expect(onImport).not.toHaveBeenCalled();}
+  view.rerender(panel(true));
+  await waitFor(()=>expect(onImport).toHaveBeenCalledOnce());
   expect(onImport).toHaveBeenCalledWith(expect.objectContaining({
     samples:[expect.objectContaining({id:'saved',enteredAt:9,source:expect.objectContaining({symbol:'PIEVERSEUSDT'})})],
   }),expect.any(Array));
+  expect(onImport.mock.calls[0][0].samples).toHaveLength(1);
+  expect(destination.samples.map(row=>row.source.symbol)).toEqual(['EXISTINGUSDT','PIEVERSEUSDT']);
+  expect(destination.samples[0]).toBe(existing);expect(complete).toEqual(original);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  view.rerender(panel(true));expect(onImport).toHaveBeenCalledOnce();
   expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['b']);
+});
+
+it.each(['close','account'])('cancels a pending preview import after %s before the archive is ready',async action=>{
+  calls.directory.mockResolvedValue({groups:[{id:'round',title:'待导入',at:1,count:1,pages:['page']}]});
+  calls.body.mockResolvedValue([['BTCUSDT',1,'冻结记录','saved']]);
+  const source={id:'signal',symbol:'BTCUSDT',timeMs:1,timeLabel:'',fallbackZone:''};
+  const cold=newQualityStudy(1),warm:FishQualityStudy={...cold,filterLibrary:{version:1,settings:[{id:'f',signature:'f',filters:[],plans:[]}],
+    records:[{id:'saved',settingId:'f',source,enteredAt:1,basis:'capture',readings:[],status:{state:'none',detail:''},firstSavedAt:1,updatedAt:1}],
+    rounds:[{id:'round',startedAt:1,updatedAt:1,state:'complete',recordIds:['saved']}]}};
+  const load=vi.fn(),onImport=vi.fn(()=>true);
+  const panel=(owner:string,ready:boolean)=><DirectoryImportContext.Provider value={{onImport,prepareImport:ready?undefined:{label:'载入组合表',onClick:load}}}>
+    <FishFilterLibrary account={owner} study={ready?warm:cold} ready={ready} requestWorkspace={load}/></DirectoryImportContext.Provider>;
+  const view=render(panel('alice',false));
+  fireEvent.click(screen.getByRole('button',{name:'打开过滤库'}));
+  fireEvent.click(await screen.findByRole('button',{name:/待导入/}));fireEvent.click(screen.getByRole('button',{name:'载入所选目录'}));
+  fireEvent.click(await screen.findByRole('checkbox',{name:/勾选 BTCUSDT/}));fireEvent.click(screen.getByRole('button',{name:'导入至组合表'}));
+  expect(load).toHaveBeenCalledOnce();expect(onImport).not.toHaveBeenCalled();
+  if(action==='close')fireEvent.click(screen.getByRole('button',{name:'关闭'}));
+  else view.rerender(panel('bob',false));
+  view.rerender(panel('alice',true));
+  await act(async()=>{});expect(onImport).not.toHaveBeenCalled();
+});
+
+it('selects all 1,251 preview records across four pages before allowing import',async()=>{
+  calls.directory.mockResolvedValue({groups:[
+    {id:'chosen',title:'BSS 1251',at:1,count:1251,pages:['p0','p1','p2','p3']},
+    {id:'other',title:'其他目录',at:2,count:1,pages:['unrelated']},
+  ]});
+  const rows:BrowseRow[]=Array.from({length:1251},(_,i)=>['SYM'+i,i,'冻结记录','id-'+i]);
+  let release!:(rows:BrowseRow[])=>void;
+  calls.body.mockImplementation((_,key)=>key==='p1'?new Promise(resolve=>{release=resolve;}):Promise.resolve(rows.slice(Number(key[1])*350,Number(key[1])*350+350)));
+  const pick=vi.fn();
+  render(<FishArchiveBrowse owner="alice" scope="filter" query="" pickRecords onSelectRecords={pick} legacySelection/>);
+  fireEvent.click(await screen.findByRole('button',{name:/BSS 1251/}));
+  await screen.findByText('SYM0');
+  fireEvent.click(screen.getByRole('checkbox',{name:'全选目录预览记录'}));
+  await waitFor(()=>expect(calls.body).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole('button',{name:'导入至组合表'})).toBeDisabled();
+  await act(async()=>release(rows.slice(350,700)));
+  await waitFor(()=>expect(screen.getByRole('button',{name:'导入至组合表'})).toBeEnabled());
+  expect(screen.getByText('已选 1251 条')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'导入至组合表'}));
+  expect(pick).toHaveBeenCalledWith('chosen',new Set(rows.map(r=>r[3])));
+  expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['p0','p1','p2','p3']);
 });
 
 it('opens only the filter detector page and sorts by the original percentile',async()=>{
@@ -93,7 +156,7 @@ it.each<BrowseScope>(['mining','screen','filter'])('sorts across pages, keeps th
   expect(screen.getByRole('checkbox',{name:/勾选 ZZZ/})).toBeChecked();
   fireEvent.click(screen.getByRole('checkbox',{name:'全选目录预览记录'}));
   fireEvent.click(screen.getByRole('checkbox',{name:/勾选 ZZZ/}));
-  fireEvent.click(screen.getByRole('button',{name:'导入所选到组合表'}));
+  fireEvent.click(screen.getByRole('button',{name:'导入至组合表'}));
   expect(pick).toHaveBeenCalledWith('chosen',new Set(['a']));
   expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['first','second']);
 });

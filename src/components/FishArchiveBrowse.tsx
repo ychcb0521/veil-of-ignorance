@@ -99,7 +99,7 @@ function ArchiveRecords({owner, directory, pages, reload, pick, filter}: {
       <span>已选 {count} 条</span>
       <button type="button" disabled={!count||all&&!complete} className="rounded border px-2 py-1 text-primary"
         onClick={()=>pick(new Set(rows.filter(r=>checked(r[3])).map(r=>r[3])))}>
-        导入所选到组合表
+        导入至组合表
       </button>
     </div>}
     <FishContinuousTable items={sorted} getKey={archiveRowKey} columns={(pick?1:0)+(filter?5:3)} resetKey={JSON.stringify([owner,sort])}
@@ -207,7 +207,7 @@ export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSele
         {onViewDetectors&&'cloud' in directory&&!directory.cloud.detectorPreview&&item.count>0&&<button type="button" className="underline" onClick={()=>onViewDetectors(item.id)}>{legacySelection?'载入旧版完整档案查看探测值和百分位':'查看原始探测值和百分位'}</button>}
         {onSelectRecords&&!legacySelection&&item.count>0&&<button type="button" className="rounded-md border px-2 py-1 text-primary hover:bg-muted" onClick={()=>onSelectRecords(item.id)}>选取本目录记录</button>}
         {item.pages.length ? (!selectBeforeLoad||opened===item.id)&&<ArchiveRecords key={JSON.stringify([owner,item.id,'local' in directory?directory.local.id:directory.cloud.revisions,item.pages])}
-          owner={owner} directory={directory} filter={scope==='filter'} pages={item.pages} reload={reload} pick={pickRecords&&!legacySelection&&onSelectRecords?ids=>onSelectRecords(item.id,ids):undefined}/> : <p>{item.count?'该目录尚未建立记录索引':'本轮没有记录'}</p>}
+          owner={owner} directory={directory} filter={scope==='filter'} pages={item.pages} reload={reload} pick={pickRecords&&onSelectRecords?ids=>onSelectRecords(item.id,ids):undefined}/> : <p>{item.count?'该目录尚未建立记录索引':'本轮没有记录'}</p>}
       </div>}
     </div>)}
     {!matching.length&&<p>{groups.length?'没有匹配的归档目录。':'这个版本尚无可显示的归档目录。'}</p>}
