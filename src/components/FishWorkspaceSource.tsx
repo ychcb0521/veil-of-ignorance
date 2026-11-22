@@ -18,6 +18,7 @@ type ImportRows = (snapshot: FishQualityStudy, ids: readonly string[]) => boolea
 
 export const DirectoryImportContext = createContext<{
   onImport: ImportRows;
+  onImportInformation?: (snapshot:FishQualityStudy, ids:readonly string[])=>Promise<boolean>;
   prepareImport?: {label:string; onClick?:()=>void};
 } | undefined>(undefined);
 
@@ -44,20 +45,26 @@ export function FishWorkspaceRows(props:WorkspaceRowsProps){
   const renderBoard=useContext(ArchiveRowsRenderer);
   return renderBoard?renderBoard(props):<StandaloneWorkspaceRows {...props}/>;
 }
-export function useDirectoryDetectorReadings(mining?:MiningDirectoryEvidence){
+export function useDirectoryDetectorReadings(mining?:MiningDirectoryEvidence, samples?:FishQualityStudy['samples']){
   const {family,records,runs}=mining??{};
   const filterRecords=useContext(FilterDetectorContext);
   return useMemo(()=>{
     if(family&&records&&runs)return miningReadingsByEntry({family,records,runs});
-    if(!filterRecords)return;
+    if(!filterRecords&&!samples?.some(sample=>sample.directoryInformation?.detectors?.length))return;
     const byEntry=new Map<string,FilterDetectorReading[]>();
-    for(const record of filterRecords){
+    for(const sample of samples??[]){
+      if(sample.directoryInformation?.detectors?.length){
+        const key=qualityEntryIdentity(sample.source,sample.enteredAt);
+        byEntry.set(key,[...new Map([...(byEntry.get(key)??[]),...sample.directoryInformation.detectors].map(reading=>[JSON.stringify(reading),reading])).values()]);
+      }
+    }
+    for(const record of filterRecords??[]){
       const key=qualityEntryIdentity(record.sample?.source??record.source,record.sample?.enteredAt??record.enteredAt);
       const list=byEntry.get(key)??[];
       list.push(...filterDetectorReadings(record));byEntry.set(key,list);
     }
     return byEntry;
-  },[family,records,runs,filterRecords]);
+  },[family,records,runs,filterRecords,samples]);
 }
 function StandaloneWorkspaceRows({snapshot,onImport,onDone,mining,prepareImport,initiallySelected=false}:WorkspaceRowsProps){
   const [query,setQuery] = useState('');

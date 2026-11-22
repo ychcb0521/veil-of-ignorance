@@ -39,7 +39,7 @@ export function importQualityWorkspaceRows(study: FishQualityStudy, snapshot: Fi
   for (const row of structuredClone(picked)) {
     const existing = samples.get(row.id);
     if (!existing) samples.set(row.id,row);
-    else samples.set(row.id,{...existing,groups:[...new Set([...existing.groups,...row.groups])],origins:[...new Set([...qualityOrigins(existing),...qualityOrigins(row)])]});
+    else samples.set(row.id,{...existing,directoryInformation:existing.directoryInformation??row.directoryInformation,groups:[...new Set([...existing.groups,...row.groups])],origins:[...new Set([...qualityOrigins(existing),...qualityOrigins(row)])]});
   }
   const activeGroups = new Set(study.groups.map(group => group.id));
   const selected = new Set(study.selectedRowIds);

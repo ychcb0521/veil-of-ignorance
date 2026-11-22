@@ -1,14 +1,14 @@
 import type { FishQualityStudy } from './quality';
 
-type WorkspaceData = Pick<FishQualityStudy, 'samples' | 'selectedRowIds' | 'workspaceUpdatedAt' | 'workspaceMonitorDraft'>;
+type WorkspaceData = Pick<FishQualityStudy, 'samples' | 'selectedRowIds' | 'workspaceUpdatedAt' | 'workspaceMonitorDraft'> & Partial<Pick<FishQualityStudy,'groups'>>;
 export function qualityWorkspaceData(study: WorkspaceData): WorkspaceData {
-  const { samples, selectedRowIds, workspaceUpdatedAt, workspaceMonitorDraft } = study;
-  return { samples, selectedRowIds, workspaceUpdatedAt, workspaceMonitorDraft };
+  const { samples, groups, selectedRowIds, workspaceUpdatedAt, workspaceMonitorDraft } = study;
+  return { samples, ...(groups ? {groups} : {}), selectedRowIds, workspaceUpdatedAt, workspaceMonitorDraft };
 }
 
 export function preserveQualityWorkspace(saved: WorkspaceData | undefined, incoming: FishQualityStudy): FishQualityStudy {
   return saved?.workspaceUpdatedAt && saved.workspaceUpdatedAt >= (incoming.workspaceUpdatedAt ?? 0)
-    ? { ...incoming, ...qualityWorkspaceData(saved) } : incoming;
+    ? { ...incoming, ...qualityWorkspaceData(saved), groups:[...new Map([...(saved.groups ?? []),...incoming.groups].map(group=>[group.id,group])).values()] } : incoming;
 }
 
 // A separate sibling record survives writes by tabs that predate manual filter saves.

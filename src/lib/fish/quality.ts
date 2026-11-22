@@ -98,6 +98,8 @@ export function qualityRuleText(g: QualityGroup): string {
 export const hasQualityExit = (group: QualityGroup) => !!group.router || !!group.addition?.enabled || (group.combo ? !!group.rule : !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0);
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
+  /** Exact information copied from a selected directory; no archive or detector recomputation. */
+  directoryInformation?: {scope: import('./libraryBrowse').BrowseScope; directoryId: string; recordId: string; detail?: string; detectors?: import('./filterDetectorReadings').FilterDetectorReading[]};
   /** Verified first exchange order for a position adopted by the live monitor. */
   binanceEntry?: { version: 'binance-manual-monitor-v1'; orderId: string; price: number; quantity: number };
   /** First-match admission for holding only; never changes the original scan/capture input. */

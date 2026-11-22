@@ -7,7 +7,7 @@ import {importQualityWorkspaceRows} from '@/lib/fish/qualityWorkspace';
 import {FishArchiveBrowse} from '../FishArchiveBrowse';
 import type {BrowseRow,BrowseScope} from '@/lib/fish/libraryBrowse';
 
-it.each([{picker:true,readyBeforeClick:false},{picker:false,readyBeforeClick:false},{picker:false,readyBeforeClick:true}])('imports only checked preview records once the original archive and workspace are ready (%j)',async({picker,readyBeforeClick})=>{
+it.each([{picker:true,readyBeforeClick:false},{picker:false,readyBeforeClick:false},{picker:false,readyBeforeClick:true}])('imports checked information directly without loading the original archive or workspace (%j)',async({picker,readyBeforeClick})=>{
   calls.directory.mockResolvedValue({detectorPreview:true,groups:[
     {id:'one',title:'BSS 95',at:1,count:536,pages:['a']},
     {id:'two',title:'BSS 90',at:2,count:1251,pages:['b']},
@@ -38,7 +38,7 @@ it.each([{picker:true,readyBeforeClick:false},{picker:false,readyBeforeClick:fal
     ],
   }};
   const original=structuredClone(complete);
-  const panel=(ready:boolean)=><DirectoryImportContext.Provider value={{onImport,prepareImport:ready?undefined:{label:'载入组合表',onClick:configure}}}><FishFilterLibrary account="alice" study={ready?complete:snapshot} ready={ready}
+  const panel=(ready:boolean)=><DirectoryImportContext.Provider value={{onImport,onImportInformation:async(snapshot,ids)=>onImport(snapshot,ids),prepareImport:ready?undefined:{label:'载入组合表',onClick:configure}}}><FishFilterLibrary account="alice" study={ready?complete:snapshot} ready={ready}
     openRequest={picker?{key:1,importSelection:true}:undefined} requestWorkspace={configure}
     renderStudy={(selected,close)=><FishWorkspaceRows snapshot={selected} onImport={onImport} onDone={close}/>}/></DirectoryImportContext.Provider>;
   const view=render(panel(false));
@@ -59,12 +59,11 @@ it.each([{picker:true,readyBeforeClick:false},{picker:false,readyBeforeClick:fal
   fireEvent.click(screen.getByRole('checkbox',{name:/勾选 UNPICKEDUSDT/}));
   if(readyBeforeClick)view.rerender(panel(true));
   fireEvent.click(screen.getByRole('button',{name:'导入至组合表'}));
-  if(readyBeforeClick)expect(configure).not.toHaveBeenCalled();
-  else {expect(configure).toHaveBeenCalledOnce();expect(onImport).not.toHaveBeenCalled();}
+  expect(configure).not.toHaveBeenCalled();
   view.rerender(panel(true));
   await waitFor(()=>expect(onImport).toHaveBeenCalledOnce());
   expect(onImport).toHaveBeenCalledWith(expect.objectContaining({
-    samples:[expect.objectContaining({id:'saved',enteredAt:9,source:expect.objectContaining({symbol:'PIEVERSEUSDT'})})],
+    samples:[expect.objectContaining({enteredAt:null,source:expect.objectContaining({symbol:'PIEVERSEUSDT'}),directoryInformation:expect.objectContaining({recordId:'saved',detectors:[expect.objectContaining({reading:0.13146699636353357,percentile:90.453877893559})]})})],
   }),expect.any(Array));
   expect(onImport.mock.calls[0][0].samples).toHaveLength(1);
   expect(destination.samples.map(row=>row.source.symbol)).toEqual(['EXISTINGUSDT','PIEVERSEUSDT']);
@@ -114,7 +113,7 @@ it('selects all 1,251 preview records across four pages before allowing import',
   await waitFor(()=>expect(screen.getByRole('button',{name:'导入至组合表'})).toBeEnabled());
   expect(screen.getByText('已选 1251 条')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'导入至组合表'}));
-  expect(pick).toHaveBeenCalledWith('chosen',new Set(rows.map(r=>r[3])));
+  expect(pick).toHaveBeenCalledWith('chosen',new Set(rows.map(r=>r[3])),rows);
   expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['p0','p1','p2','p3']);
 });
 
@@ -157,7 +156,7 @@ it.each<BrowseScope>(['mining','screen','filter'])('sorts across pages, keeps th
   fireEvent.click(screen.getByRole('checkbox',{name:'全选目录预览记录'}));
   fireEvent.click(screen.getByRole('checkbox',{name:/勾选 ZZZ/}));
   fireEvent.click(screen.getByRole('button',{name:'导入至组合表'}));
-  expect(pick).toHaveBeenCalledWith('chosen',new Set(['a']));
+  expect(pick).toHaveBeenCalledWith('chosen',new Set(['a']),[['AAA',1,'乙','a']]);
   expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['first','second']);
 });
 

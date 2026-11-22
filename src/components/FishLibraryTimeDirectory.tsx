@@ -1,3 +1,5 @@
+import {browseInformationStudy} from '@/lib/fish/browseInformationStudy';
+import type {BrowseRow} from '@/lib/fish/libraryBrowse';
 import {Popover,PopoverTrigger,PopoverContent} from './ui/popover';
 import {DirectoryDeleteButton,DirectoryTrashPanel,purgeMarkedDirectory,useFishDirectoryTrash,type DirectoryCleanup} from './FishDirectoryTrash';
 import {changeDirectory,directoryAccount,type DirectoryRef,type DirectoryScope} from '@/lib/fish/directoryTrash';
@@ -136,6 +138,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const workspaceImport=useContext(DirectoryImportContext);
   const workspaceImporter=useRef(workspaceImport);workspaceImporter.current=workspaceImport;
   const importOperation=useRef(0),completedImport=useRef(0);
+  const informationImportPending=useRef(false);
+  const archiveOwner=useRef(browseArchive?.owner);archiveOwner.current=browseArchive?.owner;
   const [picked,setPicked]=useState<{id:string;records:ReadonlySet<string>;owner:string;operation:number}>();
   useEffect(()=>{setPicked(undefined);},[browseArchive?.owner,browseArchive?.scope]);
   const [importSelection,setImportSelection]=useState(false);
@@ -183,7 +187,21 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
     }catch(e){setLoaded({id:item.id,operation,error:e instanceof Error?e.message:'归档读取失败，请重试'});}
     return()=>{active=false;controller.abort();};
   },[open,selectedId,selected?.id,selected?.revision,loadAttempt,bodyId,confirmBodyLoad,picked]);
-  const selectArchiveRecords=(id:string,records?:ReadonlySet<string>)=>{
+  const selectArchiveRecords=(id:string,records?:ReadonlySet<string>,rows?:BrowseRow[])=>{
+    if(rows && workspaceImport?.onImportInformation && browseArchive?.owner){
+      if(informationImportPending.current)return;
+      informationImportPending.current=true;
+      const owner=browseArchive.owner, operation=++importOperation.current, epoch=selectionEpoch.current;
+      const snapshot=browseInformationStudy(browseArchive.scope,id,rows);
+      const ids=qualityComparisonRows(snapshot).map(row=>row.id);
+      setBusy('正在导入勾选记录…');setError('');
+      void workspaceImport.onImportInformation(snapshot,ids).then(imported=>{
+        if(operation!==importOperation.current||owner!==archiveOwner.current||epoch!==selectionEpoch.current)return;
+        if(imported)changeOpen(false);else setError('勾选记录未能导入，原组合表已保留，请重试');
+      }).catch(cause=>{if(operation===importOperation.current)setError(cause instanceof Error?cause.message:'导入失败，请重试');})
+        .finally(()=>{informationImportPending.current=false;if(operation===importOperation.current)setBusy('');});
+      return;
+    }
     if(!browseArchive?.owner||!browseArchive.loadFull)return;
     setPicked(records?{id,records:new Set(records),owner:browseArchive.owner,operation:++importOperation.current}:undefined);setError('');setImportSelection(true);setTemplateQuery('');setBrowseByRound(true);setSelectedId(id);setBodyId(id);
     setManagementOwner(browseArchive.owner);if(!browseArchive.fullReady)browseArchive.loadFull();
@@ -387,7 +405,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-fish-scroll data-testid={prefix+'-directory-scroll'}>
       {trashOwner&&open&&!picker&&<DirectoryTrashPanel toolbar={trashToolbar} known={trash.known} key={trashOwner+trashScope} owner={trashOwner} scope={trashScope} marks={trash.marks} reload={trash.reload} cleanup={cleanupDirectory} selection={trashSelection} clear={()=>setTrashSelection(undefined)} trashView={trashView} onTrashView={value=>{resetDirectorySelection();setTrashView(value);}}/>}
       {trashView&&trash.issue&&<p role="status" className="text-xs">{trash.issue} <button type="button" className="underline" onClick={trash.reload}>重试</button></p>}
-      {trashView ? null : directoryOnly && open && browseArchive?.owner ? <FishArchiveBrowse marks={trash.marks} selectBeforeLoad={selectBeforeLoad} legacySelection={selectBeforeLoad&&!browseArchive.fullReady} onViewDetectors={browseArchive.scope==='filter'&&browseArchive.loadFull?selectArchiveRecords:undefined} pickRecords={(!!workspaceImport||importSelection)&&!picker} onSelectRecords={(workspaceImport&&!picker||importSelection)&&browseArchive.loadFull?selectArchiveRecords:undefined} onDelete={trashOwner&&!picker?setTrashSelection:undefined} key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/> : <>
+      {trashView ? null : directoryOnly && open && browseArchive?.owner ? <FishArchiveBrowse marks={trash.marks} selectBeforeLoad={selectBeforeLoad} legacySelection={selectBeforeLoad&&!browseArchive.fullReady} onViewDetectors={!workspaceImport?.onImportInformation&&browseArchive.scope==='filter'&&browseArchive.loadFull?selectArchiveRecords:undefined} pickRecords={(!!workspaceImport||importSelection)&&!picker} onSelectRecords={(workspaceImport&&!picker||importSelection)&&(workspaceImport?.onImportInformation||browseArchive.loadFull)?selectArchiveRecords:undefined} onDelete={trashOwner&&!picker?setTrashSelection:undefined} key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/> : <>
       {notice}
       {picked&&workspaceImport&&completedImport.current!==picked.operation&&<p role="status" className="text-xs">正在准备已勾选的 {picked.records.size} 条记录，完成后导入至组合表…</p>}
       {importSelection&&managementOwner&&selectedId&&!selected&&!loading&&!loadError&&<p role="alert" className="text-xs">

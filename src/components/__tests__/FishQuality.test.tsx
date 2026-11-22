@@ -10,6 +10,24 @@ import { RouteLoadBoundary } from '@/components/RouteLoadBoundary';
 import { STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
 const T = Date.UTC(2026, 9, 20);
 
+it('shows directly imported frozen readings and allows table selection before loading the historical study',async()=>{
+  const {browseInformationStudy}=await import('@/lib/fish/browseInformationStudy');
+  const s=state(), removeRows=vi.fn();
+  s.study=browseInformationStudy('filter','chosen',[['PIEVERSEUSDT',T,'','opaque',[
+    {metric:'BSS · avg_BSS_2',reading:0.13146699636353357,percentile:90.453877893559,sampleCount:14299},
+  ]]]);
+  s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);
+  s.ready=false;
+  s.workspace={informationReady:true,importInformation:vi.fn(),importRows:vi.fn(),removeRows,saveMonitoring:vi.fn(),saveFiltering:vi.fn(),sources:undefined};
+  render(<FishQuality state={s}/>);
+  expect(screen.getByText('PIEVERSEUSDT')).toBeInTheDocument();
+  expect(screen.getByText('BSS · avg_BSS_2')).toBeInTheDocument();
+  expect(screen.getByText('0.13146699636353357')).toBeInTheDocument();
+  expect(screen.getByText('90.453877893559%（12934/14299）')).toBeInTheDocument();
+  expect(screen.getByRole('checkbox',{name:'全选当前筛选信号'})).toBeEnabled();
+  expect(screen.getByRole('button',{name:'删除所选行'})).toBeEnabled();
+});
+
 it('defaults the combination sell algorithm to 3% even when the independent stop stays empty', () => {
   const s = state();
   render(<FishQuality state={s}/>);

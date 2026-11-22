@@ -6,6 +6,8 @@ import { newQualityStudy, importQualityFish, importQualityLibrary, qualityResult
 import { definitionKey, BSS_DEF, STATE_DEF, FEATURES_KEY } from '@/lib/deepDig/features';
 import { __resetNotificationCenterForTests, isNotificationHistoryOnly } from '@/lib/notificationCenter';
 import type { TradeSignal } from '@/lib/signalLibrary';
+import * as workspaceStore from '@/lib/fish/qualityWorkspaceStore';
+import { browseInformationStudy } from '@/lib/fish/browseInformationStudy';
 
 const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
 vi.mock('@/lib/fish/qualityStore', () => ({ loadQualityStudy: storage.load, saveQualityStudy: storage.save }));
@@ -17,6 +19,35 @@ const T = Date.UTC(2026, 9, 20);
 const signal: TradeSignal = { id: 'a', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: '结果', cutoffMs: T, threshold: .12, average: .2, cbi2: .2, startAverage: .2, previousAverage: .1, direction: '>', scale: 1 } };
 beforeEach(() => { __resetNotificationCenterForTests(); vi.useFakeTimers(); storage.load.mockReset().mockImplementation(async () => ({ study: newQualityStudy() })); storage.save.mockReset().mockResolvedValue(true); });
 afterEach(() => { cleanup(); vi.clearAllTimers(); vi.useRealTimers(); localStorage.clear(); });
+it('imports directory information into a cold workspace without loading or saving the old study, then retains it on an explicit load',async()=>{
+  const existing=browseInformationStudy('filter','existing',[['EXISTING',1,'','old']]);
+  existing.workspaceUpdatedAt=1;
+  const snapshot=browseInformationStudy('filter','selected',[
+    ['PICKED',2,'','chosen',[{metric:'BSS',reading:0.13146699636353357,percentile:90.453877893559}]],
+    ['UNPICKED',3,'','other'],
+  ]);
+  const ids=[qualityComparisonRows(snapshot)[0].id];
+  const read=vi.spyOn(workspaceStore,'readQualityWorkspace').mockResolvedValue(existing);
+  const imported={...existing,samples:[...existing.samples,snapshot.samples[0]],workspaceUpdatedAt:Date.now()+1,selectedRowIds:ids};
+  const write=vi.spyOn(workspaceStore,'importQualityWorkspaceInformation').mockResolvedValue(imported);
+  try {
+    const hook=renderHook(({enabled})=>useFishQuality('direct-import',[],async()=>{},[],[],enabled,[],true,false),{initialProps:{enabled:false}});
+    await flush();
+    expect(hook.result.current.study.samples[0].source.symbol).toBe('EXISTING');
+    expect(hook.result.current.ready).toBe(false);
+    await act(async()=>expect(await hook.result.current.workspace!.importInformation(snapshot,ids)).toBe(true));
+    expect(hook.result.current.study.samples.map(row=>row.source.symbol)).toEqual(['EXISTING','PICKED']);
+    expect(hook.result.current.study.samples[1].directoryInformation?.detectors?.[0]).toMatchObject({reading:0.13146699636353357,percentile:90.453877893559});
+    expect(hook.result.current.workspace!.informationReady).toBe(true);
+    expect(hook.result.current.ready).toBe(false);
+    await flush(1000);
+    expect(storage.load).not.toHaveBeenCalled();expect(storage.save).not.toHaveBeenCalled();
+    hook.rerender({enabled:true});await flush();
+    expect(storage.load).toHaveBeenCalledOnce();
+    expect(hook.result.current.study.samples.map(row=>row.source.symbol)).toEqual(['EXISTING','PICKED']);
+    hook.unmount();
+  } finally { read.mockRestore();write.mockRestore(); }
+});
 const flush = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 const chooseAndStart = (h: { result: { current: ReturnType<typeof useFishQuality> } }) => {
   act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
