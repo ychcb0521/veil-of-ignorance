@@ -1047,9 +1047,9 @@ it('places folded capture values after ratings, aligns each detector reading aft
  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(screen.getByTestId('quality-detector-value-cell')).toHaveTextContent('3 项');
  fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
  expect(screen.getByRole('button',{name:'展开探测算法明细'})).toHaveAttribute('aria-expanded','true');
- for(const text of ['12.5','0','-8.4'])expect(within(screen.getByTestId('quality-fish-table')).getAllByText(text,{exact:true}).filter(el=>!el.closest('[data-testid="quality-run-state-cell"]'))).toHaveLength(1);
- fireEvent.click(screen.getByRole('button',{name:'按探测值排序'}));expect(screen.getAllByTestId('quality-detector-value-cell')[0]).toHaveTextContent(/^12.5/);
- fireEvent.click(screen.getByRole('button',{name:'按探测值排序'}));expect(screen.getAllByTestId('quality-detector-value-cell')[0]).toHaveTextContent(/^-8.4/);
+ for(const text of ['12.50','0.00','-8.40'])expect(within(screen.getByTestId('quality-fish-table')).getAllByText(text,{exact:true}).filter(el=>!el.closest('[data-testid="quality-run-state-cell"]'))).toHaveLength(1);
+ fireEvent.click(screen.getByRole('button',{name:'按探测值排序'}));expect(screen.getAllByTestId('quality-detector-value-cell')[0]).toHaveTextContent(/^12\.50/);
+ fireEvent.click(screen.getByRole('button',{name:'按探测值排序'}));expect(screen.getAllByTestId('quality-detector-value-cell')[0]).toHaveTextContent(/^-8\.40/);
  fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(s.setSelectedRows).not.toHaveBeenCalled();
 });
 
