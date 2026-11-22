@@ -33,10 +33,19 @@ it('defaults to the newest screening directory without replacing saved data, and
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
 });
 it('opens the filter library from the source picker and changes the table only after a directory is chosen',async()=>{
- const {state,filterId}=fixture();render(<FishQuality state={state}/>);
+ const {state,filterId}=fixture();
+ const library=state.study.filterLibrary!;
+ for(const record of [...library.records,...(library.rounds[0].filterSnapshot?.records??[])]){
+   record.sourceSelection={family:'BSS',readings:[{metric:'avg_BSS_2',reading:0.14,percentile:96.125}]};
+ }
+ render(<FishQuality state={state}/>);
  fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:/^过滤库/}));
  const dialog=screen.getByRole('dialog');expect(within(dialog).getByRole('heading',{name:'模板目录'})).toBeInTheDocument();expect(state.restoreMonitorStudy).not.toHaveBeenCalled();
- fireEvent.click(within(dialog).getByLabelText('打开过滤归档 '+filterId));fireEvent.click(within(dialog).getByRole('button',{name:'选择此目录'}));
+ fireEvent.click(within(dialog).getByLabelText('打开过滤归档 '+filterId));
+ const board=within(await within(dialog).findByTestId('quality-archive-board'));
+ expect(board.getAllByRole('button',{name:'按探测算法排序'})).toHaveLength(1);
+ expect(board.getByTestId('quality-fish-table')).toHaveTextContent('96.125%');
+ fireEvent.click(within(dialog).getByRole('button',{name:'选择此目录'}));
  await waitFor(()=>expect(state.restoreMonitorStudy).toHaveBeenCalledWith(expect.objectContaining({buyFilters:expect.arrayContaining([expect.objectContaining({threshold:.7})])}),undefined,true));
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(screen.getByRole('combobox',{name:'鱼质量的来源'})).toHaveTextContent('过滤库');
 });

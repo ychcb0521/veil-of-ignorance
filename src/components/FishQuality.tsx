@@ -1,3 +1,4 @@
+import {percentilePosition} from '@/lib/fish/filterDetectorReadings';
 import {FishStudyRecoveryStatus} from './FishStudyRecoveryStatus';
 import { captureLimitText } from '@/lib/fish/thresholdRange';
 import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
@@ -11,7 +12,7 @@ import {hasCampaignOnSignalDay,hasTradeOnSignalDay} from '@/lib/signalCampaignIn
 import {qualityTemplateImportSelection,templateCampaignPath, type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
 import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import type { MiningDirectoryEvidence } from '@/lib/fish/miningLibraryDirectory';
-import { FilterDetectorContext, DirectoryImportContext, FishWorkspaceRows, FishWorkspaceSource, fishSourceButton } from './FishWorkspaceSource';
+import { ArchiveRowsRenderer, useDirectoryDetectorReadings, type WorkspaceRowsProps, DirectoryImportContext, FishWorkspaceRows, FishWorkspaceSource, fishSourceButton } from './FishWorkspaceSource';
 import { Database, Save, Trash2 } from 'lucide-react';
 import {FishCombinationHelp} from './FishCombinationHelp';
 import {FishConditionDialogContent,FishConditionSettings} from './FishConditionSettings';
@@ -21,7 +22,7 @@ import {ScreeningHeaders,ScreeningCells,type ScreeningSortKey} from './FishQuali
 import {qualityScreeningResults,screeningResultIndex,screeningRowResults,screeningCell} from '@/lib/fish/qualityScreeningResults';
 import {FishQualitySourcePicker} from './FishQualitySourcePicker';
 import {latestEntryDirectory,sourceDirectoryKeys,sourceDirectoryIds,matchesMiningDirectory,type QualitySourceDirectory} from '@/lib/fish/qualitySourceDirectories';
-import {FishDeferredDetails,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
+import {type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import { FishPreEntryMonitor } from './FishPreEntryMonitor';
 import { FishInstantTrading } from './FishInstantTrading';
 import { HoldingMonitorSettings, MonitorTimePicker } from './FishHoldingMonitorSettings';
@@ -104,7 +105,7 @@ const ROW_PX = 33, OVERSCAN = 12;
 const NO_QUALITY_ROWS: QualitySample[] = [];
 // 【用户要求】2026-10-26「鱼质量中的所有表头都要能够排序」：空值（未评估、无评分等）不论升降都排在最后
 type ArchiveKind = 'filter' | 'screening' | 'monitor';
-type SortKey = `signal-value:${string}` | `addition:${string}` | `entry:${string}` | `price-change:${string}` | `label:${string}` | PostExitSortKey | ScreeningSortKey | 'time' | 'mined-at' | 'catch-count' | 'catch-kind' | 'symbol' | 'market' | 'quality' | 'process' | 'detector' | 'detector-value' | `filter:${string}` | `sell:${string}` | `static:${string}` | `peak:${string}` | `mirror:${string}` | `held:${string}` | `relative:${string}` | `payoff:${string}` | `geometric:${string}`;
+type SortKey = 'archive-metric'|'archive-reading'|'archive-percentile'|`signal-value:${string}` | `addition:${string}` | `entry:${string}` | `price-change:${string}` | `label:${string}` | PostExitSortKey | ScreeningSortKey | 'time' | 'mined-at' | 'catch-count' | 'catch-kind' | 'symbol' | 'market' | 'quality' | 'process' | 'detector' | 'detector-value' | `filter:${string}` | `sell:${string}` | `static:${string}` | `peak:${string}` | `mirror:${string}` | `held:${string}` | `relative:${string}` | `payoff:${string}` | `geometric:${string}`;
 const TEXT_KEYS = new Set(['symbol', 'market', 'detector', 'catch-kind']);
 /** 持仓时间：不到 1 小时写分钟，两天内写小时，再长写天。 */
 export function heldText(hours: number | null | undefined): string {
@@ -401,12 +402,13 @@ function DetectorPicker({ choices, signalsOf, selected, onChange, children }: { 
     </li>; })}</ul> : <p className="px-3 py-3 text-muted-foreground">当前数据里没有默认探测算法的信号</p>}
   </PopoverContent></Popover>;
 }
-export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,jumpingSignalId,tradedDayIndex,campaignDayIndex,archiveView=false, archiveKind, templateTable, onArchiveCampaign, onImportArchiveRows }: { onImportArchiveRows?:(ids:readonly string[])=>boolean;archiveView?:boolean;archiveKind?:ArchiveKind;templateTable?:QualityTemplateTable;onArchiveCampaign?:()=>void;state: FishQualityState; mining?: FishMiningApi; capturing?: boolean; onJump?: (source: TradeSignal) => void;onRate?:(source:TradeSignal,value:number)=>void; canJump?: (source: TradeSignal) => boolean; jumpingSignalId?: string | null; tradedDayIndex?: Set<string>; campaignDayIndex?: Set<string> }) {
+export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,jumpingSignalId,tradedDayIndex,campaignDayIndex,directoryRows,archiveView=false, archiveKind, templateTable, onArchiveCampaign, onImportArchiveRows }: { directoryRows?:WorkspaceRowsProps; onImportArchiveRows?:(ids:readonly string[])=>boolean;archiveView?:boolean;archiveKind?:ArchiveKind;templateTable?:QualityTemplateTable;onArchiveCampaign?:()=>void;state: FishQualityState; mining?: FishMiningApi; capturing?: boolean; onJump?: (source: TradeSignal) => void;onRate?:(source:TradeSignal,value:number)=>void; canJump?: (source: TradeSignal) => boolean; jumpingSignalId?: string | null; tradedDayIndex?: Set<string>; campaignDayIndex?: Set<string> }) {
   const { study, ready, running, progress, resumeMonitoring, resumeFiltering, setSourceQuality } = state;
   const sharedTemplateNames=useQualityTemplateNames();
   const templateNames=sharedTemplateNames??qualityTemplateNames(study);
   const screenName=useCallback<ScreeningPlanName>((plan,round)=>templateNames.forPlan(plan,'screen',round.hours)?.name??plan.label,[templateNames]);
   const registerLibraryExport = useContext(FishLibraryRowExportContext);
+  const directoryReadings=useDirectoryDetectorReadings(directoryRows?.mining);
   const importingArchive = archiveView && !!onImportArchiveRows;
   const workspace = archiveView ? undefined : state.workspace;
   const lockedBatch = archiveView || workspace ? null : state.lockedBatch;
@@ -554,6 +556,12 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     }
     const value = (r: QualitySample): number | string | null => {
       if(sort.startsWith('screening:')){const value=screeningCell(screeningFor(r),screenName);return sort==='screening:time'?value.time:sort==='screening:plan'?value.plan==='—'?null:value.plan:value.status==='—'?null:value.status;}
+      if(sort==='archive-metric'||sort==='archive-reading'||sort==='archive-percentile'){
+        const values=directoryReadings?.get(qualityEntryIdentity(r.source,r.enteredAt))??[];
+        if(sort==='archive-metric')return values.map(value=>value.metric).join('、')||null;
+        const field=sort==='archive-reading'?'reading':'percentile';
+        return values.reduce<number|null>((max,r)=>r[field]===undefined?max:Math.max(max??r[field],r[field]),null);
+      }
       if (sort === 'time') return qualitySignalTime(r.source);
       if (sort === 'mined-at') return mergeCabinSignals ? captureTimes.get(qualityTableSignalKey(r)) ?? null : qualityTableCaptureTime(r);
       if (sort === 'symbol') return r.source.symbol;
@@ -591,7 +599,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
       const order = typeof a.v === 'string' ? a.v.localeCompare(String(b.v)) : a.v - (b.v as number);
       return order * (ascending ? 1 : -1) || qualitySignalTime(b.r.source) - qualitySignalTime(a.r.source) || a.r.id.localeCompare(b.r.id);
     }).map(x => x.r);
-  }, [runScopeRows, sort, ascending, detectorMap, resultMap, templateTable, catchTypes, archiveKind, plansForSort, monitorTimeBasisByRow, study.monitorTimeBasis, filterStatus, filterColumns, signalMetrics, signalReadingMap, filterReadingMap, postExitReadings, entryReadings,screeningIndex,screeningRoundId,screeningRunId,mergeCabinSignals,screenName]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [directoryReadings,runScopeRows, sort, ascending, detectorMap, resultMap, templateTable, catchTypes, archiveKind, plansForSort, monitorTimeBasisByRow, study.monitorTimeBasis, filterStatus, filterColumns, signalMetrics, signalReadingMap, filterReadingMap, postExitReadings, entryReadings,screeningIndex,screeningRoundId,screeningRunId,mergeCabinSignals,screenName]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows: QualityTableRow[] = useMemo(() => detectorExpanded ? sortedRows : collapseQualityTableRows(sortedRows, templateTable ? 'saved-entry' : mergeCabinSignals ? 'signal' : 'entry'), [sortedRows, detectorExpanded, mergeCabinSignals, templateTable]);
   // 表格为空时探测算法表头不显示：是它们滤空的，就在空状态里写明并给出清除
   const emptyByDetector = !rows.length && activeAlgorithms.length > 0 && searched.length > 0 && narrowed.length === 0;
@@ -614,7 +622,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const shownFilters = showStaticResults && (archiveKind==='filter'||filterReadings?.length) ? filterColumns : [];
   const shownSignalMetrics = showStaticResults ? signalMetrics ?? [] : [];
   const shownPlans = !hideMonitor && (!archiveKind || archiveKind==='monitor') ? plans : [];
-  const showDetectorColumns = !workspace && !hideFilter && !archiveKind;
+  const showDetectorColumns = !workspace && !hideFilter && !archiveKind && !directoryReadings;
   const showCabinAlgorithms = archiveKind==='filter';
   const showCabinProcess = showCabinAlgorithms || !!archiveKind && batch.some(row=>!!row.source.fish||!!row.source.fishArchive);
   const showClassicProcess = !archiveKind && !hideFilter;
@@ -699,9 +707,9 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const showCaptureTime=showCabinAlgorithms||rows.some(row=>qualityTableCaptureTime(row)!=null);
   // Keep the same minimum tracks for horizontal scrolling. In archive dialogs, give spare space to columns with longer content.
   const stretch = (width: number, weight = 1) => ({width, weight});
-  const basicSpan = 4 + Number(showCaptureTime) + (showCabinAlgorithms ? 2 : 0) + Number(showCabinProcess);
+  const basicSpan = 4 + (directoryReadings?3:0) + Number(showCaptureTime) + (showCabinAlgorithms ? 2 : 0) + Number(showCabinProcess);
   const columns = [
-    stretch(152), stretch(130), ...(showCaptureTime ? [stretch(130)] : []),
+    stretch(152), stretch(130), ...(directoryReadings?[stretch(130),stretch(140),stretch(190)]:[]), ...(showCaptureTime ? [stretch(130)] : []),
     ...(showCabinAlgorithms ? [60, stretch(118,2)] : []), 58, 80, ...(showCabinProcess ? [72] : []),
     ...(showDetectorColumns ? [detectorExpanded ? 145 : 102, stretch(detectorExpanded ? 174 : 146)] : []),
     ...(showClassicProcess ? [84] : []), ...shownFilters.map(() => stretch(138)), ...shownSignalMetrics.map(() => stretch(124)),
@@ -760,12 +768,14 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     : state.requestWorkspace
       ? { label: '载入组合表', onClick: state.requestWorkspace }
       : { label: '正在载入组合表…' };
-  const renderArchive = (snapshot: FishQualityStudy, close?: () => void, directory?:MiningDirectoryEvidence) => workspace || directory ? <div className="space-y-2 px-4 py-3">
-    <FishWorkspaceRows snapshot={snapshot} onImport={workspace ? importWorkspace : undefined} onDone={close} mining={directory} prepareImport={prepareSourceImport}/>
-    <FishDeferredDetails summary="查看归档组合表" className="text-[11px]">
-      <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>
-    </FishDeferredDetails>
-  </div> : <><FilterDetectorContext.Consumer>{records=>records&&<FishWorkspaceRows snapshot={snapshot}/>}</FilterDetectorContext.Consumer><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/></>;
+  const renderArchive = (snapshot: FishQualityStudy, close?: () => void, directory?:MiningDirectoryEvidence) => <FishWorkspaceRows snapshot={snapshot} onImport={workspace?importWorkspace:undefined}
+    onDone={close} mining={directory} prepareImport={prepareSourceImport}/>;
+  const renderDirectoryBoard=(props:WorkspaceRowsProps)=><ArchivedQualityBoard study={props.snapshot} directoryRows={props}
+    onJump={onJump} canJump={canJump} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}
+    onImportRows={props.onImport?ids=>{
+      if(!props.onImport!(props.snapshot,ids))return false;
+      props.onDone?.();return true;
+    }:undefined}/>;
   const renderTemplate = (table:QualityTemplateTable, close:()=>void, kind:ArchiveKind, importSelection:boolean) =>
     <ArchivedQualityBoard study={table.study} templateTable={table} archiveKind={kind}
       tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}
@@ -858,6 +868,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     const members = qualityTableMembers(row);
     const rowTimeBasis = qualityRowMonitorTimeBasis(study, row);
     const jumping = jumpingSignalId === row.source.id;
+    const evidence=directoryReadings?.get(qualityEntryIdentity(row.source,row.enteredAt))??[];
     const sourceAtSignal = showCabinAlgorithms ? {...row.source,timeMs:qualitySignalTime(row.source)} : row.source;
     const traded = showCabinAlgorithms && tradedDayIndex && hasTradeOnSignalDay(tradedDayIndex,sourceAtSignal);
     const hasDayCampaign = showCabinAlgorithms && campaignDayIndex && hasCampaignOnSignalDay(campaignDayIndex,sourceAtSignal);
@@ -868,6 +879,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           <td className={`${cell} sticky left-0 z-10 border-t border-border/40 bg-background font-mono group-hover:bg-accent`} title={`${(isTuringCupSymbol(row.source.symbol) ? '离线行情' : EXCHANGE_NAMES[row.source.exchange ?? 'binance'])} · 来源：${qualitySourceLabel(row)}`}><span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5"><span className={`w-5 shrink-0 select-none text-right text-[9px] tabular-nums ${rowSelected(row) ? 'font-medium text-primary' : 'text-muted-foreground/55'}`} data-testid="quality-row-number">{index + 1}</span><input type="checkbox" aria-label={`选择 ${row.source.symbol} ${date(qualitySignalTime(row.source))}${row.detectorId ? ` ${detectorMap.get(row.detectorId)?.label} ${detectorMap.get(row.detectorId)?.snapshot.threshold}` : detectorExpanded ? ' 信号库' : ' 合并信号'}`} title="按住 Shift 点另一行可连续选择" checked={rowSelected(row)} ref={el => { if (el) el.indeterminate = !rowSelected(row) && members.some(member => selectedIds.has(member.id)); }} disabled={!ready || !!lockedBatch} onMouseDown={e => { if (e.shiftKey) e.preventDefault(); }} onChange={e => toggleRow(row.id, e.target.checked, (e.nativeEvent as MouseEvent).shiftKey === true)} className="h-3 w-3 shrink-0 accent-[hsl(var(--primary))]"/>{traded&&<CheckCircle2 aria-label="信号当日已交易" className="h-3 w-3 shrink-0 text-emerald-500"/>}<button type="button" aria-label={`查看 ${row.source.symbol} 盘面`} title={`查看 ${row.source.symbol} 在 ${date(row.source.timeMs)} 的盘面`} disabled={jumpDisabled} aria-busy={jumping || undefined} onClick={() => onJump?.(row.source)} className={`${wrapCell} min-w-0 max-w-full rounded-sm text-left text-primary transition-colors hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:text-inherit disabled:no-underline`}>{turingCupTicker(row.source.symbol)}</button>{jumping && <span role="status" className="font-sans text-[9px] text-muted-foreground">正在加载…</span>}{row.source.turingReplaySample && <span className="font-sans text-[9px] text-muted-foreground" title="图灵杯行情的模拟入场点">回放样本</span>}</span>{!isTuringCupSymbol(row.source.symbol) && row.source.exchange && row.source.exchange !== 'binance' && <span className="ml-1 font-sans text-[9px] text-muted-foreground">{EXCHANGE_NAMES[row.source.exchange]}</span>}</td>
 
           <td className={`${cell} border-t border-border/40 font-mono text-muted-foreground`} title={entries.length > 1 ? `合并 ${entries.length} 个入场记录 · 展开明细查看` : `模拟买入：${date(qualityMonitorEntryAt(row, rowTimeBasis))}（${rowTimeBasis ? qualityMonitorTimeLabels[rowTimeBasis] : row.source.preEntryMonitor||row.monitorEntry?'动态筛选首次满足':row.basis === 'detected' ? '实际发现' : row.basis === 'capture' ? '捕捞时刻' : row.basis === 'missing' ? '时间缺失' : isLibrary(row) ? qualitySourceLabel(row) + '信号时间' : '原始信号'}）`}><span className="inline-flex items-center gap-1">{date(qualitySignalTime(row.source))}{hasDayCampaign&&<span title="当日该标的已有交易战役" aria-label="当日已有战役" className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500/50"/>}</span></td>
+          {directoryReadings&&(['metric','reading','percentile'] as const).map(field=><td key={field} className={cell+' border-t border-border/40 font-mono'}>{evidence.length?evidence.map((r,i)=><div key={i}>{field==='metric'?r.metric:field==='reading'?r.reading??(r.rawReading!==undefined?'原值 '+r.rawReading:'未记录'):percentilePosition(r)}</div>):'—'}</td>)}
           {showCaptureTime && (() => { const at = qualityTableCaptureTime(row); return <td className={`${cell} border-t border-border/40 font-mono text-muted-foreground`} data-testid="quality-mined-at-cell">{at ? date(at) : '—'}</td>; })()}
           {showCabinAlgorithms&&<>
             <td className={`${cell} border-t border-border/40 font-mono text-muted-foreground`}>{caughtTypes.length}</td>
@@ -1043,12 +1055,13 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
         <div className="flex flex-wrap items-center gap-1">
           {onImportArchiveRows&&<>
             <span className="mr-1 text-[10.5px] text-muted-foreground">勾选记录，或用表头全选当前筛选</span>
-            <button type="button" className={button+' text-primary'} disabled={!sourcePickedCount}
+            <button type="button" className={button+' text-primary'} disabled={!sourcePickedCount||!!directoryRows?.prepareImport&&!directoryRows.prepareImport.onClick}
               onClick={()=>{
+                if(directoryRows?.prepareImport){directoryRows.prepareImport.onClick?.();return;}
                 if(onImportArchiveRows(sourcePicked.map(row=>row.id)))setError('');
                 else setError('没有可导入的记录，或组合表尚未就绪');
               }}>
-              <Download aria-hidden className="h-3 w-3"/>导入所选到组合表（{sourcePickedCount}）
+              <Download aria-hidden className="h-3 w-3"/>{directoryRows?.prepareImport?.label??`导入所选到组合表（${sourcePickedCount}）`}
             </button>
           </>}
           {lockedBatch && <button type="button" className="px-1.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline disabled:opacity-40" disabled={!!state.archiving} onClick={unlockSelection}>解除锁定</button>}
@@ -1148,6 +1161,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           <tr className="bg-muted/40">
           <th className={`${cell} sticky left-0 z-30 bg-muted font-medium`} aria-sort={ariaSort('symbol')}><span className="flex items-center gap-1.5"><span aria-hidden className="w-5 shrink-0"/><input type="checkbox" aria-label="全选当前筛选信号" title="全选当前筛选下的所有行；按住 Shift 点两行可连续选择" checked={allSelected} ref={el => { if (el) el.indeterminate = selectedRows.length > 0 && !allSelected; }} disabled={!ready || !!lockedBatch} onChange={e => selectVisible(e.target.checked)} className="h-3 w-3 accent-[hsl(var(--primary))]"/>{sortButton('symbol', '标的')}</span></th>
           <th className={`${cell} font-medium`} aria-sort={ariaSort('time')}>{sortButton('time', '信号时间')}</th>
+          {directoryReadings&&([['archive-metric','探测算法'],['archive-reading','探测值'],['archive-percentile','百分位位置']] as const).map(([key,label])=><th key={key} className={cell+' font-medium'} aria-sort={ariaSort(key)}>{sortButton(key,label)}</th>)}
           {showCaptureTime && <th className={`${cell} font-medium`} data-testid="quality-mined-at-column" aria-sort={ariaSort('mined-at')} title="实际捕捞到该信号的时间（北京时间）。同一入场有多次捕捞时显示最近一次。">{sortButton('mined-at', '捕捞时间')}</th>}
           {showCabinAlgorithms&&<>
             <th className={`${cell} font-medium`} aria-sort={ariaSort('catch-count')}>{sortButton('catch-count','算法数量')}</th>
@@ -1172,11 +1186,12 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     {tableExport&&<div hidden aria-hidden="true" data-testid="quality-export-batch"><table ref={exportTableRef}><tbody>{tableExport.entries.slice(tableExport.offset,tableExport.offset+EXPORT_BATCH).map(({row,index})=>tableExport.render(row,index))}</tbody></table></div>}
     <RowDetail row={allRows.find(r => r.id === detailId)} state={state} templateTable={templateTable} close={() => setDetailId('')}/>
   </section>;
-  return <QualityArchiveContext.Provider value={archiveView}><DirectoryImportContext.Provider value={workspace ? {onImport:importWorkspace,prepareImport:prepareSourceImport} : undefined}>{body}</DirectoryImportContext.Provider></QualityArchiveContext.Provider>;
+  return <QualityArchiveContext.Provider value={archiveView}><DirectoryImportContext.Provider value={workspace ? {onImport:importWorkspace,prepareImport:prepareSourceImport} : undefined}><ArchiveRowsRenderer.Provider value={renderDirectoryBoard}>{body}</ArchiveRowsRenderer.Provider></DirectoryImportContext.Provider></QualityArchiveContext.Provider>;
 }
 
 /** Reuse the live table's renderer; only selection/filter/expansion state is local to the viewer. */
-export function ArchivedQualityBoard({ study, onJump, canJump, selection, templateTable, onOpenCampaign, archiveKind, tradedDayIndex, campaignDayIndex, onImportRows }: {
+export function ArchivedQualityBoard({ directoryRows, study, onJump, canJump, selection, templateTable, onOpenCampaign, archiveKind, tradedDayIndex, campaignDayIndex, onImportRows }: {
+  directoryRows?:WorkspaceRowsProps;
   onImportRows?:(ids:readonly string[])=>boolean;
   archiveKind?:ArchiveKind;
   tradedDayIndex?:Set<string>;
@@ -1188,7 +1203,7 @@ export function ArchivedQualityBoard({ study, onJump, canJump, selection, templa
   canJump?: (source: TradeSignal) => boolean;
   selection?: { rowIds: string[]; onChange: (ids: readonly string[]) => void };
 }) {
-  const [localSelection, setLocalSelection] = useState(onImportRows ? [] : study.selectedRowIds ?? []);
+  const [localSelection, setLocalSelection] = useState(()=>directoryRows?.initiallySelected?qualityDisplayRows(study).filter(r=>!isDelayedTuringReplaySample(r.source)).map(r=>r.id):onImportRows ? [] : study.selectedRowIds ?? []);
   const selectedRowIds = selection?.rowIds ?? localSelection;
   const onSelectionChange = selection?.onChange;
   const state = useMemo(() => {
@@ -1203,5 +1218,5 @@ export function ArchivedQualityBoard({ study, onJump, canJump, selection, templa
       setPriority: noop, setScope: noop, setFilters: noop, setHoldingVetoes: noop, setSellPlans: noop,
     } satisfies FishQualityState;
   }, [study, selectedRowIds, onSelectionChange]);
-  return <FishQuality archiveView onImportArchiveRows={onImportRows} archiveKind={archiveKind} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} templateTable={templateTable} onArchiveCampaign={onOpenCampaign} state={state} onJump={onJump} canJump={canJump}/>;
+  return <FishQuality archiveView directoryRows={directoryRows} onImportArchiveRows={onImportRows} archiveKind={archiveKind} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} templateTable={templateTable} onArchiveCampaign={onOpenCampaign} state={state} onJump={onJump} canJump={canJump}/>;
 }

@@ -35,17 +35,19 @@ function compareValues(a:string|number|null, b:string|number|null, direction:Sor
   return direction==='ascending'?result:-result;
 }
 
-export function FishWorkspaceRows({snapshot,onImport,onDone,mining,prepareImport,initiallySelected=false}:{
+export type WorkspaceRowsProps={
   snapshot: FishQualityStudy; onImport?: ImportRows; onDone?: () => void; initiallySelected?:boolean; mining?:MiningDirectoryEvidence;
   prepareImport?: { label: string; onClick?: () => void };
-}) {
-  const [query,setQuery] = useState('');
-  const [error,setError] = useState('');
-  const [sort,setSort] = useState<{column:SortColumn;direction:SortDirection}>({column:'signalTime',direction:'descending'});
+};
+export const ArchiveRowsRenderer=createContext<((props:WorkspaceRowsProps)=>React.ReactNode)|undefined>(undefined);
+export function FishWorkspaceRows(props:WorkspaceRowsProps){
+  const renderBoard=useContext(ArchiveRowsRenderer);
+  return renderBoard?renderBoard(props):<StandaloneWorkspaceRows {...props}/>;
+}
+export function useDirectoryDetectorReadings(mining?:MiningDirectoryEvidence){
   const {family,records,runs}=mining??{};
   const filterRecords=useContext(FilterDetectorContext);
-  const showDetectors=!!(mining||filterRecords);
-  const readingsByEntry=useMemo(()=>{
+  return useMemo(()=>{
     if(family&&records&&runs)return miningReadingsByEntry({family,records,runs});
     if(!filterRecords)return;
     const byEntry=new Map<string,FilterDetectorReading[]>();
@@ -56,6 +58,14 @@ export function FishWorkspaceRows({snapshot,onImport,onDone,mining,prepareImport
     }
     return byEntry;
   },[family,records,runs,filterRecords]);
+}
+function StandaloneWorkspaceRows({snapshot,onImport,onDone,mining,prepareImport,initiallySelected=false}:WorkspaceRowsProps){
+  const [query,setQuery] = useState('');
+  const [error,setError] = useState('');
+  const [sort,setSort] = useState<{column:SortColumn;direction:SortDirection}>({column:'signalTime',direction:'descending'});
+  const family=mining?.family,filterRecords=useContext(FilterDetectorContext);
+  const showDetectors=!!(mining||filterRecords);
+  const readingsByEntry=useDirectoryDetectorReadings(mining);
   const rows=useMemo(()=>qualityComparisonRows(snapshot).filter(row=>!isDelayedTuringReplaySample(row.source)).map(row=>{
     const signalTime=qualitySignalTime(row.source);
     const readings:FilterDetectorReading[]=readingsByEntry?.get(qualityEntryIdentity(row.source,row.enteredAt))??[];
@@ -148,7 +158,7 @@ export function FishWorkspaceSource({ name, loadSnapshot, onImport, onOpenChange
   const changeOpen = (value: boolean) => { setOpen(value); onOpenChange?.(value); };
   return <Dialog open={open} onOpenChange={changeOpen}>
     <DialogTrigger asChild><button type="button" className={fishSourceButton} disabled={!loadSnapshot}><Database aria-hidden className="h-3 w-3"/>{name}</button></DialogTrigger>
-    <DialogContent className="w-[calc(100vw-1.5rem)] max-w-2xl">
+    <DialogContent className="max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] overflow-auto sm:max-w-[96vw]">
       <DialogHeader><DialogTitle>{name}</DialogTitle><DialogDescription>勾选要带入组合表的记录。</DialogDescription></DialogHeader>
       {loading && <p role="status" className="text-xs text-muted-foreground">正在读取回放归档…</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error} {retry && <button type="button" className="underline" onClick={retry}>重试</button>}</p>}

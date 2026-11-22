@@ -33,6 +33,24 @@ it('does not fetch a monitoring body until loading the selected directory',async
  expect(loadArchive).toHaveBeenCalledOnce();
 });
 
+it('shows the shared combination table as the first and only monitor detail and imports its selection',async()=>{
+ const study=archiveQualityMonitorStudy(monitorArchiveFixture(),T+4_000_000);
+ const entry=study.monitorLibrary!.archives![0],importRows=vi.fn(()=>true);
+ const source=()=>study;
+ const workspace={sources:{fish:source,mined:source,library:source,turing:source},importRows,removeRows:vi.fn(),saveMonitoring:vi.fn(),saveFiltering:vi.fn()};
+ render(<FishQuality state={{...state(study),workspace}}/>);
+ fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
+ fireEvent.click(screen.getByRole('button',{name:'打开监测归档 '+entry.id}));
+ const board=within(await screen.findByTestId('quality-archive-board'));
+ expect(board.getByTestId('quality-fish-table')).toHaveTextContent('+10.00%');
+ expect(screen.queryByTestId('quality-workspace-source-rows')).toBeNull();
+ fireEvent.click(board.getByRole('checkbox',{name:'全选当前筛选信号'}));
+ fireEvent.click(board.getByRole('button',{name:/导入所选到组合表/}));
+ expect(importRows).toHaveBeenCalledOnce();
+ expect(importRows.mock.calls[0]).toEqual([expect.objectContaining({results:entry.study.results}),expect.any(Array)]);
+ expect(screen.queryByRole('dialog')).toBeNull();
+});
+
 it('opens one monitoring result table per template and keeps saved results from different rounds',async()=>{
  const original=monitorArchiveFixture();
  const saved=original.sellPlans!.map((plan,i)=>({id:'saved-'+i,name:plan.label,savedAt:T-1000+i,updatedAt:T-1000+i,plan}));
