@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
-import {percentilePosition} from '@/lib/fish/filterDetectorReadings';
+import {detectorReadingText,percentilePosition} from '@/lib/fish/filterDetectorReadings';
 import {formatUTC8} from '@/lib/timeFormat';
 import {readBrowseCatalog,readBrowsePage,type BrowseCatalog,type BrowseGroup,type BrowseRow,type BrowseScope} from '@/lib/fish/libraryBrowse';
 import {mergeLibraryDirectoryEdits,type LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
@@ -107,7 +107,7 @@ function ArchiveRecords({owner, directory, pages, reload, pick, filter}: {
       tableClassName="text-left" header={<tr>{pick&&<th scope="col">选取</th>}{sortHeader(0,'标的')}{sortHeader(1,'信号时间（北京时间）')}{filter?<>{sortHeader('metric','探测算法')}{sortHeader('reading','探测值')}{sortHeader('percentile','百分位位置')}</>:sortHeader(2,'归档记录')}</tr>}
       row={row => <tr className="[&>td]:border-t">{pick&&<td><input type="checkbox" aria-label={'勾选 '+row[0]+' '+formatUTC8(row[1])} checked={checked(row[3])}
         onChange={()=>setExceptions(prior=>{const ids=new Set(prior);if(ids.has(row[3]))ids.delete(row[3]);else ids.add(row[3]);return ids;})}/></td>}
-        <td className="pr-2 font-mono">{row[0]}</td><td className="whitespace-nowrap pr-2">{formatUTC8(row[1])}</td>{filter?(['metric','reading','percentile'] as const).map(field=><td key={field} className="whitespace-nowrap pr-2 tabular-nums">{row[4]?.length?row[4].map((r,i)=><div key={i}>{field==='percentile'?percentilePosition(r):field==='metric'?r.metric:r.reading??(r.rawReading!==undefined?'原值 '+r.rawReading:'未记录')}</div>):'未记录'}</td>):<td>{row[2]}</td>}</tr>}
+        <td className="pr-2 font-mono">{row[0]}</td><td className="whitespace-nowrap pr-2">{formatUTC8(row[1])}</td>{filter?(['metric','reading','percentile'] as const).map(field=><td key={field} className="whitespace-nowrap pr-2 tabular-nums">{row[4]?.length?row[4].map((r,i)=><div key={i}>{field==='percentile'?percentilePosition(r):field==='metric'?r.metric:detectorReadingText(r)}</div>):'未记录'}</td>):<td>{row[2]}</td>}</tr>}
       footer={!loading && !error && next < pages.length ? <FishScrollBoundary key={next} onReach={loadNext}/> : null}/>
     {loading && <p role="status">{rows.length ? '正在读取后续记录…' : '正在读取归档记录…'}</p>}
     {error && <p role="alert">{error} <button type="button" className="underline" onClick={loadNext}>重试读取</button>

@@ -8,7 +8,7 @@ it('uses each signal own capture-time observation and scale, preserving zero and
  const sources=[.125,0,-.084].map((average,i)=>({id:String(i),symbol:'TEST'+i+'USDT',timeMs:T-3600000,timeLabel:'',fallbackZone:'',fish:{...snapshot,average}}));
  const study=importQualityFish(newQualityStudy(T),sources),rows=qualityDisplayRows(study),before=structuredClone(study);
  expect(rows.map(r=>qualityDetectorReading(r).value)).toEqual([12.5,0,-8.4]);
- expect(qualityDetectorReading(rows[0])).toMatchObject({text:'12.5',at:T});
+ expect(qualityDetectorReading(rows[0])).toMatchObject({text:'12.50',at:T});
  expect(qualityDetectorReading(rows[0]).detail).toContain('探测时刻');
  const sheet=buildQualitySheets(study,rows)[0],index=sheet.columns.findIndex(c=>c.header==='探测值');
  expect(sheet.columns[index-1].header).toBe('评分');expect(sheet.rows.map(r=>r[index])).toEqual([12.5,0,-8.4]);expect(study).toEqual(before);

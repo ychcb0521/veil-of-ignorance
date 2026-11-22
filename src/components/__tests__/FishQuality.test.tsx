@@ -23,8 +23,8 @@ it('shows directly imported frozen readings and allows table selection before lo
   render(<FishQuality state={s}/>);
   expect(screen.getByText('PIEVERSEUSDT')).toBeInTheDocument();
   expect(screen.getByText('BSS · avg_BSS_2')).toBeInTheDocument();
-  expect(screen.getByText('0.13146699636353357')).toBeInTheDocument();
-  expect(screen.getByText('90.453877893559%（12934/14299）')).toBeInTheDocument();
+  expect(screen.getByText('0.13')).toBeInTheDocument();
+  expect(screen.getByText('90.45%')).toBeInTheDocument();
   expect(screen.getByRole('checkbox',{name:'全选当前筛选信号'})).toBeEnabled();
   expect(screen.getByRole('button',{name:'删除所选行'})).toBeEnabled();
 });

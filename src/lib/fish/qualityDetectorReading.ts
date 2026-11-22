@@ -10,6 +10,6 @@ export function qualityDetectorReading(row: QualitySample) {
   const measured = condition?.reading;
   const value = measured != null && Number.isFinite(measured) && (condition?.snapshot.scale ?? 0) > 0 ? measured : null;
   const at = snapshot && Number.isFinite(snapshot.cutoffMs) && snapshot.cutoffMs > 0 ? snapshot.cutoffMs : null;
-  return { value, text: value == null ? '—' : String(Number(value.toPrecision(7))), label: condition?.label ?? '探测算法', at,
+  return { value, text: value == null ? '—' : value.toFixed(2), label: condition?.label ?? '探测算法', at,
     detail: condition ? `${condition.text} · 探测时刻 ${at ? formatUTC8(at) : '未记录'} · ${condition.context}${value == null ? ' · 探测读数未记录' : ` · 探测值 ${value}`}` : id ? '历史探测快照未记录' : '信号库的信号没有探测读数' };
 }

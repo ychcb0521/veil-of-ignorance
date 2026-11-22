@@ -38,11 +38,12 @@ export function filterDetectorReadings(record:Pick<QualityFilterRecord,'sourceSe
     return [{metric:fishMetricLabel(snapshot),reading,rawReading}];
   });
 }
+/** Table display only: stored readings and percentile positions retain full precision. */
+export function detectorReadingText(r:FilterDetectorReading):string{
+  if(Number.isFinite(r.reading))return r.reading!.toFixed(2);
+  if(Number.isFinite(r.rawReading))return '原值 '+r.rawReading!.toFixed(2);
+  return '未记录';
+}
 export function percentilePosition(r:FilterDetectorReading):string{
-  if(r.percentile===undefined)return '未记录';
-  const percent=r.percentile+'%';
-  const count=r.sampleCount;
-  if(!count||!Number.isSafeInteger(count)||count<1)return percent;
-  const rank=Math.round(r.percentile*count/100);
-  return Math.abs(100*rank/count-r.percentile)<1e-9 ? percent+'（'+rank+'/'+count+'）' : percent;
+  return Number.isFinite(r.percentile)?r.percentile!.toFixed(2)+'%':'未记录';
 }

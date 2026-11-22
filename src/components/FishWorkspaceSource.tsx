@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Database, Download } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { qualityComparisonRows, qualityEntryIdentity, type FishQualityStudy } from '@/lib/fish/quality';
-import { filterDetectorReadings,percentilePosition,type FilterDetectorReading } from '@/lib/fish/filterDetectorReadings';
+import { filterDetectorReadings,detectorReadingText,percentilePosition,type FilterDetectorReading } from '@/lib/fish/filterDetectorReadings';
 import { miningReadingsByEntry, type MiningDirectoryEvidence } from '@/lib/fish/miningLibraryDirectory';
 import { libraryReading } from './FishLibraryConditions';
 import { FishContinuousTable } from './FishContinuousTable';
@@ -122,7 +122,7 @@ function StandaloneWorkspaceRows({snapshot,onImport,onDone,mining,prepareImport,
     {showDetectors&&<>
       <td className="whitespace-nowrap px-2 py-1 font-mono tabular-nums">{row.readings.length?row.readings.map((r,i)=>
         <div key={i} title={r.metric}>{!filterRecords&&row.readings.length>1&&<span className="mr-1 text-muted-foreground">{r.metric}</span>}
-          {filterRecords&&r.reading!==undefined?String(r.reading):r.reading===undefined&&r.rawReading!==undefined?`原值 ${libraryReading(r.rawReading)}（倍率未记录）`:libraryReading(r.reading)}</div>):'未记录'}</td>
+          {filterRecords||r.reading!==undefined?detectorReadingText(r):r.rawReading!==undefined?`${detectorReadingText(r)}（倍率未记录）`:libraryReading(r.reading)}</div>):'未记录'}</td>
       <td className="whitespace-nowrap px-2 py-1 font-mono tabular-nums">{row.readings.length?row.readings.map((r,i)=>
         <div key={i} title={r.sampleCount?`${r.metric} · ${r.sampleCount} 个有效读数`:r.metric}>{filterRecords?percentilePosition(r):r.percentile===undefined?'—':r.percentile.toFixed(2)+'%'}</div>):'—'}</td>
     </>}

@@ -69,8 +69,8 @@ it.each([{picker:true,readyBeforeClick:false},{picker:false,readyBeforeClick:fal
   expect(screen.queryByText('旧归档导入')).toBeNull();
   expect(screen.queryByRole('button',{name:/载入旧版完整档案并/})).toBeNull();
   expect(screen.getByText('BSS · avg_BSS_2')).toBeInTheDocument();
-  expect(screen.getByText('0.13146699636353357')).toBeInTheDocument();
-  expect(screen.getByText('90.453877893559%（12934/14299）')).toBeInTheDocument();
+  expect(screen.getByText('0.13')).toBeInTheDocument();
+  expect(screen.getByText('90.45%')).toBeInTheDocument();
   const importButton=screen.getByRole('button',{name:'导入至组合表'});
   expect(importButton).toBeDisabled();
   fireEvent.click(screen.getByRole('checkbox',{name:'全选目录预览记录'}));
@@ -142,18 +142,18 @@ it('opens only the filter detector page and sorts by the original percentile',as
     status:{state:'none',detail:'冻结记录'},sourceSelection:{hits:[
       {family:'CBA',readings:[{metric:'avg_CBA_2',reading:0,percentile:79.5}]},
       {family:'BSS',readings:[{metric:'avg_BSS_2',reading:0.13146699636353357,percentile}]}]}});
-  calls.body.mockResolvedValue([row('SECOND',98.1),row('FIRST',91.2)]);
+  calls.body.mockResolvedValue([row('SECOND',91.200002),row('FIRST',91.200001)]);
   render(<FishArchiveBrowse owner="alice" scope="filter" query=""/>);
   fireEvent.click(await screen.findByRole('button',{name:/并集目录/}));
-  await screen.findByText('98.1%');
+  expect(await screen.findAllByText('91.20%')).toHaveLength(2);
   expect(screen.getAllByRole('columnheader')).toHaveLength(5);
   expect(screen.queryByRole('button',{name:'按归档记录排序'})).toBeNull();
-  expect(screen.getAllByText('0.13146699636353357')).toHaveLength(2);
-  expect(screen.getAllByText('0')).toHaveLength(2);
+  expect(screen.getAllByText('0.13')).toHaveLength(2);
+  expect(screen.getAllByText('0.00')).toHaveLength(2);
   expect(screen.getAllByText('BSS · avg_BSS_2')).toHaveLength(2);
   fireEvent.click(screen.getByRole('button',{name:'按百分位位置排序'}));
   expect(screen.getAllByRole('row')[1]).toHaveTextContent('FIRST');
-  expect(screen.getAllByRole('row')[1]).toHaveTextContent('79.5%');
+  expect(screen.getAllByRole('row')[1]).toHaveTextContent('79.50%');
   expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['rich']);
 });
 
