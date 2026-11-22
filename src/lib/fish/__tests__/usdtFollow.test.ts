@@ -91,6 +91,22 @@ it('keeps simulated and pre-pause captures from opening real orders after resume
   expect(venue.order.mock.calls[0][2].side).toBe('BUY');
 });
 
+it('does not backfill an expired open when screening confirms it now or sends it again', async () => {
+  const start = Date.now() - 180_000, now = start + 180_000;
+  const store = makeStore(file()), venue = exchange();
+  const runner = createUsdtFollower(store, venue, owner, 'hedge', start);
+  const late = { ...campaign(now - 120_001), admittedAt: now };
+  runner.ingest([late], now);
+  await runner.tick(now);
+  runner.ingest([late], now + 1);
+  await runner.tick(now + 1);
+  expect(venue.order).not.toHaveBeenCalled();
+
+  runner.ingest([{ ...campaign(now), id: 'fresh-control' }], now);
+  await runner.tick(now);
+  expect(venue.order).toHaveBeenCalledTimes(1);
+});
+
 it('requires both realtime capture provenance and a sized, valid frozen template for live entry', () => {
   const at = Date.now(), source = { id: 'fixture', symbol, exchange: 'binance' as const, timeMs: at, timeLabel: '', fallbackZone: '' };
   const record: PreEntryRecord = { id: 'entry', roundId: 'round', status: 'matched', startTime: at, cursor: at,
