@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, cleanup, within, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishQuality } from '@/components/FishQuality';
+import { FishPanel } from '@/components/FishPanel';
 import type { QualityBatchLock } from '@/lib/fish/qualityBatchScope';
 import { importQualityFish, separateQualityFilters, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, qualityRunSamples } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
@@ -178,7 +179,9 @@ it('saves a Turing copy without enabling default holding conditions or changing 
 it('keeps static and dynamic modules separate and opens the new three-stage settings', () => {
  const s=state();
  s.preEntry={library:{version:1,rounds:[],records:[]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn(),configure:vi.fn(),useSavedSettings:vi.fn(),importLibrary:vi.fn(),clearTableResults:vi.fn()};
- render(<FishQuality state={s}/>);
+ render(<FishPanel quality={s} signals={[]} progress={null} inputs={{time:'',threshold:''}} onInputsChange={()=>{}}
+   selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={()=>{}} onCancel={()=>{}}
+   onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>);
  const fixed=within(screen.getByTestId('quality-static-controls')),dynamic=within(screen.getByTestId('quality-dynamic-controls')),holding=within(screen.getByTestId('quality-run-controls'));
  expect(fixed.getByRole('button',{name:'开始过滤'})).toBeInTheDocument();
  expect(dynamic.getByRole('button',{name:'开始筛选'}).className).toBe(holding.getByRole('button',{name:'开始监测'}).className);

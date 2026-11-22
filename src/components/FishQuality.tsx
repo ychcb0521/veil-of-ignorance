@@ -25,9 +25,7 @@ import {FishQualitySourcePicker} from './FishQualitySourcePicker';
 import {latestEntryDirectory,sourceDirectoryKeys,sourceDirectoryIds,matchesMiningDirectory,type QualitySourceDirectory} from '@/lib/fish/qualitySourceDirectories';
 import {type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import { FishPreEntryMonitor } from './FishPreEntryMonitor';
-import { FishInstantTrading } from './FishInstantTrading';
 import { HoldingMonitorSettings, MonitorTimePicker } from './FishHoldingMonitorSettings';
-import { FishScreened } from './FishScreened';
 import { ADDITION_VETO_LABELS, type AdditionEntryVetoKind } from '@/lib/fish/qualityAdditionVeto';
 import { readQualityTableSheet,downloadQualityTableSheet } from '@/lib/fish/qualityTableExport';
 import {qualityOrigins,qualitySourceLabel,QUALITY_SOURCE_NAMES,isSignalLibraryOrigin,type QualityOrigin} from '@/lib/fish/qualitySources';
@@ -403,7 +401,7 @@ function DetectorPicker({ choices, signalsOf, selected, onChange, children }: { 
     </li>; })}</ul> : <p className="px-3 py-3 text-muted-foreground">当前数据里没有默认探测算法的信号</p>}
   </PopoverContent></Popover>;
 }
-export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,jumpingSignalId,tradedDayIndex,campaignDayIndex,directoryRows,archiveView=false, archiveKind, templateTable, onArchiveCampaign, onImportArchiveRows }: { directoryRows?:WorkspaceRowsProps; onImportArchiveRows?:(ids:readonly string[])=>boolean;archiveView?:boolean;archiveKind?:ArchiveKind;templateTable?:QualityTemplateTable;onArchiveCampaign?:()=>void;state: FishQualityState; mining?: FishMiningApi; capturing?: boolean; onJump?: (source: TradeSignal) => void;onRate?:(source:TradeSignal,value:number)=>void; canJump?: (source: TradeSignal) => boolean; jumpingSignalId?: string | null; tradedDayIndex?: Set<string>; campaignDayIndex?: Set<string> }) {
+export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSignalId,tradedDayIndex,campaignDayIndex,directoryRows,archiveView=false, archiveKind, templateTable, onArchiveCampaign, onImportArchiveRows }: { directoryRows?:WorkspaceRowsProps; onImportArchiveRows?:(ids:readonly string[])=>boolean;archiveView?:boolean;archiveKind?:ArchiveKind;templateTable?:QualityTemplateTable;onArchiveCampaign?:()=>void;state: FishQualityState; mining?: FishMiningApi; onJump?: (source: TradeSignal) => void;onRate?:(source:TradeSignal,value:number)=>void; canJump?: (source: TradeSignal) => boolean; jumpingSignalId?: string | null; tradedDayIndex?: Set<string>; campaignDayIndex?: Set<string> }) {
   const { study, ready, running, progress, resumeMonitoring, resumeFiltering, setSourceQuality } = state;
   const sharedTemplateNames=useQualityTemplateNames();
   const templateNames=sharedTemplateNames??qualityTemplateNames(study);
@@ -939,12 +937,6 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     return()=>window.clearTimeout(timer);
   },[tableExport,exportOwner]);
 
-  const instantTrading = !archiveView && state.preEntry && <section className="min-w-0 border-t border-border/50 px-4 py-3" aria-label="即时交易区域">
-    <FishInstantTrading key={state.account} state={state} capturing={capturing}>
-          <FishScreened state={state} library={state.preEntry.library} ratings={study.sourceRatings} onJump={onJump} canJump={canJump} onRate={onRate}
-            jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}/>
-        </FishInstantTrading></section>;
-
   const body=<section ref={rootRef} className="min-w-0 border-t border-border/50 px-4 py-3" aria-labelledby={titleId} data-testid={archiveView?"quality-archive-board":"fish-quality"}>
     {!archiveKind&&<><div className="flex items-center justify-between gap-2">
       <div className="flex items-center gap-0.5"><h3><button id={titleId} type="button" className={fishSectionHeading} aria-expanded={open} aria-controls={contentId} onClick={() => setOpen(!open)}><Gauge aria-hidden className="h-3 w-3 text-muted-foreground"/><span>{archiveView?'归档运行结果':'鱼质量'}</span>{archiveView&&<FishCount n={countSignals(allRows)}/>}<ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`}/></button></h3>
@@ -1195,7 +1187,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     {tableExport&&<div hidden aria-hidden="true" data-testid="quality-export-batch"><table ref={exportTableRef}><tbody>{tableExport.entries.slice(tableExport.offset,tableExport.offset+EXPORT_BATCH).map(({row,index})=>tableExport.render(row,index))}</tbody></table></div>}
     <RowDetail row={allRows.find(r => r.id === detailId)} state={state} templateTable={templateTable} close={() => setDetailId('')}/>
   </section>;
-  return <QualityArchiveContext.Provider value={archiveView}><DirectoryImportContext.Provider value={workspace ? {onImport:importWorkspace,onImportInformation:workspace.importInformation?importWorkspaceInformation:undefined,prepareImport:prepareSourceImport} : undefined}><ArchiveRowsRenderer.Provider value={renderDirectoryBoard}>{body}{instantTrading}</ArchiveRowsRenderer.Provider></DirectoryImportContext.Provider></QualityArchiveContext.Provider>;
+  return <QualityArchiveContext.Provider value={archiveView}><DirectoryImportContext.Provider value={workspace ? {onImport:importWorkspace,onImportInformation:workspace.importInformation?importWorkspaceInformation:undefined,prepareImport:prepareSourceImport} : undefined}><ArchiveRowsRenderer.Provider value={renderDirectoryBoard}>{body}</ArchiveRowsRenderer.Provider></DirectoryImportContext.Provider></QualityArchiveContext.Provider>;
 }
 
 /** Reuse the live table's renderer; only selection/filter/expansion state is local to the viewer. */
