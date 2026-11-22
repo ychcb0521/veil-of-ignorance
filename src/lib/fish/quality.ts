@@ -37,6 +37,7 @@ import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '
 import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
 import { initialPayoffRiskThreshold, isStaticDrawdownSell, qualityExitAlgorithmLabel, qualityExitThresholdText, validateQualityExitRule } from './qualityStaticDrawdownSell';
 import {MIRROR_DEADLINE_KIND,mirrorDeadlineAt,mirrorCompletedBy} from './qualityMirrorDeadline';
+import {MIRROR_LOSS_REVIEW_KIND,MIRROR_LOSS_REVIEW_VERSION,reviewMirrorLoss,type MirrorLossReviewStates,type MirrorLossReviewCheck} from './qualityMirrorLossReview';
 import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVetoIdentity, LIMITED_PAYOFF_RISK_VERSION, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
@@ -116,6 +117,7 @@ export interface QualitySample {
   signalId?: string; detectorId?: string;
 }
 export interface QualityResult {
+  mirrorLossReviews?:MirrorLossReviewStates;
   impulse1115Classification?:HoldingImpulse1115Reading;
   followBasis?: import('./usdtFollowMonitorBasis').UsdtFollowMonitorBasis;
   instantMonitorSwitches?: import('./instantMonitorSwitchCheckpoint').InstantMonitorSwitch[];
@@ -728,6 +730,16 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
   if (end <= entry) return { ...base, status: 'waiting', reason: '等待入场后的首根 1 分钟 K 线' };
   try {
     const row = { ...sample.source, timeMs: now }, pp = pricePlan();
+    const lossReviewRules=activeHoldingVetoes(group.holdingVetoes).filter(v=>v.kind===MIRROR_LOSS_REVIEW_KIND);
+    lossReviewRules.forEach(validateHoldingVeto);
+    const started=sample.binanceEntry?sample.source.timeMs:sample.enteredAt;
+    const reviewObservedFrom=Math.max(sample.enteredAt,sample.importedAt,previous?.instantMonitorSwitches?.at(-1)?.effectiveAt??0);
+    const readReviewPrice=async(at:number,known:readonly ResearchBar[]=[])=>{
+      const saved=known.find(b=>b.openTime===at-QUALITY_MINUTE);if(saved)return saved.close;
+      const bars=await load(row,at-QUALITY_MINUTE,at,pp,signal);validateFishBars(bars,at,1,QUALITY_MINUTE);return bars[0].close;
+    };
+    const lossTrigger=(rule:QualityHoldingVeto,check:MirrorLossReviewCheck,at:number):QualityTrigger=>({at,barOpenTime:at,atOpen:true,reading:check.pnl,
+      cause:{id:rule.id,label:holdingVetoName(rule),kind:rule.kind,direction:rule.direction,threshold:rule.threshold,mirrorDeadlineVersion:MIRROR_LOSS_REVIEW_VERSION,mirrorLossReview:check,...(rule.mirrorStage?{mirrorStage:rule.mirrorStage}:{})}});
     if (!hasQualityExit(group)) {
       // Enter now, but wait for a chosen exit experiment before loading the whole holding history.
       const bars = await load(row, entry, entry + QUALITY_MINUTE, pp, signal);
@@ -752,9 +764,14 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       return {confirmed:met&&advantageState.count>=required,evidence:advantageState};
     }:undefined;
     if (since >= end && !prior?.pendingExit) {
+      if(prior&&lossReviewRules.length){
+        const review=await reviewMirrorLoss({rules:lossReviewRules,entry:started,end,entryPrice:prior.entryPrice!,notional:initialNotional,
+          additions:qualityAdditionFills(prior),reductions:prior.additionReductions,mirror:prior.mirrorFill,actual:!!sample.binanceEntry,observeFrom:sample.binanceEntry?Math.max(since,reviewObservedFrom):since,previous:prior.mirrorLossReviews,readPrice:at=>readReviewPrice(at)});
+        return {...prior,evaluatedAt:now,mirrorLossReviews:review.states,...(review.stop?{pendingExit:lossTrigger(review.stop.rule,review.stop.check,since),
+          reason:`定时检查：尚未镜像止盈，整笔账面盈亏 ${review.stop.check.pnl.toFixed(2)} U；立即发出市价清仓指令`}:{})};
+      }
       // Exchange reconciliation can already have advanced this checkpoint to
       // the latest candle. A due clock stop still acts now, without another bar.
-      const started=sample.source.timeMs;
       const due=sample.binanceEntry&&prior&&activeHoldingVetoes(group.holdingVetoes)
         .filter(v=>v.kind===MIRROR_DEADLINE_KIND).sort((a,b)=>a.threshold-b.threshold)
         .find(v=>mirrorDeadlineAt(started,v.threshold)<=end&&!mirrorCompletedBy(prior.mirrorFill,started,mirrorDeadlineAt(started,v.threshold)));
@@ -882,6 +899,23 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         }else{additionFill=await findQualityAddition({boxBreakVetoes:config.entryVetoes,candidates,required,row,entry,end:Math.min(additionEnd,additionsBlockedAt??Infinity),...(config.minGainPct!=null?{priceGate:{referencePrice:entryPrice,thresholdPct:config.minGainPct,basis:'real-average'}}:{}),...(config.quantityMode?{after:mirrorFill!.at,quantity:config.quantityMode==='entry'?initialNotional/entryPrice*(1-mirrorFill!.fraction):config.quantity}:{notional:config.amountMode==='entry'?initialNotional:config.amountUsdt}),load,signal});additionFills=additionFill?[additionFill]:[];}
       }
     }
+    let mirrorLossReviews=prior?.mirrorLossReviews;
+    if(lossReviewRules.length){
+      const review=await reviewMirrorLoss({rules:lossReviewRules,entry:started,end:finalTime,entryPrice,notional:initialNotional,
+        additions:sample.binanceEntry?qualityAdditionFills(prior??{}):additionFills,reductions:sample.binanceEntry?prior?.additionReductions:additionReductions,
+        mirror:sample.binanceEntry?prior?.mirrorFill:mirrorFill,actual:!!sample.binanceEntry,observeFrom:sample.binanceEntry?Math.max(since,reviewObservedFrom):since,previous:prior?.mirrorLossReviews,readPrice:at=>readReviewPrice(at,prices)});
+      mirrorLossReviews=review.states;
+      if(review.stop&&(!trigger||review.stop.check.at<trigger.at||review.stop.check.at===trigger.at&&!trigger.atOpen)){
+        const at=sample.binanceEntry?Math.max(since,review.stop.check.at):review.stop.check.at;
+        trigger=lossTrigger(review.stop.rule,review.stop.check,at);exitBar=prices.find(b=>b.openTime===at);closed=!!exitBar;
+        finalTime=at;finalPrice=exitBar?.open??review.stop.check.price;stopFill=undefined;sellStageBoundary=false;
+        additionFills=sample.binanceEntry?[...qualityAdditionFills(prior??{})]:additionFills.filter(f=>f.at<at);additionFill=additionFills[0];
+        additionReductions=sample.binanceEntry?prior?.additionReductions:additionReductions?.filter(f=>f.at<at);
+        mirrorFill=sample.binanceEntry?prior?.mirrorFill:undefined;
+        additionVetoes=additionVetoes?.filter(v=>v.at<=at);additionSkips=additionSkips?.filter(v=>v.at<=at);
+        if(additionGuardPlus&&additionGuardPlus.at>at)additionGuardPlus=undefined;
+      }
+    }
     if(boxStopStateAt)boxStopStates=boxStopStateAt(finalTime);
     const savedAdditionBlock=boxAdditionBlockedAt(boxStopStates,prior?.additionsBlockedAt);
     if(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime)additionNote='首次箱体断裂已确认，本笔持仓停止后续加仓；第二次独立断裂时终止，其他卖出条件继续生效';
@@ -920,7 +954,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let vetoPath:import('./qualityVeto').QualityHoldingPath|undefined;
     if(trackVetoPath){vetoPath=prior?.vetoPath??{entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};for(const b of held)vetoPath=advanceQualityHolding(vetoPath,b);vetoPath=advanceQualityHolding({...vetoPath,peak:Math.max(vetoPath.peak,fillPeak)},{openTime:finalTime,open:finalPrice,high:finalPrice,low:finalPrice,close:finalPrice,volume:0,takerBuyVolume:0});}
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
-    return { ...base,...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
+    return { ...base,...(mirrorLossReviews?{mirrorLossReviews}:{}),...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       ...(additionGuardPlus&&additionGuardPlus.at<=finalTime?{additionGuardPlus}:{}),
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
       ...(position&&(additionFill||trackLedger) ? {additionFill,...(group.addition?.quantityMode==='calculator'||prior?.instantMonitorSwitches?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
@@ -943,6 +977,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         : closed && trigger?.cause?.boxBreakEvidence?.version===BOX_SECOND_EXIT_VERSION ? '持仓期间第二次箱体断裂已确认（两次独立防守线红叉），按下一分钟开盘价卖出全部持仓；本条件未在首次断裂时停止加仓'
         : closed && trigger?.cause?.boxBreakEvidence?.version===BOX_SECOND_BREAK_VERSION ? '第二次箱体断裂已确认（两次独立防守线红叉），按下一分钟开盘价卖出全部持仓；第一次断裂后已停止加仓'
         : closed && trigger?.cause?.boxBreakEvidence ? `一票否决：${trigger.cause.boxBreakEvidence.event==='darvas_5m_guard_broken'?'DBL-5-5mins':trigger.cause.label.split(' ')[0]} 防守线断裂（红叉已确认），按下一分钟开盘价卖出全部持仓`
+        : trigger?.cause?.kind===MIRROR_LOSS_REVIEW_KIND ? `定时检查（持仓 ${((trigger.cause.mirrorLossReview!.at-started)/3_600_000).toFixed(1)} 小时）：未镜像且整笔账面盈亏 ${trigger.cause.mirrorLossReview!.pnl.toFixed(2)} U；${closed?'已按检查时点首个可用成交价清仓':'立即发出市价清仓指令，模拟成交等待下一分钟价格'}`
         : trigger?.cause?.kind===MIRROR_DEADLINE_KIND ? `持仓达到 ${trigger.cause.threshold} 小时，尚未实现镜像平衡减仓；${closed?'按到期时点的首个可用成交价清仓':'立即发出市价清仓指令，模拟成交等待下一分钟价格'}`
         : closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${['indicator','box-stop'].includes(trigger.cause.kind)?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? mirrorFill ? `镜像止盈已卖出初始币数 ${mirrorFill.fraction * 100}%，剩余 ${(1 - mirrorFill.fraction) * 100}% 持有中` : '持有中' : '观察期结束仍持有，记录期末浮盈' };
   } catch (error) {

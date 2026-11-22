@@ -1,6 +1,6 @@
 import { qualityAdditionFills } from './qualityAddition';
 import {instantMonitorExitDue,instantMonitorSale} from './instantMonitorExecution';
-import {MIRROR_DEADLINE_KIND,MIRROR_DEADLINE_VERSION} from './qualityMirrorDeadline';
+import {isMirrorClockExit} from './qualityMirrorLossReview';
 import { qualityResultKey, type QualityResult, type QualitySample } from './quality';
 import { MANAGED_MINUTE, binanceManualId, initialBinanceManualCheckpoint, type BinanceManualDecision, type BinanceManualPosition } from './binanceManualMonitor';
 
@@ -29,7 +29,7 @@ export function binanceManualAdvance(position: BinanceManualPosition, prior: Qua
   // A due clock stop must not be delayed by replayed, still-unexecuted additions
   // or mirror proposals. The unchanged prior checkpoint contains actual fills.
   const deadlineCause=observed.pendingExit?.cause??observed.exitSnapshot?.cause;
-  if(deadlineCause?.kind===MIRROR_DEADLINE_KIND&&deadlineCause.mirrorDeadlineVersion===MIRROR_DEADLINE_VERSION&&instantMonitorExitDue(observed)){
+  if(isMirrorClockExit(deadlineCause)&&instantMonitorExitDue(observed)){
     const at=instantMonitorSale(observed).at;
     return {checkpoint:prior,decision:{kind:'close' as const,reason:observed.reason||'镜像限时终止',through:through(at),action:{id,action:'close' as const,at}}};
   }
@@ -68,5 +68,5 @@ export function binanceManualAdvance(position: BinanceManualPosition, prior: Qua
     const moves = reductions.filter(evidence => evidence.fraction === 0 && evidence.at < decision.action.at);
     return { decision, checkpoint: moves.length ? { ...prior, additionReductions: [...(prior.additionReductions ?? []), ...moves] } : prior };
   }
-  if (observed.status === 'open' && (observed.endTime ?? 0) > after && actions.length === 0) return { checkpoint: observed };
+  if (observed.status === 'open' && ((observed.endTime ?? 0) > after || observed.mirrorLossReviews&&JSON.stringify(observed.mirrorLossReviews)!==JSON.stringify(prior.mirrorLossReviews)) && actions.length === 0) return { checkpoint: observed };
 }

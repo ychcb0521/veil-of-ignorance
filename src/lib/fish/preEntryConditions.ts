@@ -15,7 +15,7 @@ export interface PreEntryConditions {
   hardVetoes: QualityHoldingVeto[];
 }
 export const emptyPreEntryConditions = (): PreEntryConditions => ({ version: PRE_ENTRY_CONDITIONS_VERSION, entryVetoes: [], sellVetoes: [], hardVetoes: [] });
-export const preEntryPositionOnly = (kind: string) => kind === 'addition-geometric-profit' || kind === 'payoff-ratio' || kind === 'mirror-deadline';
+export const preEntryPositionOnly = (kind: string) => kind === 'addition-geometric-profit' || kind === 'payoff-ratio' || kind === 'mirror-deadline' || kind === 'mirror-loss-review';
 export function validatePreEntryConditions(value?: PreEntryConditions) {
   if (!value) return;
   if (value.version !== PRE_ENTRY_CONDITIONS_VERSION) throw Error('动态筛选条件版本不可用，请保留旧方案');

@@ -98,7 +98,7 @@ export function settleManagedUsdtDecision(row: UsdtCampaignLedger, key: string, 
     const at = Math.max(...actual.map(fill => fill.at));
     checkpoint = { ...checkpoint, endPrice: price };
     if (pending.kind === 'add') {
-      const addition = { ...pending.evidence, price, quantity, notional: price * quantity };
+      const addition = { ...pending.evidence, executedAt:Math.max(...actual.map(fill=>fill.at)), price, quantity, notional: price * quantity };
       const additions = [...(prior.additionFills ?? (prior.additionFill ? [prior.additionFill] : [])), addition];
       const newVetoStage = pending.vetoStageSwitches?.at(-1);
       const peak = Math.max(price, prior.vetoPath?.peak ?? managed.entryPrice * (1 + (prior.peakPct ?? 0) / 100));
@@ -113,7 +113,7 @@ export function settleManagedUsdtDecision(row: UsdtCampaignLedger, key: string, 
         gainPct: (price / managed.entryPrice - 1) * 100 };
     } else if (pending.kind === 'support-reduction') {
       const costRemoved = quantity * remaining.entry;
-      const reduction = { ...pending.evidence, price, quantity, costRemoved,
+      const reduction = { ...pending.evidence, executedAt:Math.max(...actual.map(fill=>fill.at)), price, quantity, costRemoved,
         fraction: units / (remaining.held + units), realizedPnl: actual.reduce((sum, fill) => sum + fill.realized, 0) };
       checkpoint.additionReductions = [...(prior.additionReductions ?? []), reduction];
     } else if (!remaining.held) {

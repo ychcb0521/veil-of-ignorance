@@ -157,6 +157,7 @@ export function supportDropReduction(p:{held:number;cost:number;realized:number}
 export const defaultSupportReduction = (): QualitySupportReductionRule => ({ enabled: false, minDropAtr: .5, maxPct: 80, version: 2 });
 /** 一次支撑下移减仓：减掉当时持仓的 fraction；costRemoved 为按均价移出的成本，realizedPnl＝quantity×price − costRemoved。 */
 export interface QualityReductionFill {
+  executedAt?:number;
   reductionVersion?:1|2;
   at: number; price: number; fraction: number; quantity: number; costRemoved: number; realizedPnl: number; breakeven: number; previousK: number; newK: number; previousSupport: number; newSupport: number; atr: number;
   /** 开着保本底线时：挪到的防守线 K′（newK 是它下方的保本底线 F′）。 */
@@ -173,6 +174,7 @@ const atrIdentity=(rule:QualityAdditionRoundRule)=>qualityAdditionAtrSettings(ru
 export const qualityAdditionRoundLimit=(rule:QualityAdditionRule)=>rule.maxRounds??(rule.repeat===false?1:Infinity);
 export const qualityAdditionRound=(rule:QualityAdditionRule,index:number):QualityAdditionRoundRule=>rule.rounds?.[index]??rule;
 export interface QualityAdditionFill {
+  executedAt?:number;
   positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;
   ledger?:{costBefore:number;realizedBefore:number;mirrorQuantityBefore:number;breakevenBefore:number};
   kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;

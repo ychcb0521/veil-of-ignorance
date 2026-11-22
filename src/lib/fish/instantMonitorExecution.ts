@@ -12,7 +12,7 @@ import { INSTANT_TEMPLATE_MONITOR } from './instantMonitorSettings';
 
 import { legacyPlanInEngineUnits, legacyResultInPositionUnits } from './instantLegacyPosition';
 import { sizeInstantEntry, type InstantPositionSettings } from './instantPositionSettings';
-import {MIRROR_DEADLINE_KIND,MIRROR_DEADLINE_VERSION} from './qualityMirrorDeadline';
+import {isMirrorClockExit} from './qualityMirrorLossReview';
 
 export const INSTANT_POSITION = { marginUsdt: 40, leverage: 5 } as const;
 export function instantMonitorSize(monitor?: InstantMonitorSettings, position?: InstantPositionSettings) {
@@ -52,13 +52,12 @@ export async function evaluateInstantMonitor(sample: QualitySample, monitor: Ins
 /** A clock deadline can issue a market exit before the next candle's fill price exists.
  * Keep the result open/pending until execution is known; never invent a market fill. */
 export function instantMonitorExitDue(result:QualityResult):boolean {
-  return result.status==='closed'||result.status==='open'&&result.pendingExit?.cause?.kind===MIRROR_DEADLINE_KIND
-    &&result.pendingExit.cause.mirrorDeadlineVersion===MIRROR_DEADLINE_VERSION
+  return result.status==='closed'||result.status==='open'&&isMirrorClockExit(result.pendingExit?.cause)
     &&Number.isFinite(result.pendingExit.at)&&result.pendingExit.at<=result.evaluatedAt
     &&Number.isFinite(result.endPrice)&&result.endPrice!>0;
 }
 export function instantMonitorSale(result: QualityResult): ScreenedCdaTrigger {
-  return { at: result.pendingExit?.cause?.kind===MIRROR_DEADLINE_KIND&&instantMonitorExitDue(result)?result.pendingExit.at:result.endTime!, closePrice: result.endPrice!,
+  return { at: result.pendingExit&&isMirrorClockExit(result.pendingExit.cause)&&instantMonitorExitDue(result)?result.pendingExit.at:result.endTime!, closePrice: result.endPrice!,
     evidence: { version: INSTANT_TEMPLATE_MONITOR, reason: 'template', detail: result.reason || '持仓监测模板触发卖出' } };
 }
 
