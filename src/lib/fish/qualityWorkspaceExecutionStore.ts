@@ -1,8 +1,8 @@
 import {newQualityStudy,type FishQualityStudy} from './quality';
 import {qualityWorkspaceData,preserveQualityWorkspace,preserveQualitySignalReadings,preserveQualityFilterDraft} from './qualitySignalReadingsStore';
 import {saveQualityStudy as saveHistoricalStudy} from './qualityStore';
-import {preserveQualityFilterLibrary} from './qualityFilterLibrary';
-import {preserveQualityMonitorLibrary} from './qualityMonitorLibrary';
+import {serializeArchiveWork} from '../serializeArchiveWork';
+export {mergeQualityWorkspaceExecution} from './qualityWorkspaceExecutionMerge';
 
 const key=(owner?:string)=>'fish-quality:'+(owner??'anonymous');
 const executionKey=(owner?:string)=>key(owner)+':workspace-execution-v1';
@@ -28,7 +28,8 @@ export async function loadQualityWorkspaceExecution(owner:string|undefined,infor
   tx.onerror=tx.onabort=()=>reject(tx.error??Error('组合表运行读取失败，请重试'));
  });}finally{db.close();}
 }
-export async function saveQualityWorkspaceExecution(owner:string|undefined,study:FishQualityStudy){
+export function saveQualityWorkspaceExecution(owner:string|undefined,study:FishQualityStudy){
+ return serializeArchiveWork(async()=>{
  const db=await open();
  try{await new Promise<void>((resolve,reject)=>{
   const tx=db.transaction('studies','readwrite'),store=tx.objectStore('studies');
@@ -42,20 +43,10 @@ export async function saveQualityWorkspaceExecution(owner:string|undefined,study
     if(next.workspaceUpdatedAt)store.put(qualityWorkspaceData(next),key(owner)+':workspace');
    }catch(cause){tx.abort();reject(cause);}
   };
- });return true;}finally{db.close();}
+ });
+ if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent('fish-quality-saved',{detail:{owner}}));
+ return true;}finally{db.close();}
+ });
 }
 export const saveExecutableQualityStudy=(owner:string|undefined,study:FishQualityStudy,options?:Parameters<typeof saveHistoricalStudy>[2])=>
  study.workspaceExecution===1?saveQualityWorkspaceExecution(owner,study):options?saveHistoricalStudy(owner,study,options):saveHistoricalStudy(owner,study);
-
-/** Explicit historical reads retain the current working results and append saved rounds. */
-export function mergeQualityWorkspaceExecution(history:FishQualityStudy,working:FishQualityStudy){
- const combined=preserveQualityFilterLibrary(working,preserveQualityMonitorLibrary(working,preserveQualityWorkspace(working,history)));
- const readings=<T extends {key:string}>(old:readonly T[]|undefined,next:readonly T[]|undefined)=>[...new Map([...(old??[]),...(next??[])].map(item=>[item.key,item])).values()];
- return {...combined,workspaceExecution:undefined,
-  results:[...new Map([...history.results,...working.results].map(result=>[result.key,result])).values()],
-  buyFilters:working.buyFilters,independentFilters:working.independentFilters,
-  workspaceFilterDraft:working.workspaceFilterDraft,workspaceFilterDraftUpdatedAt:working.workspaceFilterDraftUpdatedAt,
-  signalMetrics:working.signalMetrics,signalMetricsUpdatedAt:working.signalMetricsUpdatedAt,turingStaticSettings:working.turingStaticSettings,
-  signalReadings:readings(history.signalReadings,working.signalReadings),filterReadings:readings(history.filterReadings,working.filterReadings),
- };
-}

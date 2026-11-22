@@ -29,6 +29,7 @@ export function qualityDetectorCategory(detectors: readonly QualityGroup[]): str
   return labels.length ? labels.join(' + ') : '无探测算法';
 }
 export type QualityCampaignData = Awaited<ReturnType<typeof getCampaignFullData>>;
+export class QualityCampaignNotFoundError extends Error {}
 const iso = (time: number) => new Date(time).toISOString();
 // 模拟交易没有另外的「实际操作时间」：每一笔都发生在它模拟成交的那一刻，实际时间 = 模拟时间。
 // 记录时间（recorded_at / created_at）仍是计算时刻。旧版把实际时间写成计算时刻，交易战役按实际时间排先后，
@@ -167,7 +168,7 @@ export function* iterateQualityCampaignData(owner: string, study: FishQualityStu
 export function qualityMonitorCampaignDataFromStudy(owner:string, study:FishQualityStudy, id:string):QualityCampaignData {
   const recordId=monitorCampaignRecordId(id),record=study.monitorLibrary?.records.find(r=>r.id===recordId);
   const setting=record&&study.monitorLibrary?.settings.find(s=>s.id===record.settingId);
-  if(!record||!setting)throw new Error('本账号未找到这条监测记录，请在保存该监测库的账号中打开');
+  if(!record||!setting)throw new QualityCampaignNotFoundError('本账号未找到这条监测记录，请在保存该监测库的账号中打开');
   return buildMonitorCampaignData(owner,record,setting);
 }
 function buildMonitorCampaignData(owner:string,record:QualityMonitorRecord,setting:QualityMonitorSetting):QualityCampaignData {
@@ -205,7 +206,7 @@ export function qualityCampaignDetailFromStudy(owner: string, study: FishQuality
     const successor = run.supersededBy;
     run = findRun(key => key === successor);
   }
-  if (!run) throw new Error('本账号未找到这场比较战役，请在保存鱼质量结果的浏览器中打开');
+  if (!run) throw new QualityCampaignNotFoundError('本账号未找到这场比较战役，请在保存鱼质量结果的浏览器中打开');
   if (!hasQualityEntry(run.result)) throw new Error(`此战役纠错未通过：${run.repair?.error ?? '缺少可靠成交数据'}。原记录仍保留，可在比较列表重试纠错。`);
   return buildQualityCampaignData(owner, run, section);
 }

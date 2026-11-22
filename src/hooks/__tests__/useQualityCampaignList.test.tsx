@@ -5,6 +5,8 @@ import { listLocalInstantCampaignData, listQualityCampaignData } from '@/lib/fis
 import { publishInstantCampaigns } from '@/lib/fish/instantCampaignStore';
 import { buildUsdtLiveCampaignData } from '@/lib/fish/usdtLiveCampaignProjection';
 import type { UsdtLiveCampaign } from '@/lib/fish/usdtLiveCampaign';
+import { workspaceCampaignFixture } from '@/lib/fish/__tests__/workspaceCampaign.fixture';
+import { listQualityCampaignDataFromStudy } from '@/lib/fish/qualityCampaignProjection';
 vi.mock('@/lib/fish/qualityCampaigns', () => ({
   listQualityCampaignData: vi.fn(async () => ({ rows: [], warning: undefined, selectedSellKey: undefined })),
   listLocalInstantCampaignData: vi.fn(async () => []),
@@ -45,13 +47,28 @@ it('does no comparison loading for the personal board and isolates board/account
   // 【用户要求】2026-10-26 卖出比较与探测比较合并为「卖出与探测（控制变量法）」一个板块
   const h = renderHook(({ owner, section }) => useQualityCampaignList(owner, section), { initialProps: { owner: 'a', section: 'personal' as 'personal' | 'quality' } });
   expect(load).not.toHaveBeenCalled();
-  h.rerender({ owner: 'a', section: 'quality' }); await waitFor(() => expect(h.result.current.complete).toBe(true)); expect(load).toHaveBeenLastCalledWith('a', 'quality',expect.any(AbortSignal));
+  h.rerender({ owner: 'a', section: 'quality' }); await waitFor(() => expect(h.result.current.complete).toBe(true)); expect(load).toHaveBeenLastCalledWith('a', 'quality',expect.any(AbortSignal),expect.any(Function));
   const previousSignal=load.mock.calls.at(-1)![2]!;
   h.rerender({ owner: 'b', section: 'quality' }); expect(h.result.current.rows).toEqual([]);
-  await waitFor(() => expect(load).toHaveBeenLastCalledWith('b', 'quality',expect.any(AbortSignal)));expect(previousSignal.aborted).toBe(true);
+  await waitFor(() => expect(load).toHaveBeenLastCalledWith('b', 'quality',expect.any(AbortSignal),expect.any(Function)));expect(previousSignal.aborted).toBe(true);
   const n = load.mock.calls.length;
   act(() => { window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner: 'a' } })); }); expect(load).toHaveBeenCalledTimes(n);
   act(() => { window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner: 'b' } })); }); await waitFor(() => expect(load).toHaveBeenCalledTimes(n + 1));
+});
+it('shows current working campaigns while historical recovery is pending and retains them when recovery fails', async () => {
+  let fail!: (error: Error) => void;
+  const local = listQualityCampaignDataFromStudy('current', workspaceCampaignFixture(), 'quality', []);
+  vi.mocked(listQualityCampaignData).mockImplementationOnce((_owner, _section, _signal, onLocal) => {
+    onLocal?.(local);
+    return new Promise((_resolve, reject) => { fail = reject; });
+  });
+  const h = renderHook(() => useQualityCampaignList('current', 'quality'));
+  await waitFor(() => expect(h.result.current.rows).toHaveLength(local.rows.length));
+  expect(h.result.current.complete).toBe(false);
+  await act(async () => fail(Error('历史同步离线')));
+  expect(h.result.current.rows.map(row => row.campaign.id)).toEqual(local.rows.map(row => row.campaign.id));
+  expect(h.result.current.complete).toBe(true);
+  expect(h.result.current.error).toBe('历史同步离线');
 });
 it('passes the sell board buy-filter label through and clears it on other boards', async () => {
   const load = vi.mocked(listQualityCampaignData);

@@ -1,7 +1,8 @@
 import { accountFeatureDefs } from '@/lib/featureSource';
 import { loadQualityStudy, prepareQualityCampaignRead } from './qualityStore';
 import { listQualityCampaignDataFromStudy, qualityCampaignDetailFromStudy, type QualityCampaignData } from './qualityCampaignProjection';
-import type { QualityCampaignReadRequest, QualityCampaignReadResult } from './qualityCampaignReader';
+import { readQualityCampaignProjection, withStoredQualityCampaignStudy, type QualityCampaignReadRequest, type QualityCampaignReadResult } from './qualityCampaignReader';
+import { mergeQualityWorkspaceExecution } from './qualityWorkspaceExecutionMerge';
 import { paperCampaignPerformance, qualityCampaignPerformanceFromStudy } from './qualityCampaignPerformance';
 import { serializeArchiveWork } from '../serializeArchiveWork';
 import {QualityCampaignPacketDecoder,type QualityCampaignReply} from './qualityCampaignTransfer';
@@ -23,6 +24,14 @@ export type { QualityCampaignData } from './qualityCampaignProjection';
 
 function throwIfReadAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new DOMException('读取已取消', 'AbortError');
+}
+
+async function loadCampaignStudy(owner: string) {
+  const loaded = await loadQualityStudy(owner);
+  if (typeof indexedDB === 'undefined') return loaded;
+  const study = await withStoredQualityCampaignStudy({ owner, kind: 'list', section: 'quality', definitions: [], workspaceOnly: true },
+    working => working.workspaceExecution === 1 ? mergeQualityWorkspaceExecution(loaded.study, working) : loaded.study);
+  return { ...loaded, study };
 }
 
 // Campaign navigation, saves and cloud encoders share the renderer's memory.
@@ -82,7 +91,8 @@ export async function listLocalInstantCampaignData(owner: string) {
   return mergeUsdtLiveCampaignRows([...paper, ...live.map(({ campaign }) => buildUsdtLiveCampaignData(owner, campaign))]);
 }
 
-export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect' | 'quality' | 'instant' = 'quality',signal?:AbortSignal) {
+export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect' | 'quality' | 'instant' = 'quality',signal?:AbortSignal,
+  onLocal?: (data: ReturnType<typeof listQualityCampaignDataFromStudy>) => void) {
   if (section === 'instant') {
     const [{ snapshots, warning }, live] = await Promise.all([listInstantCampaignSnapshots(owner, signal),
       listCloudUsdtCampaigns(owner, signal).catch(() => undefined)]);
@@ -94,6 +104,13 @@ export async function listQualityCampaignData(owner: string, section: 'sell' | '
       selectedSellKey: undefined, buyFilterLabel: '', repair: undefined };
   }
   if(signal?.aborted)throw new DOMException('读取已取消','AbortError');
+  if (onLocal && (typeof Worker === 'function' || typeof indexedDB !== 'undefined')) {
+    const request: QualityCampaignReadRequest = { owner, kind: 'list', section, definitions: accountFeatureDefs(), workspaceOnly: true };
+    const local = await (typeof Worker === 'function' ? projectInWorker(request, signal) : readQualityCampaignProjection(request));
+    throwIfReadAborted(signal);
+    if (local.kind !== 'list') throw new Error('持仓监测读取结果不匹配');
+    onLocal(local.data);
+  }
   if (typeof Worker === 'function') {
     const prepared = await prepareQualityCampaignRead(owner);
     if (prepared.durable) {
@@ -103,7 +120,7 @@ export async function listQualityCampaignData(owner: string, section: 'sell' | '
     }
   }
   if(signal?.aborted)throw new DOMException('读取已取消','AbortError');
-  const loaded = await loadQualityStudy(owner);
+  const loaded = await loadCampaignStudy(owner);
   return { ...listQualityCampaignDataFromStudy(owner, loaded.study, section), warning: loaded.warning };
 }
 export async function loadQualityCampaignData(owner: string, id: string, signal?: AbortSignal): Promise<QualityCampaignData> {
@@ -177,6 +194,14 @@ export async function loadQualityCampaignData(owner: string, id: string, signal?
     const metadata = original ? instantCampaignMetadata(original.record, original.round) : undefined;
     return applyTrash(buildInstantCampaignData(owner, { ...frozen, metadata }));
   }
+  // Resolve the working trade before synchronizing or downloading legacy history.
+  if (typeof Worker === 'function' || typeof indexedDB !== 'undefined') {
+    const request: QualityCampaignReadRequest = { owner, kind: 'detail', id, workspaceOnly: true };
+    const local = await (typeof Worker === 'function' ? projectInWorker(request, signal) : readQualityCampaignProjection(request));
+    throwIfReadAborted(signal);
+    if (local.kind === 'detail') return applyTrash(local.data);
+    if (local.kind !== 'missing') throw new Error('持仓监测读取结果不匹配');
+  }
   if (typeof Worker === 'function') {
     const prepared = await prepareQualityCampaignRead(owner);
     if (prepared.durable) {
@@ -186,7 +211,7 @@ export async function loadQualityCampaignData(owner: string, id: string, signal?
     }
   }
   throwIfReadAborted(signal);
-  const { study } = await loadQualityStudy(owner);
+  const { study } = await loadCampaignStudy(owner);
   throwIfReadAborted(signal);
   return applyTrash(qualityCampaignDetailFromStudy(owner, study, id));
 }
@@ -210,7 +235,7 @@ export async function loadQualityCampaignPerformance(owner: string, section: 'se
     }
   }
   throwIfReadAborted(signal);
-  const { study } = await loadQualityStudy(owner);
+  const { study } = await loadCampaignStudy(owner);
   throwIfReadAborted(signal);
   return qualityCampaignPerformanceFromStudy(owner, study, section, sellKey, excluded);
 }

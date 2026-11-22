@@ -20,6 +20,51 @@ it('requests only a worker summary for detail account metrics, never a full camp
   expect(store.load).not.toHaveBeenCalled(); expect(terminate).toHaveBeenCalledOnce();
 });
 afterEach(() => vi.unstubAllGlobals());
+it('resolves the independent working trade before legacy synchronization, even when legacy recovery would fail', async () => {
+  const sent = vi.fn();
+  store.prepare.mockRejectedValue(Error('legacy cloud offline'));
+  class Reader {
+    onmessage: any; onerror: any; terminate = vi.fn();
+    postMessage(request: any) {
+      if (request.type === 'ack') return;
+      sent(request);
+      queueMicrotask(() => reply(this, { kind: 'detail', data: { campaign: { id: 'fish-sell-working' } } }));
+    }
+  }
+  vi.stubGlobal('Worker', Reader);
+  expect((await loadQualityCampaignData('owner', 'fish-sell-working')).campaign.id).toBe('fish-sell-working');
+  expect(sent).toHaveBeenCalledExactlyOnceWith({ owner: 'owner', kind: 'detail', id: 'fish-sell-working', workspaceOnly: true });
+  expect(store.prepare).not.toHaveBeenCalled(); expect(store.load).not.toHaveBeenCalled();
+});
+it('falls back to the historical reader only when the working record explicitly has no such trade', async () => {
+  const sent: any[] = [];
+  class Reader {
+    onmessage: any; onerror: any; terminate = vi.fn();
+    postMessage(request: any) {
+      if (request.type === 'ack') return;
+      sent.push(request);
+      queueMicrotask(() => reply(this, request.workspaceOnly ? { kind: 'missing' } : { kind: 'detail', data: { campaign: { id: request.id } } }));
+    }
+  }
+  vi.stubGlobal('Worker', Reader);
+  expect((await loadQualityCampaignData('owner', 'fish-sell-historical')).campaign.id).toBe('fish-sell-historical');
+  expect(sent).toHaveLength(2); expect(sent[0].workspaceOnly).toBe(true); expect(sent[1].workspaceOnly).toBeUndefined();
+  expect(store.prepare).toHaveBeenCalledOnce(); expect(store.load).not.toHaveBeenCalled();
+});
+it('publishes the working list before attempting historical recovery', async () => {
+  const local = vi.fn();
+  store.prepare.mockImplementation(async () => { expect(local).toHaveBeenCalledOnce(); throw Error('historical recovery failed'); });
+  class Reader {
+    onmessage: any; onerror: any; terminate = vi.fn();
+    postMessage(request: any) {
+      if (request.type === 'ack') return;
+      expect(request.workspaceOnly).toBe(true);
+      queueMicrotask(() => reply(this, { kind: 'list', data: { rows: [], buyFilterLabel: '', selectedSellKey: undefined } }));
+    }
+  }
+  vi.stubGlobal('Worker', Reader);
+  await expect(listQualityCampaignData('owner', 'quality', undefined, local)).rejects.toThrow('historical recovery failed');
+});
 it('cancels an obsolete read and releases the shared archive queue immediately',async()=>{
  const workers:any[]=[];
  class Reader{onmessage:any;onerror:any;terminate=vi.fn();constructor(){workers.push(this);}postMessage(){}}

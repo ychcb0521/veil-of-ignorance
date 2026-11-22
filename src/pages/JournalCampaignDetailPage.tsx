@@ -984,6 +984,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   );
   const { getEffectiveTime, balance, positionsMap, priceMap } = useTradingContext();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [campaign, setCampaign] = useState<TradeCampaign | null>(null);
   const templateNames = useCampaignTemplateNames(campaign ?? undefined);
   const campaignDisplayCode = useMemo(
@@ -1156,6 +1158,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     const controller = new AbortController();
     (async () => {
       setLoading(true);
+      setLoadError(null);
       try {
         // 列表页的后台自愈正好在跑这一场：等它落地再读（最多等 2 s），之后在本页的编辑不会被它晚到的写入盖回去
         if (!batchExport) await waitForCampaignListHeal(id);
@@ -1225,15 +1228,14 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             reportBatchError(error);
             return;
           }
-          toast.error(error instanceof Error ? error.message : String(error));
-          nav(`/journal/campaigns${detailSearch}`);
+          setLoadError(error instanceof Error ? error.message : String(error));
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; controller.abort(); };
-  }, [id, viewerUserId, nav, detailSearch, adoptUnfilledOrderIds, batchExport, reportBatchError, paperCampaign]);
+  }, [id, viewerUserId, nav, detailSearch, adoptUnfilledOrderIds, batchExport, reportBatchError, paperCampaign, loadAttempt]);
 
   const campaignOwnerId = campaign?.user_id ?? null;
   const instantSummary = campaign?.comparison?.instant;
@@ -2374,6 +2376,19 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     setDeviationNotes(campaign.deviation_notes ?? {});
   }, [campaign, id]);
 
+  if (loadError && !batchExport) return (
+    <main className="min-h-screen bg-background p-6">
+      <div role="alert" className="mx-auto max-w-xl space-y-4 rounded-xl border border-border bg-card p-6">
+        <h1 className="font-medium">交易战役加载失败</h1>
+        <p className="text-sm text-muted-foreground break-words">{loadError}</p>
+        <p className="text-sm text-muted-foreground">原有记录仍保留，请重试读取。</p>
+        <div className="flex gap-3">
+          <Button onClick={() => setLoadAttempt(value => value + 1)}>重试读取</Button>
+          <Button variant="outline" onClick={() => nav(`/journal/campaigns${detailSearch}`)}>返回战役列表</Button>
+        </div>
+      </div>
+    </main>
+  );
   if (loading || !campaign || !accuracy) {
     if (batchExport) return null;
     return (

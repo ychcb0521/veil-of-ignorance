@@ -91,7 +91,20 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
       if (inFlight) { queued = true; return; }
       inFlight = true;
       try {
-        const data = await listQualityCampaignData(owner, section,controller.signal);
+        const showWorking: NonNullable<Parameters<typeof listQualityCampaignData>[3]> = data => {
+          if (!active || epoch !== generation || !data.rows.length) return;
+          const incoming = cards(data.rows);
+          setSnapshot(previous => {
+            const sameSection = previous.owner === owner && previous.section === section;
+            const rows = new Map((sameSection ? previous.rows : []).map(row => [row.campaign.id, row]));
+            for (const row of incoming) rows.set(row.campaign.id, row);
+            return { owner, section, rows: [...rows.values()], complete: sameSection && previous.complete,
+              error: sameSection ? previous.error : null, selectedSellKey: data.selectedSellKey, buyFilterLabel: data.buyFilterLabel };
+          });
+        };
+        const data = section === 'quality'
+          ? await listQualityCampaignData(owner, section, controller.signal, showWorking)
+          : await listQualityCampaignData(owner, section, controller.signal);
         if (active && epoch === generation) observedRepair = data.repair;
         if (active && epoch === generation) {
           const rows = cards(data.rows);

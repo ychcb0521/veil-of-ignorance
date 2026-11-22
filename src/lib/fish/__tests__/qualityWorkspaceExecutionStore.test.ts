@@ -2,6 +2,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {newQualityStudy,qualityComparisonRows} from '../quality';
 import {browseInformationStudy} from '../browseInformationStudy';
 import {loadQualityWorkspaceExecution,saveExecutableQualityStudy,mergeQualityWorkspaceExecution} from '../qualityWorkspaceExecutionStore';
+import {workspaceCampaignFixture} from './workspaceCampaign.fixture';
 const historical=vi.hoisted(()=>vi.fn(async()=>true));
 vi.mock('../qualityStore',()=>({saveQualityStudy:historical}));
 function fixture(){
@@ -38,4 +39,22 @@ it('preserves legacy saves and merges working results into an explicitly loaded 
   results:[{key:'new-result',sampleId:'a',groupId:'p',evaluatedAt:2,status:'closed' as const}],filterReadings:[{key:'zero',value:0}]};
  const merged=mergeQualityWorkspaceExecution(history,working);
  expect(merged.workspaceExecution).toBeUndefined();expect(merged.planTemplates).toEqual(history.planTemplates);expect(merged.results).toEqual(working.results);expect(merged.filterReadings).toEqual(working.filterReadings);expect(history).toEqual(before);
+});
+it('keeps working frozen campaign history after a full archive is explicitly opened, even if current samples/plans were removed',()=>{
+ const history=newQualityStudy(1),working=workspaceCampaignFixture();
+ const frozen=structuredClone(working.campaignRuns);
+ working.samples=[];working.sellPlans=[];working.results=[];
+ const merged=mergeQualityWorkspaceExecution(history,working);
+ expect(merged.campaignRuns).toEqual(frozen);expect(history.campaignRuns).toBeUndefined();
+});
+it('commits the working snapshot before letting the campaign reader enter the archive queue and publishes a saved event',async()=>{
+ const f=fixture(),study={...newQualityStudy(),workspaceExecution:1 as const};
+ const listener=vi.fn();window.addEventListener('fish-quality-saved',listener);
+ try{
+  const save=saveExecutableQualityStudy('alice',study);
+  const {serializeArchiveWork}=await import('@/lib/serializeArchiveWork');
+  const observed=serializeArchiveWork(async()=>structuredClone(f.rows.get('fish-quality:alice:workspace-execution-v1')));
+  expect(await save).toBe(true);expect(await observed).toMatchObject({workspaceExecution:1});
+  expect(listener).toHaveBeenCalledOnce();expect(listener.mock.calls[0][0].detail).toEqual({owner:'alice'});
+ }finally{window.removeEventListener('fish-quality-saved',listener);}
 });

@@ -309,6 +309,15 @@ describe('战役详情页 · 状态与已实现盈亏同源', () => {
 });
 
 describe('战役详情页 · 等列表后台自愈让出', () => {
+  it('keeps the failed detail link and supports retry without rerunning or changing templates', async () => {
+    vi.mocked(getCampaignFullData).mockRejectedValueOnce(new Error('本机监测记录读取失败，请重试'));
+    renderDetail('tut-1');
+    expect(await screen.findByRole('alert')).toHaveTextContent('本机监测记录读取失败，请重试');
+    expect(screen.getByText('交易战役加载失败')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重试读取' }));
+    await waitFor(() => expect(screen.getByTestId('campaign-status-chip')).toHaveTextContent('亏损结束'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
   it('打开的正是后台正在自愈的那一场：等它落地再读，读到的是收敛后的行', async () => {
     let release!: () => void;
     vi.mocked(waitForCampaignListHeal).mockReturnValueOnce(new Promise<void>(resolve => { release = resolve; }));
