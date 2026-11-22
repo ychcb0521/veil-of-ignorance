@@ -1,6 +1,6 @@
 import {ArchiveReadFailure} from './accountArchiveRead';
 
-/** Resume verified, complete batches of the same account revision on this page. */
+/** Resume individually verified parts of the same account revision on this page. */
 export type RecoveryProgress = {phase: 'download' | 'decode' | 'save'; done: number; total: number};
 export interface RecoveryRead {
   signal: AbortSignal;
@@ -33,7 +33,9 @@ export async function readQualityRecoveryParts(
   const report = () => context.report({phase: 'download', done: cache.count, total: keys.length});
   context.signal.addEventListener('abort', cancel, {once: true});
   let cursor = 0;
-  const batchSize = 4;
+  // Each stored part can be 900 KB. Keep responses small and checkpoint every
+  // verified part, so one slow request cannot discard its successful neighbours.
+  const batchSize = 1;
   async function worker() {
     while (cursor < keys.length) {
       checkRecoverySignal(controller.signal);

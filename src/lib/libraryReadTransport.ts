@@ -1,7 +1,17 @@
 /** Read-only account library requests may use one alternate route. Never replay writes. */
 const ROUTE_TIMEOUT_MS = 5_000;
+const SHARD_ROUTE_TIMEOUT_MS = 30_000;
+
+function readTimeout(input: RequestInfo | URL) {
+  const url = new URL(input instanceof Request ? input.url : String(input));
+  const fullValue = /(?:^|,)(?:[\w]+:)?value(?:,|$)/.test(url.searchParams.get('select') ?? '');
+  // Catalog/head reads stay short. A 900 KB encoded shard needs time for the
+  // response body too; a successful HTTP 200 is not a completed download.
+  return fullValue && /#\d+/.test(url.searchParams.get('key') ?? '') ? SHARD_ROUTE_TIMEOUT_MS : ROUTE_TIMEOUT_MS;
+}
 
 export async function fetchLibraryRead(fetcher:typeof fetch,input:RequestInfo|URL,init:RequestInit|undefined,gateway:string):Promise<Response> {
+  const timeoutMs = readTimeout(input);
   const external=init?.signal??(input instanceof Request?input.signal:undefined);
   const read=async(target:RequestInfo|URL)=>{
     if(external?.aborted)throw new DOMException('读取已取消','AbortError');
@@ -14,7 +24,7 @@ export async function fetchLibraryRead(fetcher:typeof fetch,input:RequestInfo|UR
       const fail=()=>reject(external?.aborted?new DOMException('读取已取消','AbortError'):new Error('库记录读取超时，请重试'));
       controller.signal.addEventListener('abort',fail,{once:true});
       if(controller.signal.aborted)fail();
-      timer=setTimeout(()=>controller.abort(),ROUTE_TIMEOUT_MS);
+      timer=setTimeout(()=>controller.abort(),timeoutMs);
     });
     try {
       return await Promise.race([(async()=>{

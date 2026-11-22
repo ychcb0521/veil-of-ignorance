@@ -19,25 +19,26 @@ export function describeArchiveReadIssue(owner: string | undefined, name: string
   }
 }
 
-/** A transient request failure gets one retry in smaller responses.
+/** A failed response is split down to individual parts, each retried at most once.
  * Revision and completeness checks happen after transport, never retried as network errors. */
 export async function readArchiveBatch<T>(
   keys: string[], signal: AbortSignal | undefined,
   fetchRows: (keys: string[]) => Promise<T[]>,
 ): Promise<T[]> {
-  try { return await fetchRows(keys); } catch {
+  if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted','AbortError');
+  if (!keys.length) return [];
+  try { return await fetchRows(keys); } catch (error) {
     if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted','AbortError');
-    const size = Math.ceil(keys.length / 2);
-    const rows: T[] = [];
-    try {
-      for (let i = 0; i < keys.length; i += size) {
-        if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted','AbortError');
-        rows.push(...await fetchRows(keys.slice(i, i + size)));
-      }
-      return rows;
-    } catch {
-      if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted','AbortError');
-      throw new ArchiveReadFailure('network');
-    }
+    if (error instanceof ArchiveReadFailure) throw error;
+  }
+  if (keys.length > 1) {
+    const middle = Math.ceil(keys.length / 2);
+    const first = await readArchiveBatch(keys.slice(0, middle), signal, fetchRows);
+    return [...first, ...await readArchiveBatch(keys.slice(middle), signal, fetchRows)];
+  }
+  try { return await fetchRows(keys); } catch (error) {
+    if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted','AbortError');
+    if (error instanceof ArchiveReadFailure) throw error;
+    throw new ArchiveReadFailure('network');
   }
 }

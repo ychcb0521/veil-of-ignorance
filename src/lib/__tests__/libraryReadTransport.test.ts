@@ -7,6 +7,7 @@ import {createAuthFetch} from '../authTransport';
 const site='https://veil-of-ignorance-ten.vercel.app';
 const upstream=AUTH_BACKEND_ORIGIN+'/rest/v1/user_sim_state?select=key%2Crevision%3Avalue-%3E%3Erev%2Cdocument%3Avalue-%3Ebrowse&user_id=eq.alice&key=in.%28idb%3Afish-quality%2Cidb%3Afish-library-browse-v1%2Ffilter%29';
 const headers={Authorization:'Bearer fixture',apikey:'fixture'};
+const shards=AUTH_BACKEND_ORIGIN+'/rest/v1/user_sim_state?select=key%2Cvalue&user_id=eq.alice&key=in.%28idb%3Afish-quality%230%29';
 const reply=(status=200,body='[]')=>new Response(body,{status,headers:{'Content-Type':'application/json'}});
 afterEach(()=>vi.useRealTimers());
 
@@ -67,4 +68,40 @@ it('keeps real SDK JSON projections, account and key filters intact across the f
   expect(second.origin).toBe(AUTH_BACKEND_ORIGIN);expect(second.search).toBe(first.search);
   expect(second.searchParams.get('user_id')).toBe('eq.alice');
   expect(second.searchParams.get('select')).toBe('key,revision:value->>rev,document:value->browse');
+});
+
+it('allows a successful archive shard body to finish after five seconds without duplicating the request', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn<typeof fetch>(async () => new Response(new ReadableStream({ start(controller) {
+    setTimeout(() => { controller.enqueue(new TextEncoder().encode('[{"key":"idb:fish-quality#0","value":{"rev":"r","data":"frozen"}}]')); controller.close(); }, 8_000);
+  } }), { headers: { 'Content-Type': 'application/json' } }));
+  const pending = createAuthFetch(fetcher, 30000, site)(shards, { headers });
+  await vi.advanceTimersByTimeAsync(6_000);
+  expect(fetcher).toHaveBeenCalledOnce(); expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(await (await pending).json()).toEqual([{ key: 'idb:fish-quality#0', value: { rev: 'r', data: 'frozen' } }]);
+  expect(fetcher).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+});
+
+it('retains the short catalog deadline for shard revision metadata', async () => {
+  vi.useFakeTimers();
+  const metadata = shards.replace('select=key%2Cvalue', 'select=key%2Crevision%3Avalue-%3E%3Erev');
+  const fetcher = vi.fn<typeof fetch>().mockImplementationOnce(() => new Promise(() => {})).mockResolvedValueOnce(reply());
+  const pending = createAuthFetch(fetcher, 30000, site)(metadata, { headers });
+  await vi.advanceTimersByTimeAsync(5_001);
+  expect((await pending).status).toBe(200); expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it('bounds a stalled shard body and honours user cancellation without retrying it', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn<typeof fetch>().mockImplementationOnce(async () => new Response(new ReadableStream({ start() {} }))).mockResolvedValueOnce(reply());
+  const pending = createAuthFetch(fetcher, 30000, site)(shards, { headers });
+  await vi.advanceTimersByTimeAsync(30_001);
+  expect((await pending).status).toBe(200); expect(fetcher).toHaveBeenCalledTimes(2);
+  const controller = new AbortController();
+  const stoppedFetcher = vi.fn<typeof fetch>(() => new Promise<Response>(() => {}));
+  const stopped = createAuthFetch(stoppedFetcher, 30000, site)(shards, { headers, signal: controller.signal });
+  const rejected = expect(stopped).rejects.toMatchObject({ name: 'AbortError' });
+  controller.abort(); await rejected; expect(stoppedFetcher).toHaveBeenCalledOnce();
+  expect(vi.getTimerCount()).toBe(0);
 });

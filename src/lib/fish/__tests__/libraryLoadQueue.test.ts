@@ -1,6 +1,6 @@
 import {expect, it, vi} from 'vitest';
 import {prioritizeInstantScreening, readFishLibrary} from '../libraryLoadQueue';
-import {readArchiveBatch} from '../../accountArchiveRead';
+import {ArchiveReadFailure,readArchiveBatch} from '../../accountArchiveRead';
 
 it('runs only one restore per account, starts waiting libraries in priority order and continues after a failure', async () => {
   const order: string[] = [];
@@ -62,4 +62,21 @@ it('retries only the failed response in smaller batches and stops on cancellatio
   const fail = vi.fn(async () => { controller.abort(); throw Error('cancelled'); });
   await expect(readArchiveBatch(keys, controller.signal, fail)).rejects.toThrow();
   expect(fail).toHaveBeenCalledOnce();
+});
+
+it('can reduce a failing two-part response to single parts without repeating a successful half', async () => {
+  const fetch = vi.fn(async (batch: string[]) => {
+    if (batch.length > 1 && batch[0] !== '3') throw Error('response too slow');
+    return batch;
+  });
+  expect(await readArchiveBatch(['1','2','3','4'], undefined, fetch)).toEqual(['1','2','3','4']);
+  expect(fetch.mock.calls.map(([batch]) => batch)).toEqual([['1','2','3','4'], ['1','2'], ['1'], ['2'], ['3','4']]);
+});
+
+it('retries a single transport failure once, and never retries version failures or empty work', async () => {
+  const fetch = vi.fn().mockRejectedValueOnce(Error('connection reset')).mockResolvedValueOnce(['1']);
+  expect(await readArchiveBatch(['1'], undefined, fetch)).toEqual(['1']); expect(fetch).toHaveBeenCalledTimes(2);
+  const invalid = vi.fn().mockRejectedValue(new ArchiveReadFailure('revision'));
+  await expect(readArchiveBatch(['1'], undefined, invalid)).rejects.toMatchObject({ issue: 'revision' });
+  expect(invalid).toHaveBeenCalledOnce(); expect(await readArchiveBatch([], undefined, invalid)).toEqual([]);
 });

@@ -8,7 +8,7 @@ const context = () => ({signal: new AbortController().signal, report: vi.fn()});
 const keys = Array.from({length: 13}, (_, i) => 'chunk-' + i);
 const rows = (keys: string[], rev: string) => keys.map(key => ({key, value: {rev, data: key}})).reverse();
 
-it('reuses complete batches on retry, keeps order, and isolates owners and revisions', async () => {
+it('reuses individually verified parts on retry, keeps order, and isolates owners and revisions', async () => {
   const read = vi.fn(async (batch: string[]) => rows(batch, 'r'));
   await expect(readQualityRecoveryParts('a', 'r', keys, async batch => {
     if (batch[0] === keys[4]) {
@@ -19,12 +19,28 @@ it('reuses complete batches on retry, keeps order, and isolates owners and revis
   }, context())).rejects.toThrow('版本');
   read.mockClear();
   expect(await readQualityRecoveryParts('a', 'r', keys, read, context())).toEqual(keys);
-  expect(read.mock.calls.map(([batch]) => batch)).toEqual([keys.slice(4, 8)]);
+  expect(read.mock.calls.map(([batch]) => batch)).toEqual([[keys[4]]]);
   for (const [owner, rev] of [['b','r'], ['b','next']]) {
     const fetch = vi.fn(async (batch: string[]) => rows(batch, rev));
     expect(await readQualityRecoveryParts(owner, rev, keys, fetch, context())).toEqual(keys);
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(keys.length);
+    expect(fetch.mock.calls.every(([batch]) => batch.length === 1)).toBe(true);
   }
+});
+
+it('checkpoints progress per shard and cancels without publishing an incomplete or mixed archive', async () => {
+  const controller = new AbortController(), report = vi.fn();
+  let requested = 0;
+  await expect(readQualityRecoveryParts('cancel', 'r', keys, async batch => {
+    requested++;
+    if (batch[0] === keys[2]) controller.abort();
+    return rows(batch, 'r');
+  }, { signal: controller.signal, report })).rejects.toMatchObject({ name: 'AbortError' });
+  expect(requested).toBeLessThan(keys.length);
+  const retry = vi.fn(async (batch: string[]) => rows(batch, 'r'));
+  expect(await readQualityRecoveryParts('cancel', 'r', keys, retry, context())).toEqual(keys);
+  expect(retry.mock.calls.some(([batch]) => batch[0] === keys[0])).toBe(false);
+  expect(report.mock.calls.some(([progress]) => progress.done === 1)).toBe(true);
 });
 
 it('rejects missing parts and never mixes revisions', async () => {
