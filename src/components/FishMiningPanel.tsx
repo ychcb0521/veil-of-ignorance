@@ -17,7 +17,7 @@ import type { FishMiningApi } from '@/hooks/useFishMining';
 import { FishCheck } from './FishAlgorithmCard';
 import { FishNumberField, FishScanScopeFields, FishScanWickFields } from './FishScanSettingsFields';
 import { FishTurnoverSettingsFields } from './FishTurnoverSettings';
-import { buildConfiguredMiningScan, continuousMiningSettings, copyCaptureToMining, copyHitRateToMining, initialMiningSettings, loadMiningSettings, readMiningSettings, saveMiningSettings, type FishMiningSettings } from '@/lib/fish/miningSettings';
+import { buildConfiguredMiningScan, continuousMiningSettings, copyCaptureToMining, initialMiningSettings, loadMiningSettings, readMiningSettings, saveMiningSettings, type FishMiningSettings } from '@/lib/fish/miningSettings';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { FishMiningLibrary } from '@/components/FishMiningLibrary';
@@ -93,20 +93,20 @@ function MiningRuleEditor({ mining, close, restart = false, loaded }: MiningEdit
   const [draft, setDraft] = useState(settings.rules);
   const [target, setTarget] = useState(String(settings.target));
   const [error, setError] = useState('');
-  const [copiedFrom, setCopiedFrom] = useState<'捕捞' | '捕捞质量'>();
+  const [copiedFrom, setCopiedFrom] = useState<'捕捞'>();
   const [startTime, setStartTime] = useState(() => {
     const {stopped, startMs, cursorMs, endMs} = mining.state;
     if (stopped && (cursorMs > Date.now() || cursorMs >= (endMs ?? Date.now()))) return '';
     return short(stopped ? cursorMs : startMs).replace(' ', 'T');
   });
   const [endTime,setEndTime]=useState(()=>short(mining.state.endMs??Date.now()).replace(' ','T'));
-  const copySettings = (source: '捕捞' | '捕捞质量') => {
+  const copySettings = () => {
     const current = { ...settings, rules: draft };
     try {
-      const copied = source === '捕捞' ? copyCaptureToMining(current, capture) : copyHitRateToMining(current);
+      const copied = copyCaptureToMining(current, capture);
       setSettings(copied);
       setDraft(copied.rules);
-      setCopiedFrom(source);
+      setCopiedFrom('捕捞');
       setError('');
     } catch (cause) {
       setCopiedFrom(undefined);
@@ -158,13 +158,12 @@ function MiningRuleEditor({ mining, close, restart = false, loaded }: MiningEdit
         </label>
         <div role="group" aria-label="复制设置" className="flex flex-wrap items-center gap-1.5">
           <button type="button" className="rounded-md border border-border/70 px-2 py-1 hover:bg-muted"
-            onClick={() => copySettings('捕捞')}>复制已保存的捕捞条件</button>
-          <button type="button" className="rounded-md border border-border/70 px-2 py-1 hover:bg-muted"
-            onClick={() => copySettings('捕捞质量')}>复制捕捞质量设置</button>
+            onClick={copySettings}>复制已保存的捕捞条件</button>
+
         </div>
       </div>
       {copiedFrom && <p role="status" className="text-muted-foreground">
-        已从{copiedFrom}填入草稿。{copiedFrom === '捕捞质量' && '每档回看使用样本前后时长之和。'}
+        已从{copiedFrom}填入草稿。
       </p>}
     {draft.map((rule,i)=>{const choice=mining.ruleChoices?.find(c=>c.featureId===rule.featureId),valid=choice?.statistics.some(s=>s.name===rule.statistic),menu=choice?.menuStatistics??choice?.statistics??[];return <div key={rule.id} className="flex flex-wrap items-center gap-1.5">
       <FishCheck aria-label={`启用批量捕捞算法 ${i+1}`} checked={rule.enabled!==false}

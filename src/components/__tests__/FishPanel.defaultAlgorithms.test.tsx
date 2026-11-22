@@ -112,18 +112,16 @@ it('捕捞、鱼舱、鱼质量是三个同级模块，独立折叠', async () =
  const {newQualityStudy}=await import('@/lib/fish/quality');
  const {enableQualityComparison}=await import('@/lib/fish/qualityComparison');
  const q={study:enableQualityComparison(newQualityStudy()),ready:true,running:false,progress:null,warning:'',error:'',start:vi.fn(),cancel:vi.fn(),setRule:vi.fn(),setObserveHours:vi.fn(),selectSell:vi.fn(),setSelectedRows:vi.fn()};
- render(panel({quality:q,onTestHitRate:vi.fn()}));
+ render(panel({quality:q}));
  const host=screen.getByTestId('fish-panel');
  for(const id of ['fish-catching','fish-cabin','fish-quality'])expect(screen.getByTestId(id).parentElement).toBe(host);
  const captureProcess = screen.getByRole('region', { name: '捕捞进程' });
- const captureQuality = screen.getByRole('region', { name: '捕捞质量' });
- expect(captureProcess.parentElement).toBe(captureQuality.parentElement);
+ expect(screen.queryByRole('region', { name: '捕捞质量' })).toBeNull();
  expect(within(captureProcess).getByTestId('fish-new')).toBeVisible();
- expect(within(captureQuality).queryByTestId('fish-new')).not.toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'捕捞'}));
  expect(screen.getByRole('button',{name:/^鱼质量/,expanded:true})).toBeVisible();
  fireEvent.click(screen.getByRole('button',{name:/^鱼质量/,expanded:true}));
- expect(screen.getByRole('button',{name:/^鱼舱/})).toBeVisible();
+ expect(within(screen.getByTestId('fish-old')).getByRole('button',{name:/^鱼舱/,expanded:true})).toBeVisible();
 });
 
 it('邮件来源展示实际捕捞序列与已保存的额外来源，打开或调整捕捞阈值不会覆盖邮件选择',()=>{
@@ -165,61 +163,4 @@ it('保存参数提交整套账号配置，重开时忽略本机旧卡片和未�
  expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(23);
  expect(screen.getByRole('radio',{name:'并集'})).toHaveAttribute('aria-checked','true');
  push.mockRestore();
-});
-
-
-it('copies saved quality settings into a cancellable capture draft and applies edited values on save', async () => {
- localStorage.setItem('sb-test-auth-token', JSON.stringify({ user: { id: 'copy-quality' } }));
- const prefix = getUserPrefix(), key = prefix + FISH_HIT_RATE_SETTINGS_KEY;
- const saved: FishHitRateSettings = {
-  version: 1, cards: [{ id: 'copied', featureId: 'cbi2', enabled: true, pref: { statistic: '结果', threshold: '0.235', direction: '<', constraints: [] } }],
-  combination: 'or', window: { beforeHours: 5, afterHours: 0.1 },
-  selection: { exchanges: ['okx'], includeDuplicates: true },
-  downwardWick: { enabled: true, hours: 2.5, atrMultiple: 4.6 },
-  turnover: { enabled: false, floors: [{ hours: 1, min: 654_321 }, { hours: 12, min: 3_000_000 }, { hours: 24, min: 5_000_000 }] },
- };
- const auto = { mode: 'manual', hours: 4 };
- localStorage.setItem(prefix + FISH_ACCOUNT_SETTINGS_KEY, JSON.stringify({
-  version: 1, cards: [{ ...saved.cards[0], pref: { ...saved.cards[0].pref, threshold: '0.11' } }],
-  combination: 'and', lookbackHours: 2, downwardWick: { enabled: true, hours: 48, atrMultiple: 3 },
-  selection: { exchanges: ['binance'], includeDuplicates: false }, auto,
- }));
- const push = vi.spyOn(sync, 'pushSimStateImmediately').mockResolvedValue(true);
- const time = '2026-11-01 16:30:00';
- function Fixture() {
-  const [selection, onSelectionChange] = useState({ exchanges: ['binance'], includeDuplicates: false });
-  return panel({ selection, onSelectionChange, inputs: { time, threshold: '' } });
- }
- try {
-  render(<Fixture/>);
-  const open = () => fireEvent.click(screen.getByRole('button', { name: '从捕捞质量复制设置' }));
-  open();
-  expect(screen.getByRole('alert')).toHaveTextContent('保存独立设置');
-  localStorage.setItem(key, JSON.stringify(saved));
-  open();
-  const dialog = screen.getByRole('dialog', { name: '从捕捞质量复制设置' });
-  const form = within(dialog);
-  expect(form.getByLabelText('扫描覆盖时间（小时）')).toHaveValue(5.1);
-  expect(form.getByLabelText('捕捞阈值')).toHaveValue(0.235);
-  expect(form.getByLabelText('OKX')).toBeChecked();
-  fireEvent.click(form.getByRole('button', { name: '取消' }));
-  expect(push).not.toHaveBeenCalled();
-  expect(readFishAccountSettings()?.lookbackHours).toBe(2);
-
-  open();
-  const draft = within(screen.getByRole('dialog', { name: '从捕捞质量复制设置' }));
-  fireEvent.change(draft.getByLabelText('扫描覆盖时间（小时）'), { target: { value: '4.5' } });
-  fireEvent.click(draft.getByRole('button', { name: '保存捕捞设置' }));
-  await waitFor(() => expect(screen.queryByRole('dialog', { name: '从捕捞质量复制设置' })).not.toBeInTheDocument());
-  expect(push.mock.calls.map(call => call[1]).sort()).toEqual([FISH_ACCOUNT_SETTINGS_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY].sort());
-  expect(readFishAccountSettings()).toMatchObject({ lookbackHours: 4.5, combination: 'or', auto, selection: saved.selection });
-  expect(localStorage.getItem(key)).toBe(JSON.stringify(saved));
-  expect(screen.getByLabelText('捕捞时间（UTC+8）')).toHaveValue(time);
-  expect(start).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '开始捕捞' }));
-  expect(start).toHaveBeenCalledWith(expect.objectContaining({
-   anchorMs: Date.parse('2026-11-01T16:30:00+08:00'), lookbackHours: 4.5, exchanges: ['okx'], combination: 'or',
-   downwardWick: saved.downwardWick, turnoverFloors: [], algorithm: expect.objectContaining({ threshold: 0.235, direction: '<' }),
-  }));
- } finally { push.mockRestore(); }
 });

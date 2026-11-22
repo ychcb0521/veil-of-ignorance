@@ -26,21 +26,16 @@ import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type Fish
 import { fishRuleText } from '@/lib/fishRule';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
-import { Activity, ChevronDown, CircleHelp, Clock3, Copy, Gauge, ListChecks, Play, Plus, ScanSearch, Settings, ShieldAlert, Square } from 'lucide-react';
+import { Activity, ChevronDown, CircleHelp, Clock3, ListChecks, Play, Plus, Settings, Square } from 'lucide-react';
 import { fishInfoTrigger, fishRail, fishSectionHeading, fishSubHeading } from './FishSection';
 import { FishQualityInfo } from './FishQualityModule';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { signalChartSymbol, type TradeSignal } from '@/lib/signalLibrary';
 import { fishSelectionKey, parseFishSettings, type FishScanSettings, type FishProgress } from '@/lib/fishScanner';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FishLibrary } from '@/components/FishLibrary';
 import { FishCabinTransfer } from './FishCabinTransfer';
-import { FishHitRateTest } from '@/components/FishHitRateTest';
-import { FishHitRateSettingsForm } from '@/components/FishHitRateSettingsForm';
-import { DEFAULT_FISH_HIT_RATE_WINDOW, validateFishHitRateWindow, type FishHitRateOptions } from '@/lib/fish/hitRate';
-import { readSavedFishHitRateSettings, type FishHitRateSettings } from '@/lib/fish/hitRateSettings';
 import { buildFishScanSettings, compileFishPreference } from '@/lib/fish/scanPlan';
 import { FishWickDetails } from '@/components/FishWickDetails';
 import { FishWickSettings } from '@/components/FishWickSettings';
@@ -79,7 +74,6 @@ export interface FishPanelProps {
   defaultAlgorithms?: readonly string[];
   librarySignals?: TradeSignal[];
   onSuggest?: (options:FishSuggestionOptions)=>Promise<FishSuggestion>;
-  onTestHitRate?: (options: FishHitRateOptions) => Promise<void>;
   signals: TradeSignal[]; progress: FishProgress | null;
   inputs: { time: string; threshold: string }; onInputsChange: (value: { time: string; threshold: string }) => void;
   selection: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }; onSelectionChange: (value: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }) => void;
@@ -100,7 +94,7 @@ export {FISH_DEFAULT_ALGORITHMS};
 const cleanPreference=(p:FishPreference):FishPreference=>({...p,constraints:[]});
 const OPEN_KEY = 'veil.fish.open';
 const catchingDefaultKey = () => `${getUserPrefix()}fish-catching-default.v1`;
-type FishOpen = { settings: boolean; catching: boolean; cabin: boolean; algorithms: boolean; captureQuality: boolean; hitRate: boolean };
+type FishOpen = { settings: boolean; catching: boolean; cabin: boolean; algorithms: boolean };
 function readCatchingDefault() {
   try {
     const saved = localStorage.getItem(catchingDefaultKey());
@@ -111,8 +105,8 @@ function readCatchingDefault() {
 function readOpen(): FishOpen {
   const pick = (v: unknown, fallback: boolean) => typeof v === 'boolean' ? v : fallback;
   const catching = readCatchingDefault();
-  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { settings: v.settings === true, catching: pick(v.catching, catching), cabin: pick(v.cabin, FISH_PANEL_DEFAULTS.cabin), algorithms: pick(v.algorithms, FISH_PANEL_DEFAULTS.secondary), captureQuality: v.captureQuality === true, hitRate: v.hitRate === true }; }
-  catch { return { settings: false, catching, cabin: FISH_PANEL_DEFAULTS.cabin, algorithms: FISH_PANEL_DEFAULTS.secondary, captureQuality: false, hitRate: false }; }
+  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { settings: v.settings === true, catching: pick(v.catching, catching), cabin: pick(v.cabin, FISH_PANEL_DEFAULTS.cabin), algorithms: pick(v.algorithms, FISH_PANEL_DEFAULTS.secondary) }; }
+  catch { return { settings: false, catching, cabin: FISH_PANEL_DEFAULTS.cabin, algorithms: FISH_PANEL_DEFAULTS.secondary }; }
 }
 const coverageUnits = (hours: number) => hours < 1 && Number.isInteger(hours * 60) ? 60 : 1;
 const coverageText = (hours: number) => coverageUnits(hours) === 60 ? (hours * 60) + ' 分钟' : hours + ' 小时';
@@ -121,12 +115,6 @@ const STATUS: Record<FishProgress['status'], string> = { running: '捕捞中', c
 export function FishPanel(p: FishPanelProps) {
   const [error,setError]=useState(''),defs=useFishFeatures();
   const [open, setOpenState] = useState(readOpen);
-  const [hitRateRunning, setHitRateRunning] = useState(false);
-  const hitRateActive = useRef(false);
-  const updateHitRateRunning = useCallback((running: boolean) => {
-    hitRateActive.current = running;
-    setHitRateRunning(running);
-  }, []);
   const setOpen = (patch: Partial<FishOpen>) => setOpenState(o => {
     const next = { ...o, ...patch };
     try { sessionStorage.setItem(OPEN_KEY, JSON.stringify(next)); } catch { /* 记不住只是下次要再点 */ }
@@ -281,13 +269,13 @@ export function FishPanel(p: FishPanelProps) {
     const queue:{key:string;target:{id:string;plan:FishProgram}|null}[]=[...(suggestionKey&&firstEnabled&&!RECORDED_RANGES[selected]?[{key:suggestionKey,target:null}]:[]),...extraSuggest.flatMap(x=>x&&!RECORDED_RANGES[x.plan.def.id]?[{key:x.key,target:{id:x.id,plan:x.plan}}]:[])];
     const run=suggestionRun.current;
     if(run?.mode==='auto'&&!queue.some(q=>q.key===run.key))suggestionController.current?.abort();
-    if(p.hasRound||!library.length||scanning||hitRateRunning||p.reconstructionRunning||suggestionRun.current)return;
+    if(p.hasRound||!library.length||scanning||p.reconstructionRunning||suggestionRun.current)return;
     const next=queue.find(q=>!autoTried.current.has(q.key)&&!readFishSuggestion(q.key));
     if(!next)return;
-    const timer=setTimeout(()=>{if(hitRateActive.current||suggestionRun.current||autoTried.current.has(next.key))return;autoTried.current.add(next.key);void calculateSuggestion('auto',next.target);},800);
+    const timer=setTimeout(()=>{if(suggestionRun.current||autoTried.current.has(next.key))return;autoTried.current.add(next.key);void calculateSuggestion('auto',next.target);},800);
     return()=>clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[queueKeys,selected,firstEnabled,scanning,library.length,autoSuggesting,hitRateRunning,p.reconstructionRunning,p.hasRound]);
+  },[queueKeys,selected,firstEnabled,scanning,library.length,autoSuggesting,p.reconstructionRunning,p.hasRound]);
   // 方向一换，阈值仍是上次自动填的建议时改填另一端（> 取 P25，< 取 P75）；分布与方向无关，不用重算
   const changeDirection=(direction:'>'|'<')=>{
     const fill=suggestion&&!suggestionStale?suggestedFishThreshold(suggestion,direction):null;
@@ -302,27 +290,10 @@ export function FishPanel(p: FishPanelProps) {
     const turnoverFloors = currentTurnover.enabled ? currentTurnover.floors : [];
     for(const plan of plans){const checked=fishProgramForLookback(plan,hours,turnoverFloors);if(checked.unavailable)throw new Error(checked.unavailable);}
     p.onStart({...settings,lookbackHours:hours,downwardWick:readFishDownwardWick(owner),feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,turnoverFloors});}catch(e){setError(e instanceof Error?e.message:String(e));}};
-  const runHitRate = async (options: FishHitRateOptions) => {
-    const pending = suggestionRun.current;
-    if (pending?.mode === 'auto') {
-      options.onWaiting?.('正在结束后台阈值建议，随后开始测试…');
-      autoTried.current.delete(pending.key);
-      suggestionController.current?.abort();
-      await pending.done;
-    }
-    if (!options.signal.aborted) await p.onTestHitRate?.(options);
-  };
   const windowAnchor=p.progress?.anchorMs,windowHours=p.progress?.lookbackHours;
   const scanWindow = windowAnchor != null && Number.isFinite(windowAnchor) && windowHours !== undefined
     ? { start: formatUTC8(windowAnchor - windowHours * 3_600_000), end: formatUTC8(windowAnchor) }
     : null;
-  const captureHitRateSettings = (): FishHitRateSettings => ({
-    version: 1,
-    cards: currentCards,
-    combination, selection: { exchanges: [...exchanges], includeDuplicates, includeUsStocks },
-    downwardWick: readFishDownwardWick(owner), turnover: readCaptureTurnoverSettings(owner),
-    window: { ...DEFAULT_FISH_HIT_RATE_WINDOW },
-  });
   const {fresh,old}=useMemo(()=>{const fresh:TradeSignal[]=[],old:TradeSignal[]=[];for(const signal of p.signals)(signal.freshCatch&&fishSignalInRoundWindow(signal,{anchorMs:windowAnchor,lookbackHours:windowHours})?fresh:old).push(signal);return {fresh,old};},[p.signals,windowAnchor,windowHours]);
   const screenedKeys = useMemo(() => screenedSourceKeys(p.quality?.preEntry?.library), [p.quality?.preEntry?.library.rounds, p.quality?.preEntry?.library.records]);
   const visibleFresh = useMemo(() => fresh.filter(signal => !isScreenedSource(signal, screenedKeys)), [fresh, screenedKeys]);
@@ -332,8 +303,6 @@ export function FishPanel(p: FishPanelProps) {
   };
   const ruleText = (scanning||staleRound)&&x?.rule?x.rule:extraCards.length===0?(firstEnabled?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):''):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic,p.settings.range)).join(combination==='or'?' 或 ':' 且 ');
   const [captureCopyRevision, setCaptureCopyRevision] = useState(0);
-  const [captureCopy, setCaptureCopy] = useState<{ owner: string; settings: FishHitRateSettings } | null>(null);
-  const [copyError, setCopyError] = useState('');
   const captureTemplate = () => {
     const draft = parameterDraft();
     return freezeFishCaptureTemplate({
@@ -369,7 +338,7 @@ export function FishPanel(p: FishPanelProps) {
     }
   };
   const applyCaptureTemplate = async (settings: FishCaptureTemplateSettings) => {
-    if (running || hitRateRunning || getUserPrefix() !== owner) throw Error('当前任务结束后可以载入模板');
+    if (running || getUserPrefix() !== owner) throw Error('当前任务结束后可以载入模板');
     validateFishCaptureTemplate(settings);
     const { cards, combination, selection, lookback, schedule, wick, turnover } = structuredClone(settings);
     const profile: FishAccountSettings = {
@@ -381,30 +350,6 @@ export function FishPanel(p: FishPanelProps) {
     await applyCaptureSettings(profile, wick, turnover, schedule);
     if (getUserPrefix() === owner) toast.success('捕捞模板已载入');
   };
-  const openCaptureCopy = () => {
-    try {
-      setCaptureCopy({ owner, settings: readSavedFishHitRateSettings() });
-      setCopyError('');
-    } catch (cause) {
-      setCopyError(cause instanceof Error ? cause.message : '捕捞质量设置读取失败');
-    }
-  };
-  const saveCaptureCopy = async ({ cards, combination, selection, downwardWick, turnover, window }: FishHitRateSettings) => {
-    if (running || hitRateRunning || getUserPrefix() !== owner) throw new Error('当前任务结束后可以保存设置');
-    if (!getUserId()) throw new Error('请先登录后保存账号参数');
-    const lookbackHours = validateFishHitRateWindow(window);
-    const fixedCards = cards.map(card => ({ ...card, pref: { ...cleanPreference(card.pref), lastSuggestion: undefined } }));
-    const built = buildFishScanSettings({ cards: fixedCards, defs, combination, selection, time: '', lookbackHours,
-      downwardWick, turnoverFloors: turnover.enabled ? turnover.floors : [] });
-    if (!built.settings) throw new Error(built.error);
-    const active = readFishAccountSettings();
-    const profile: FishAccountSettings = { version: 1, cards: fixedCards, combination, selection, lookbackHours, lookbackFollowsInterval: false,
-      downwardWick: readLegacyFishDownwardWick(owner), auto: active?.auto, captureScheduleRevision: active?.captureScheduleRevision };
-    await applyCaptureSettings(profile, downwardWick, turnover);
-    if (getUserPrefix() !== owner) return;
-    setCaptureCopy(null);
-    toast.success('捕捞设置已保存到账号');
-  };
   const saveCaptureOpening = (expanded: boolean) => {
     localStorage.setItem(catchingDefaultKey(), String(expanded));
     setOpen({ catching: expanded, settings: false });
@@ -414,16 +359,6 @@ export function FishPanel(p: FishPanelProps) {
   // 【用户要求】2026-10-20「渔的界面要完全按照最高级别的审美标准来设计，既简洁又美观又具备功能性」：
   // 顶栏一行操作（时间 · 主按钮 · 淡色工具），下面一行状态，底边一根细线兼作进度条；算法是一张对齐的表，合并方式用分段按钮。
   return <section className={`mt-2 ${p.fillHeight?'min-h-0 flex-1':'max-h-[65dvh]'} min-w-0 overflow-y-auto overscroll-y-contain rounded-xl border border-border/60 bg-background`} aria-label="渔" data-testid="fish-panel">
-    {captureCopy?.owner === owner && <Dialog open onOpenChange={next => { if (!next && !savingParameters) setCaptureCopy(null); }}>
-      <DialogContent className="max-h-[85dvh] w-[calc(100%-2rem)] max-w-3xl overflow-y-auto p-4 text-[11px] sm:p-5">
-        <DialogHeader className="pr-7 text-left">
-          <DialogTitle>从捕捞质量复制设置</DialogTitle>
-          <DialogDescription>已载入保存的漏报测试设置。扫描覆盖时间取样本前后时长之和，保存后用于下一轮捕捞。</DialogDescription>
-        </DialogHeader>
-        <FishHitRateSettingsForm initial={captureCopy.settings} defs={defs} capture locked={running || hitRateRunning}
-          onSave={saveCaptureCopy} onCancel={() => setCaptureCopy(null)}/>
-      </DialogContent>
-    </Dialog>}
     <section aria-labelledby="fish-catching-title" data-testid="fish-catching">
       <div className="flex items-center px-4 pb-1 pt-3">
         <div className="flex items-center gap-0.5 pr-1.5"><button id="fish-catching-title" type="button" aria-expanded={open.catching} aria-controls="fish-catching-content" onClick={()=>setOpen({catching:!open.catching})} className={fishSectionHeading}><Play aria-hidden className="h-3 w-3 text-muted-foreground"/><span>捕捞</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open.catching?'rotate-180':''}`}/></button><Popover><PopoverTrigger asChild><button type="button" aria-label="捕捞说明" title="捕捞说明" className={fishInfoTrigger}><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="max-h-[min(75dvh,var(--radix-popover-content-available-height))] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto space-y-2.5 p-3.5 text-[11px] leading-relaxed" aria-label="捕捞说明">
@@ -472,9 +407,9 @@ export function FishPanel(p: FishPanelProps) {
         </div>
         {running
           ?<button type="button" disabled={!scanning&&!suggesting} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-40" onClick={()=>suggesting?suggestionController.current?.abort():p.onCancel()}><Square aria-hidden className="h-2.5 w-2.5 fill-current"/>取消</button>
-          :<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={running||hitRateRunning||!!multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')} onClick={()=>void start()}><Play aria-hidden className="h-2.5 w-2.5 fill-current"/>开始捕捞</button>}
+          :<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={running||!!multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')} onClick={()=>void start()}><Play aria-hidden className="h-2.5 w-2.5 fill-current"/>开始捕捞</button>}
         <button type="button" aria-expanded={open.settings} aria-controls="fish-capture-settings"
-          onClick={() => { setCopyError(''); setOpen({ settings: !open.settings }); }}
+          onClick={() => { setOpen({ settings: !open.settings }); }}
           className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-2.5 text-muted-foreground hover:bg-muted hover:text-foreground">
           <Settings aria-hidden className="h-3.5 w-3.5"/>捕捞设置
           <ChevronDown aria-hidden className={`h-3 w-3 transition-transform ${open.settings ? 'rotate-180' : ''}`}/>
@@ -505,14 +440,9 @@ export function FishPanel(p: FishPanelProps) {
     <section id="fish-capture-settings" aria-label="捕捞设置" hidden={!open.settings}
       className="min-w-0 max-w-3xl space-y-3 rounded-lg border border-border/60 bg-background p-3 text-[11px] sm:p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" disabled={running || hitRateRunning} onClick={openCaptureCopy}
-          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
-          <Copy aria-hidden className="h-3 w-3"/>从捕捞质量复制设置
-        </button>
-        {userId && open.settings && <FishCaptureTemplates key={userId} owner={userId} locked={running || hitRateRunning}
+        {userId && open.settings && <FishCaptureTemplates key={userId} owner={userId} locked={running}
           snapshot={captureTemplate} apply={applyCaptureTemplate}/>}
       </div>
-      {copyError && <p role="alert" className="text-destructive">{copyError}</p>}
       <div className={`grid gap-3 ${auto ? 'sm:grid-cols-2' : ''}`}>
         <fieldset className="min-w-0 rounded-md border border-border/60 px-3 pb-3">
           <legend className="px-1 font-medium">来源市场</legend>
@@ -607,35 +537,6 @@ export function FishPanel(p: FishPanelProps) {
         tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </div>
     </section>
-    {p.onTestHitRate && <section aria-labelledby="fish-capture-quality-title" className="min-w-0 text-[11px]">
-      <div className="flex min-w-0 items-center gap-2">
-        <h3>
-          <button id="fish-capture-quality-title" type="button" aria-expanded={open.captureQuality} aria-controls="fish-capture-quality-content"
-            onClick={() => setOpen({ captureQuality: !open.captureQuality })} className={fishSubHeading}>
-            <Gauge aria-hidden className="h-3 w-3 text-muted-foreground"/>捕捞质量
-            <ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open.captureQuality ? 'rotate-180' : ''}`}/>
-          </button>
-        </h3>
-        {!open.captureQuality && hitRateRunning && <span role="status" className="text-muted-foreground">测试中</span>}
-      </div>
-      <div id="fish-capture-quality-content" hidden={!open.captureQuality} className="min-w-0 space-y-1.5">
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-        <button id="fish-hit-rate-title" type="button" aria-expanded={open.hitRate} aria-controls="fish-hit-rate"
-          onClick={() => setOpen({ hitRate: !open.hitRate })}
-          className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-          <ScanSearch aria-hidden className="h-3.5 w-3.5"/>漏报测试
-          <ChevronDown aria-hidden className={`h-3 w-3 transition-transform ${open.hitRate ? 'rotate-180' : ''}`}/>
-        </button>
-        <button type="button" disabled className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-muted-foreground">
-          <ShieldAlert aria-hidden className="h-3.5 w-3.5"/>误报测试<span className="text-[10px] font-normal text-muted-foreground/75">待开放</span>
-        </button>
-        {!open.hitRate && hitRateRunning && <span role="status" className="text-muted-foreground">测试中</span>}
-      </div>
-      <div id="fish-hit-rate" role="region" aria-labelledby="fish-hit-rate-title" hidden={!open.hitRate} className="min-w-0">
-        <FishHitRateTest key={owner} quality={p.quality} onJump={jumpQuality} canJump={canJumpQuality} captureSettings={captureHitRateSettings} defs={defs} run={runHitRate} disabled={running} onRunningChange={updateHitRateRunning}/>
-      </div>
-      </div>
-    </section>}
     </div>
       </div>
     </section>
