@@ -27,7 +27,7 @@ export function FishQualityInfo({ label, children }: { label: string; children: 
 
 /** 鱼质量的工作模块共用尺寸、留白和标题层级。 */
 /** trailing：放在行尾最右侧的次要操作（如组合表结果的隐藏 / 清除），不打乱三行按钮的逐列对齐。 */
-export function FishQualityModule({ title, icon: Icon, summary, children, status, progress, subsection, trailing, testId, titleTestId, defaultOpen = FISH_PANEL_DEFAULTS.secondary, level='module' }: {
+export function FishQualityModule({ title, icon: Icon, summary, children, status, progress, subsection, trailing, testId, titleTestId, defaultOpen = FISH_PANEL_DEFAULTS.qualityModules, level='module' }: {
   title: string;
   icon: LucideIcon;
   summary?: ReactNode;
@@ -61,7 +61,7 @@ export function FishQualityModule({ title, icon: Icon, summary, children, status
 
 /** The buy workspace keeps static filtering and dynamic screening visibly separate. */
 export function FishQualityModuleGroup({children}:{children:ReactNode}) {
-  const [open,setOpen]=useState(FISH_PANEL_DEFAULTS.secondary), id=useId();
+  const [open,setOpen]=useState(FISH_PANEL_DEFAULTS.qualityModules), id=useId();
   return <section aria-label="买前过滤模块" data-testid="quality-filter-controls" data-module-level="module" className="border-b border-border/40 py-1.5">
     <h4 className="flex h-7 items-center"><button type="button" aria-expanded={open} aria-controls={id} onClick={()=>setOpen(!open)} className={fishSubHeading}>
       <Filter aria-hidden className="h-3.5 w-3.5 text-muted-foreground"/><span>买前过滤</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open?'rotate-180':''}`}/>
