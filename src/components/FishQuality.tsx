@@ -11,7 +11,7 @@ import {hasCampaignOnSignalDay,hasTradeOnSignalDay} from '@/lib/signalCampaignIn
 import {qualityTemplateImportSelection,templateCampaignPath, type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
 import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import type { MiningDirectoryEvidence } from '@/lib/fish/miningLibraryDirectory';
-import { DirectoryImportContext, FishWorkspaceRows, FishWorkspaceSource, fishSourceButton } from './FishWorkspaceSource';
+import { FilterDetectorContext, DirectoryImportContext, FishWorkspaceRows, FishWorkspaceSource, fishSourceButton } from './FishWorkspaceSource';
 import { Database, Save, Trash2 } from 'lucide-react';
 import {FishCombinationHelp} from './FishCombinationHelp';
 import {FishConditionDialogContent,FishConditionSettings} from './FishConditionSettings';
@@ -765,7 +765,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     <FishDeferredDetails summary="查看归档组合表" className="text-[11px]">
       <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>
     </FishDeferredDetails>
-  </div> : <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>;
+  </div> : <><FilterDetectorContext.Consumer>{records=>records&&<FishWorkspaceRows snapshot={snapshot}/>}</FilterDetectorContext.Consumer><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/></>;
   const renderTemplate = (table:QualityTemplateTable, close:()=>void, kind:ArchiveKind, importSelection:boolean) =>
     <ArchivedQualityBoard study={table.study} templateTable={table} archiveKind={kind}
       tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}

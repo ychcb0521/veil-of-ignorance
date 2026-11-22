@@ -19,7 +19,7 @@ it.each([true,false])('imports a cold filter round without opening the other rou
   const complete:FishQualityStudy={...snapshot,filterLibrary:{
     version:1,settings:[{id:'f',signature:'f',filters:[],plans:[]}],
     records:[
-      {id:'saved',settingId:'f',source,enteredAt:9,basis:'capture',readings:[],status:{state:'none',detail:'不过滤'},firstSavedAt:2,updatedAt:2},
+      {id:'saved',sourceSelection:{family:'BSS',readings:[{metric:'avg_BSS_2',reading:0.13146699636353357,percentile:90.453877893559,sampleCount:14299}]},settingId:'f',source,enteredAt:9,basis:'capture',readings:[],status:{state:'none',detail:'不过滤'},firstSavedAt:2,updatedAt:2},
       {id:'other',settingId:'f',source:{...source,id:'other-signal',symbol:'OTHERUSDT'},enteredAt:8,basis:'capture',readings:[],status:{state:'none',detail:'不过滤'},firstSavedAt:1,updatedAt:1},
     ],rounds:[
       {id:'one',startedAt:1,updatedAt:1,state:'complete',recordIds:['other']},
@@ -42,6 +42,9 @@ it.each([true,false])('imports a cold filter round without opening the other rou
   expect(configure).toHaveBeenCalledOnce();
   view.rerender(panel(true));
   const checkbox=await screen.findByRole('checkbox',{name:/选取 PIEVERSEUSDT/});
+  expect(screen.getByText('BSS · avg_BSS_2')).toBeInTheDocument();
+  expect(screen.getByText('0.13146699636353357')).toBeInTheDocument();
+  expect(screen.getByText('90.453877893559%（12934/14299）')).toBeInTheDocument();
   if(picker)fireEvent.click(checkbox);else expect(checkbox).toBeChecked();
   expect(screen.queryByRole('checkbox',{name:/选取 OTHERUSDT/})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'导入组合表'}));
@@ -49,6 +52,23 @@ it.each([true,false])('imports a cold filter round without opening the other rou
     samples:[expect.objectContaining({id:'saved',enteredAt:9,source:expect.objectContaining({symbol:'PIEVERSEUSDT'})})],
   }),expect.any(Array));
   expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['b']);
+});
+
+it('opens only the filter detector page and sorts by the original percentile',async()=>{
+  calls.directory.mockResolvedValue({detectorPreview:true,groups:[{id:'both',title:'并集目录',at:1,count:2,pages:['rich']}]});
+  const {filterBrowseRow}=await import('@/lib/fish/libraryBrowseProjection');
+  const row=(id:string,percentile:number)=>filterBrowseRow({id,source:{id,symbol:id,timeMs:1,timeLabel:'',fallbackZone:''},
+    status:{state:'none',detail:'冻结记录'},sourceSelection:{hits:[
+      {family:'CBA',readings:[{metric:'avg_CBA_2',reading:0,percentile:79.5}]},
+      {family:'BSS',readings:[{metric:'avg_BSS_2',reading:0.14,percentile}]}]}});
+  calls.body.mockResolvedValue([row('SECOND',98.1),row('FIRST',91.2)]);
+  render(<FishArchiveBrowse owner="alice" scope="filter" query=""/>);
+  fireEvent.click(await screen.findByRole('button',{name:/并集目录/}));
+  await screen.findByText('98.1%');
+  fireEvent.click(screen.getByRole('button',{name:'按百分位位置排序'}));
+  expect(screen.getAllByRole('row')[1]).toHaveTextContent('FIRST');
+  expect(screen.getAllByRole('row')[1]).toHaveTextContent('79.5%');
+  expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['rich']);
 });
 
 it.each<BrowseScope>(['mining','screen','filter'])('sorts across pages, keeps the selected record IDs and skips other directories (%s)',async scope=>{

@@ -2,7 +2,7 @@
 import {gzipSync} from 'node:zlib';
 import {createHash} from 'node:crypto';
 import {expect,it,vi,beforeEach} from 'vitest';
-import {browseCatalogKey,browsePageKey,readBrowseCatalog,readBrowsePage,type BrowseCatalog} from '../libraryBrowse';
+import {browseCatalogKey,filterDetectorCatalogKey,fullBrowseKey,recentBrowseKey,browsePageKey,readBrowseCatalog,readBrowsePage,type BrowseCatalog} from '../libraryBrowse';
 
 const mock=vi.hoisted(()=>({rows:new Map<string,unknown>(),requests:[] as string[][],owner:'a',compatible:vi.fn()}));
 vi.mock('@/integrations/supabase/client',()=>({supabase:{rpc:()=>({abortSignal:mock.compatible}),from:()=>({select:()=>({
@@ -18,11 +18,11 @@ const catalog:BrowseCatalog={version:1,owner:'a',scope:'filter',revisions:{[sour
 function put(key:string,document:unknown){mock.rows.set(key,{key,document});}
 beforeEach(()=>{mock.compatible.mockReset();mock.requests=[];mock.rows.clear();mock.rows.set(source,{key:source,revision:'r1'});
   put(browseCatalogKey('filter'),catalog);put(browsePageKey(hash),{gzip:gzipSync(text).toString('base64')});});
-it('opens the catalog with one owner-scoped request and reads just the selected page',async()=>{
+it('opens only owner-scoped catalog metadata and reads just the selected page',async()=>{
   const actual=await readBrowseCatalog('a','filter',signal);expect(actual).toEqual(catalog);
-  expect(mock.requests).toEqual([[browseCatalogKey('filter'),source]]);
+  expect(mock.requests).toEqual([ [browseCatalogKey('filter'),source], [fullBrowseKey('filter',catalog.revisions),recentBrowseKey('filter',catalog.revisions),filterDetectorCatalogKey(catalog.revisions),source] ]);
   expect(await readBrowsePage(actual!,hash,signal)).toEqual(rows);
-  expect(mock.requests[1]).toEqual([browsePageKey(hash),source]);
+  expect(mock.requests[2]).toEqual([browsePageKey(hash),source]);
 });
 it('never serves another account or a page from a superseded source',async()=>{
   expect(await readBrowseCatalog('b','filter',signal)).toBeUndefined();
@@ -45,4 +45,14 @@ it('rejects an absent page, an unlisted hash and a substituted page',async()=>{
   mock.rows.delete(browsePageKey(hash));await expect(readBrowsePage(catalog,hash,signal)).rejects.toThrow('不完整');
   put(browsePageKey(hash),{gzip:gzipSync('[]').toString('base64')});
   await expect(readBrowsePage(catalog,hash,signal)).rejects.toThrow('校验失败');
+});
+
+it('reads verified rich pages while the original filter catalog still points to its compatible pages',async()=>{
+  const richRows=[['BTCUSDT',1610000000000,'满足','saved-id',[{metric:'avg_BSS_2',reading:0,percentile:91.125}]]];
+  const raw=JSON.stringify(richRows),richHash=createHash('sha256').update(raw).digest('hex');
+  put(browsePageKey(richHash),{gzip:gzipSync(raw).toString('base64')});
+  put(filterDetectorCatalogKey(catalog.revisions),{...catalog,detectorPreview:true,groups:[{...catalog.groups[0],pages:[richHash]}]});
+  const enhanced=await readBrowseCatalog('a','filter',signal);
+  expect(await readBrowsePage(enhanced!,richHash,signal)).toEqual(richRows);
+  expect(await readBrowsePage(catalog,hash,signal)).toEqual(rows);
 });

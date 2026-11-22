@@ -18,6 +18,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 
 export interface QualityFilterSetting { id: string; signature: string; filters: QualityBuyFilter[]; plans: string[] }
 export interface QualityFilterRecord extends LibraryRecordBase {
+  sourceSelection?:import('./filterDetectorReadings').FilterSourceSelection;
   settingId: string; source: Pick<TradeSignal, 'id' | 'symbol' | 'timeMs' | 'timeLabel' | 'fallbackZone' | 'exchange' | 'market' | 'underlying' | 'binanceSymbol' | 'quality'>;
   enteredAt: number | null; basis: QualitySample['basis']; origin?: QualitySample['origin'];
   origins?:QualitySample['origins'];

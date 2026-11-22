@@ -4,9 +4,13 @@ import type {FishMiningRecord,FishMiningRun} from './miningLibrary';
 import type {QualityFilterRecord} from './qualityFilterLibrary';
 import type {BrowseRow} from './libraryBrowse';
 
+import {filterDetectorReadings} from './filterDetectorReadings';
 const statusLabels:Record<string,string>={pass:'满足',fail:'不满足',pending:'待判断',error:'缺数据',none:'不过滤'};
-export function filterBrowseRow(record:Pick<QualityFilterRecord,'id'|'source'|'status'>):BrowseRow {
-  return [record.source.symbol,record.source.timeMs,[statusLabels[record.status.state]??record.status.state,record.status.detail].filter(Boolean).join(' · '),record.id];
+export function filterBrowseRow(record:Pick<QualityFilterRecord,'id'|'source'|'status'|'sourceSelection'|'sample'>):BrowseRow {
+  const detectors=filterDetectorReadings(record);
+  const row:BrowseRow=[record.source.symbol,record.source.timeMs,[statusLabels[record.status.state]??record.status.state,record.status.detail].filter(Boolean).join(' · '),record.id];
+  if(detectors.length)row[4]=detectors;
+  return row;
 }
 export function miningBrowseRows(record:FishMiningRecord,run?:FishMiningRun) {
   const families=new Map<string,string[]>();

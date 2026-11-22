@@ -1,6 +1,6 @@
 import {DirectoryDeleteButton,DirectoryTrashPanel,purgeMarkedDirectory,useFishDirectoryTrash,type DirectoryCleanup} from './FishDirectoryTrash';
 import {changeDirectory,directoryAccount,type DirectoryRef,type DirectoryScope} from '@/lib/fish/directoryTrash';
-import {DirectoryImportContext,FishWorkspaceRows} from './FishWorkspaceSource';
+import {DirectoryImportContext,FilterDetectorContext,FishWorkspaceRows} from './FishWorkspaceSource';
 import {FishArchiveBrowse} from './FishArchiveBrowse';
 import type {BrowseScope} from '@/lib/fish/libraryBrowse';
 import {FishLibraryTransferMenu} from './FishLibraryDataMenu';
@@ -25,6 +25,7 @@ export interface FishDirectoryItem {
   templateGroup?:QualityTemplateDirectoryGroup;
   settings?:(signal?:AbortSignal)=>ReactNode|Promise<ReactNode>;
   purgeable?: boolean;
+  filterRecords?:readonly import('@/lib/fish/qualityFilterLibrary').QualityFilterRecord[];
   selectedStudy?:(ids:ReadonlySet<string>)=>FishQualityStudy;
   preview?:()=>FishQualityStudy|Promise<FishQualityStudy>;
   campaignPath?:(result:QualityResult)=>string|undefined;
@@ -315,12 +316,12 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
           </div>}
           {selectedId===item.id&&(!confirmBodyLoad||bodyId===item.id)&&!snapshot&&<p role={archiveError?'alert':'status'} className={'border-t px-4 py-3 text-[10.5px] '+(archiveError?'text-destructive':'text-muted-foreground')}>{archiveError??'正在读取归档…'}{archiveError&&<button type="button" className="ml-2 underline" onClick={()=>setLoadAttempt(attempt=>attempt+1)}>重试读取归档</button>}</p>}
           {selectedId===item.id&&snapshot&&<div className="border-t" data-testid={prefix+'-archive-content'}>
-            {picked?.id===item.id&&workspaceImport ? <FishWorkspaceRows key={item.id} snapshot={snapshot} {...workspaceImport} initiallySelected onDone={()=>changeOpen(false)}/> : <>
+            <FilterDetectorContext.Provider value={picked?.id===item.id?item.filterRecords?.filter(r=>picked.records.has(r.id)):item.filterRecords}>{picked?.id===item.id&&workspaceImport ? <FishWorkspaceRows key={item.id} snapshot={snapshot} {...workspaceImport} initiallySelected onDone={()=>changeOpen(false)}/> : <>
             {onSelectDirectory&&<div className="px-4 pt-3"><button type="button" className={action+' text-primary'} disabled={loading||!!loadError||!!busy} onClick={async()=>{setBusy(item.id);setError('');try{if(!await onSelectDirectory(item.id,snapshot))throw Error('目录未载入，当前组合表保留，请重试');changeOpen(false);}catch(e){setError(e instanceof Error?e.message:'目录选择失败');}finally{setBusy('');}}}>{busy===item.id?'正在载入…':'选择此目录'}</button></div>}
             {onCopyStudy&&<div className="flex items-center gap-1 px-4 pt-3"><button type="button" disabled={loading||!!loadError||!!busy} onClick={()=>void copy()} className={action+' text-primary'}><Copy className="h-3 w-3"/>{busy===item.id?'正在保存副本…':'复制至组合表'}</button><FishQualityInfo label="复制至组合表说明"><p>先将当前组合表完整归档，再载入这份记录的独立副本。原归档保留，不自动运行。</p></FishQualityInfo></div>}
             {item.note&&<p className="px-4 pt-3 text-[10px] text-muted-foreground">{item.note}</p>}
             <div key={selectedId}>{(item.renderStudy??renderStudy)?.(snapshot,()=>changeOpen(false))??<p className="px-4 py-3 text-xs text-muted-foreground">{snapshot.results.length} 项运行结果 · 可复制至组合表继续操作</p>}</div>
-            {typeof item.details==='function'?item.details(()=>changeOpen(false)):item.details}</>}
+            {typeof item.details==='function'?item.details(()=>changeOpen(false)):item.details}</>}</FilterDetectorContext.Provider>
           </div>}
         </div>;
   const openFullDirectory=()=>{
@@ -360,7 +361,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-fish-scroll data-testid={prefix+'-directory-scroll'}>
       {trashOwner&&open&&!picker&&<DirectoryTrashPanel toolbar={trashToolbar} known={trash.known} key={trashOwner+trashScope} owner={trashOwner} scope={trashScope} marks={trash.marks} reload={trash.reload} cleanup={cleanupDirectory} selection={trashSelection} clear={()=>setTrashSelection(undefined)} trashView={trashView} onTrashView={value=>{resetDirectorySelection();setTrashView(value);}}/>}
       {trashView&&trash.issue&&<p role="status" className="text-xs">{trash.issue} <button type="button" className="underline" onClick={trash.reload}>重试</button></p>}
-      {trashView ? null : directoryOnly && open && browseArchive?.owner ? <FishArchiveBrowse marks={trash.marks} selectBeforeLoad={selectBeforeLoad} legacySelection={selectBeforeLoad&&!browseArchive.fullReady} pickRecords={!!workspaceImport&&!picker} onSelectRecords={(workspaceImport&&!picker||importSelection)&&browseArchive.loadFull?selectArchiveRecords:undefined} onDelete={trashOwner&&!picker?setTrashSelection:undefined} key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/> : <>
+      {trashView ? null : directoryOnly && open && browseArchive?.owner ? <FishArchiveBrowse marks={trash.marks} selectBeforeLoad={selectBeforeLoad} legacySelection={selectBeforeLoad&&!browseArchive.fullReady} onViewDetectors={browseArchive.scope==='filter'&&browseArchive.loadFull?selectArchiveRecords:undefined} pickRecords={!!workspaceImport&&!picker} onSelectRecords={(workspaceImport&&!picker||importSelection)&&browseArchive.loadFull?selectArchiveRecords:undefined} onDelete={trashOwner&&!picker?setTrashSelection:undefined} key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/> : <>
       {notice}
       {importSelection&&managementOwner&&selectedId&&!selected&&!loading&&!loadError&&<p role="alert" className="text-xs">
         找不到该目录的完整归档，无法选取记录。 <button type="button" className="underline" onClick={()=>{

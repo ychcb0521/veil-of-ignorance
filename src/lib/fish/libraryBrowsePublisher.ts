@@ -2,7 +2,7 @@ import {retiredDirectoryIds} from './directoryTrash';
 import {supabase} from '@/integrations/supabase/client';
 import {syncedImmutableAccountBlobRevision} from '../accountBlobSync';
 import {runAccountSyncRequest} from '../accountSyncTransport';
-import {browsePageKey,readBrowseCatalog,readBrowseRevisions,fullBrowseKey,recentBrowseKey,type BrowseRow,type BrowseGroup,type BrowseScope} from './libraryBrowse';
+import {browsePageKey,filterDetectorCatalogKey,readBrowseCatalog,readBrowseRevisions,fullBrowseKey,recentBrowseKey,type BrowseRow,type BrowseGroup,type BrowseScope} from './libraryBrowse';
 import {filterBrowseRow,miningBrowseRows} from './libraryBrowseProjection';
 import {createFilterDirectoryReader} from './qualityLibraryDirectory';
 import {miningRecordSavedAt} from './libraryDeletion';
@@ -31,7 +31,7 @@ async function publish(owner:string,scope:BrowseScope,revision:string,source:(re
  if(inflight.has(key))return inflight.get(key);
  const task=(async()=>{
    const existing=await readBrowseCatalog(owner,scope,AbortSignal.timeout(15000));
-   if(existing&&!existing.recent)return;
+   if(existing&&!existing.recent&&(scope!=='filter'||existing.detectorPreview))return;
    const revisions=await readBrowseRevisions(owner,scope,AbortSignal.timeout(15000));
    if(!revisions)return;
    const main=scope==='filter'?'fish-quality':'fish-mining-library';
@@ -40,23 +40,35 @@ async function publish(owner:string,scope:BrowseScope,revision:string,source:(re
    const retired=await retiredDirectoryIds(owner,scope,AbortSignal.timeout(15000));
    const input=await source(revisions);
    if(!input)return;
-   const groups:BrowseGroup[]=[];
+   const groups:BrowseGroup[]=[], detectorGroups:BrowseGroup[]=[];
    // Publish immutable pages first. Losing the network cannot expose a partial catalog.
    for(const {rows,...group} of input.sort((a,b)=>b.at-a.at)){
      if(retired.has(group.id))continue;
-     const pages:string[]=[];
+     const pages:string[]=[], detectorPages:string[]=[];
+     const withDetectors=rows.some(row=>row[4]?.length);
      rows.sort(byTime);
      for(let start=0;start<rows.length;start+=350){
-       const hash=await writeBrowsePage(owner,rows.slice(start,start+350));
+       const batch=rows.slice(start,start+350);
+       const hash=await writeBrowsePage(owner,withDetectors?batch.map(([symbol,time,detail,id])=>[symbol,time,detail,id]):batch);
        if(!hash)return;
        pages.push(hash);
+       if(withDetectors){
+         const richHash=batch.some(row=>row[4]?.length)?await writeBrowsePage(owner,batch):hash;
+         if(!richHash)return;
+         detectorPages.push(richHash);
+       }
      }
      groups.push({...group,count:rows.length,pages});
+     if(scope==='filter')detectorGroups.push({...group,count:rows.length,pages:withDetectors?detectorPages:pages});
    }
    const latest=await readBrowseRevisions(owner,scope,AbortSignal.timeout(15000));
    if(JSON.stringify(latest)!==JSON.stringify(revisions)||await syncedImmutableAccountBlobRevision(receipt,owner)!==revision)return;
    const value={browse:{version:1,scope,owner,revisions,groups}};
    const catalogs=[fullBrowseKey(scope,revisions),recentBrowseKey(scope,revisions)].map(key=>({user_id:owner,key,value}));
+   if(scope==='filter'){
+     const browse={...value.browse,detectorPreview:true,groups:detectorGroups};
+     catalogs.push({user_id:owner,key:filterDetectorCatalogKey(revisions),value:{browse}});
+   }
    await runAccountSyncRequest(()=>supabase.from('user_sim_state').upsert(catalogs as never,{onConflict:'user_id,key',ignoreDuplicates:true}),{bytes:JSON.stringify(catalogs).length});
  })().finally(()=>inflight.delete(key));
  inflight.set(key,task);return task;

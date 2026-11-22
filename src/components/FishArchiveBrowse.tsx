@@ -1,4 +1,5 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
+import {percentilePosition} from '@/lib/fish/filterDetectorReadings';
 import {formatUTC8} from '@/lib/timeFormat';
 import {readBrowseCatalog,readBrowsePage,type BrowseCatalog,type BrowseRow,type BrowseScope} from '@/lib/fish/libraryBrowse';
 import {mergeLibraryDirectoryEdits,type LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
@@ -9,7 +10,7 @@ import {FishScrollBoundary} from './FishScrollBoundary';
 import {DirectoryDeleteButton} from './FishDirectoryTrash';
 import type {DirectoryMarks,DirectoryRef} from '@/lib/fish/directoryTrash';
 type Directory = {local:LocalScreenCatalog} | {cloud:BrowseCatalog};
-type Props = {owner:string;scope:BrowseScope;query:string;edits?:LibraryDirectoryEdits;marks?:DirectoryMarks;onDelete?:(item:DirectoryRef)=>void;pickRecords?:boolean;onSelectRecords?:(id:string,records?:ReadonlySet<string>)=>void;selectBeforeLoad?:boolean;legacySelection?:boolean};
+type Props = {owner:string;scope:BrowseScope;query:string;edits?:LibraryDirectoryEdits;marks?:DirectoryMarks;onDelete?:(item:DirectoryRef)=>void;onViewDetectors?:(id:string)=>void;pickRecords?:boolean;onSelectRecords?:(id:string,records?:ReadonlySet<string>)=>void;selectBeforeLoad?:boolean;legacySelection?:boolean};
 
 async function readDirectory(owner:string, scope:BrowseScope, signal:AbortSignal, historicalOnly:boolean, edits?:LibraryDirectoryEdits):Promise<Directory|undefined>{
   let emptyLocal:LocalScreenCatalog|undefined;
@@ -30,23 +31,32 @@ type ArchiveStream = {rows: BrowseRow[]; next: number; loading: boolean; error: 
 const archiveRowKey = (row: BrowseRow, index:number) => row[3]+'/'+index;
 const collator=new Intl.Collator('zh-CN',{numeric:true});
 
-function ArchiveRecords({owner, directory, pages, reload, pick, legacy}: {
-  owner: string; directory: Directory; pages: string[]; reload: () => void; pick?:(ids:ReadonlySet<string>)=>void; legacy?:boolean;
+function ArchiveRecords({owner, directory, pages, reload, pick, legacy, filter}: {
+  owner: string; directory: Directory; pages: string[]; reload: () => void; pick?:(ids:ReadonlySet<string>)=>void; legacy?:boolean; filter?:boolean;
 }) {
   const [stream, setStream] = useState<ArchiveStream>({rows: [], next: 0, loading: true, error: ''});
   const {rows, next, loading, error} = stream;
-  const [sort,setSort]=useState<{column:0|1|2;ascending:boolean}>();
+  const [sort,setSort]=useState<{column:0|1|2|'metric'|'reading'|'percentile';ascending:boolean}>();
   const [all,setAll]=useState(false);
   const [exceptions,setExceptions]=useState<ReadonlySet<string>>(()=>new Set());
   const [readRemaining,setReadRemaining]=useState(false);
   const complete=next===pages.length;
   const sorted=useMemo(()=>sort ? [...rows].sort((a,b)=>{
-    const cmp=sort.column===1 ? a[1]-b[1] : collator.compare(a[sort.column],b[sort.column]);
+    const col=sort.column;
+    const key=(r:BrowseRow)=>{
+      if(typeof col==='number')return r[col];
+      if(col==='metric')return r[4]?.map(d=>d.metric).join('、');
+      return r[4]?.reduce<number|undefined>((max,d)=>d[col]===undefined?max:Math.max(max??d[col],d[col]),undefined);
+    };
+    const left=key(a),right=key(b);
+    if(left===undefined)return right===undefined?0:1;
+    if(right===undefined)return -1;
+    const cmp=typeof left==='number'&&typeof right==='number'?left-right:collator.compare(String(left),String(right));
     return sort.ascending ? cmp : -cmp;
   }) : rows,[rows,sort]);
   const checked=(id:string)=>all!==exceptions.has(id);
   const count=all ? rows.length-exceptions.size : exceptions.size;
-  const sortHeader=(column:0|1|2,label:string)=>{
+  const sortHeader=(column:0|1|2|'metric'|'reading'|'percentile',label:string)=>{
     const active=sort?.column===column;
     return <th scope="col" aria-sort={active?(sort.ascending?'ascending':'descending'):undefined}>
       <button type="button" aria-label={'按'+label+'排序'} onClick={()=>{
@@ -92,12 +102,12 @@ function ArchiveRecords({owner, directory, pages, reload, pick, legacy}: {
         {legacy?'载入旧版完整档案并导入所选':'导入所选到组合表'}
       </button>
     </div>}
-    <FishContinuousTable items={sorted} getKey={archiveRowKey} columns={pick?4:3} resetKey={JSON.stringify([owner,sort])}
+    <FishContinuousTable items={sorted} getKey={archiveRowKey} columns={(pick?4:3)+(filter?3:0)} resetKey={JSON.stringify([owner,sort])}
       label="归档记录连续滚动列表" testId="archive-record-scroll" estimate={24} className="max-h-72"
-      tableClassName="text-left" header={<tr>{pick&&<th scope="col">选取</th>}{sortHeader(0,'标的')}{sortHeader(1,'信号时间（北京时间）')}{sortHeader(2,'归档记录')}</tr>}
+      tableClassName="text-left" header={<tr>{pick&&<th scope="col">选取</th>}{sortHeader(0,'标的')}{sortHeader(1,'信号时间（北京时间）')}{filter&&<>{sortHeader('metric','探测算法')}{sortHeader('reading','探测值')}{sortHeader('percentile','百分位位置')}</>}{sortHeader(2,'归档记录')}</tr>}
       row={row => <tr className="[&>td]:border-t">{pick&&<td><input type="checkbox" aria-label={'勾选 '+row[0]+' '+formatUTC8(row[1])} checked={checked(row[3])}
         onChange={()=>setExceptions(prior=>{const ids=new Set(prior);if(ids.has(row[3]))ids.delete(row[3]);else ids.add(row[3]);return ids;})}/></td>}
-        <td className="pr-2 font-mono">{row[0]}</td><td className="whitespace-nowrap pr-2">{formatUTC8(row[1])}</td><td>{row[2]}</td></tr>}
+        <td className="pr-2 font-mono">{row[0]}</td><td className="whitespace-nowrap pr-2">{formatUTC8(row[1])}</td>{filter&&(['metric','reading','percentile'] as const).map(field=><td key={field}>{row[4]?.length?row[4].map((r,i)=><div key={i}>{field==='percentile'?percentilePosition(r):field==='metric'?r.metric:r.reading??(r.rawReading!==undefined?'原值 '+r.rawReading:'未记录')}</div>):'—'}</td>)}<td>{row[2]}</td></tr>}
       footer={!loading && !error && next < pages.length ? <FishScrollBoundary key={next} onReach={loadNext}/> : null}/>
     {loading && <p role="status">{rows.length ? '正在读取后续记录…' : '正在读取归档记录…'}</p>}
     {error && <p role="alert">{error} <button type="button" className="underline" onClick={loadNext}>重试读取</button>
@@ -150,7 +160,7 @@ function RebuildHistoricalIndex({owner,onReady}:{owner:string;onReady:()=>void})
   return <div className="text-xs"><button type="button" className="underline" disabled={busy} onClick={()=>void rebuild()}>{busy?'正在核验 v5 归档并建立目录…':'从账号 v5 归档重建目录'}</button>{error&&<p role="alert">{error}</p>}</div>;
 }
 
-export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSelectRecords,pickRecords,selectBeforeLoad,legacySelection}:Props){
+export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSelectRecords,onViewDetectors,pickRecords,selectBeforeLoad,legacySelection}:Props){
   const [historicalOnly,setHistoricalOnly]=useState(false);
   const [directory,setDirectory]=useState<Directory>(),[issue,setIssue]=useState(''),[attempt,setAttempt]=useState(0);
   const [selected,setSelected]=useState('');
@@ -194,6 +204,7 @@ export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSele
       {selected===item.id&&<div className="space-y-2 border-t p-2">
         {selectBeforeLoad&&opened!==item.id&&item.pages.length>0&&<button type="button" className="rounded-md border px-2 py-1 hover:bg-muted"
           onClick={()=>setOpened(item.id)}>载入所选目录</button>}
+        {onViewDetectors&&'cloud' in directory&&!directory.cloud.detectorPreview&&item.count>0&&<button type="button" className="underline" onClick={()=>onViewDetectors(item.id)}>{legacySelection?'载入旧版完整档案查看探测值和百分位':'查看原始探测值和百分位'}</button>}
         {onSelectRecords&&item.count>0&&(legacySelection
           ? <details><summary className="cursor-pointer text-muted-foreground">旧归档导入</summary>
             <div className="flex flex-wrap items-center gap-2 pt-2">
@@ -203,7 +214,7 @@ export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSele
           </details>
           : <button type="button" className="rounded-md border px-2 py-1 text-primary hover:bg-muted" onClick={()=>onSelectRecords(item.id)}>选取本目录记录</button>)}
         {item.pages.length ? (!selectBeforeLoad||opened===item.id)&&<ArchiveRecords key={JSON.stringify([owner,item.id,'local' in directory?directory.local.id:directory.cloud.revisions,item.pages])}
-          owner={owner} directory={directory} pages={item.pages} reload={reload} legacy={legacySelection} pick={pickRecords&&onSelectRecords?ids=>onSelectRecords(item.id,ids):undefined}/> : <p>{item.count?'该目录尚未建立记录索引':'本轮没有记录'}</p>}
+          owner={owner} directory={directory} filter={scope==='filter'} pages={item.pages} reload={reload} legacy={legacySelection} pick={pickRecords&&onSelectRecords?ids=>onSelectRecords(item.id,ids):undefined}/> : <p>{item.count?'该目录尚未建立记录索引':'本轮没有记录'}</p>}
       </div>}
     </div>)}
     {!matching.length&&<p>{groups.length?'没有匹配的归档目录。':'这个版本尚无可显示的归档目录。'}</p>}
