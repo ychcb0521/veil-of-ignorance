@@ -1,6 +1,6 @@
 import {MIRROR_HARD_STOP_STAGES_VERSION,type MirrorHardStopStage} from './qualityMirrorHardStopStages';
 import {MIRROR_DEADLINE_KIND,MIRROR_DEADLINE_VERSION,MIRROR_DEADLINE_LABEL} from './qualityMirrorDeadline';
-import {MIRROR_LOSS_REVIEW_KIND,MIRROR_LOSS_REVIEW_VERSION,MIRROR_LOSS_REVIEW_LABEL} from './qualityMirrorLossReview';
+import {MIRROR_LOSS_REVIEW_KIND,MIRROR_LOSS_REVIEW_VERSION,MIRROR_LOSS_REVIEW_LABEL,MIRROR_LOSS_THRESHOLD_VERSION,type MirrorLossThreshold} from './qualityMirrorLossReview';
 import { usesHourlyCda } from '@/lib/cdaPeriods';
 import {POST_MIRROR_PROTECTION_VERSION} from './qualityPostMirrorProtection';
 import { algorithmMetricMenu } from './algorithmMetricMenu';
@@ -75,8 +75,12 @@ export function makeQualitySignalMetrics(choiceKeys: readonly string[], definiti
   });
 }
 export const qualityFilterChoiceKey = <T extends Pick<QualityBuyFilter, 'snapshot' | 'metric'>>(f: T) => `${f.snapshot.featureId}:${f.metric}`;
-export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperator,threshold:number,enabled=true,definitions:readonly DeepDigFeatureDef[]=accountFeatureDefs(),geometricMultiple=100):QualityHoldingVeto {
-  if(choiceKey===MIRROR_LOSS_REVIEW_KIND){const v:QualityHoldingVeto={id:'veto-'+shortFishHash(JSON.stringify([MIRROR_LOSS_REVIEW_VERSION,threshold])),label:MIRROR_LOSS_REVIEW_LABEL,kind:MIRROR_LOSS_REVIEW_KIND,direction:'>=',threshold,enabled,mirrorDeadlineVersion:MIRROR_LOSS_REVIEW_VERSION};validateHoldingVeto(v);return v;}
+export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperator,threshold:number,enabled=true,definitions:readonly DeepDigFeatureDef[]=accountFeatureDefs(),geometricMultiple=100,mirrorLossThreshold?:MirrorLossThreshold):QualityHoldingVeto {
+  if(choiceKey===MIRROR_LOSS_REVIEW_KIND){
+    const loss=mirrorLossThreshold?{version:mirrorLossThreshold.version,unit:mirrorLossThreshold.unit,value:mirrorLossThreshold.value}:undefined;
+    const version=loss?MIRROR_LOSS_THRESHOLD_VERSION:MIRROR_LOSS_REVIEW_VERSION;
+    const v:QualityHoldingVeto={id:'veto-'+shortFishHash(JSON.stringify([version,threshold,...(loss?[loss.version,loss.unit,loss.value]:[])])),label:MIRROR_LOSS_REVIEW_LABEL,kind:MIRROR_LOSS_REVIEW_KIND,direction:'>=',threshold,enabled,mirrorDeadlineVersion:version,...(loss?{mirrorLossThreshold:loss}:{})};validateHoldingVeto(v);return v;
+  }
   if(choiceKey===MIRROR_DEADLINE_KIND){const v:QualityHoldingVeto={id:'veto-'+shortFishHash(JSON.stringify([MIRROR_DEADLINE_VERSION,threshold])),label:MIRROR_DEADLINE_LABEL,kind:MIRROR_DEADLINE_KIND,direction:'>=',threshold,enabled,mirrorDeadlineVersion:MIRROR_DEADLINE_VERSION};validateHoldingVeto(v);return v;}
   if(choiceKey===LIMITED_STATIC_DRAWDOWN_CHOICE){const v:QualityHoldingVeto={id:`veto-${shortFishHash(JSON.stringify([LIMITED_STATIC_DRAWDOWN_VETO_VERSION,direction,threshold]))}`,label:LIMITED_STATIC_DRAWDOWN_LABEL,kind:'static-drawdown',direction,threshold,enabled,limitedStaticVersion:LIMITED_STATIC_DRAWDOWN_VETO_VERSION};validateHoldingVeto(v);return v;}
   if(choiceKey===PAYOFF_STOP_KIND){const v:QualityHoldingVeto={id:`veto-${shortFishHash(JSON.stringify([choiceKey,'>=',threshold]))}`,label:PAYOFF_STOP_LABEL,kind:PAYOFF_STOP_KIND,direction:'>=',threshold,enabled};validateHoldingVeto(v);return v;}
@@ -87,11 +91,11 @@ export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperato
   validateHoldingVeto(v);return v;
 }
 
-export type HoldingVetoDraft={choice:string;direction:QualityOperator;threshold:string;enabled:boolean;activation?:typeof POST_MIRROR_PROTECTION_VERSION;mirrorStage?:MirrorHardStopStage;geometricMultiple?:string;boxStop?:BoxStopRule;time?:AdditionMetricTime;saved?:QualityHoldingVeto};
+export type HoldingVetoDraft={lossThreshold?:{version:typeof MIRROR_LOSS_THRESHOLD_VERSION;unit:MirrorLossThreshold['unit'];value:string};choice:string;direction:QualityOperator;threshold:string;enabled:boolean;activation?:typeof POST_MIRROR_PROTECTION_VERSION;mirrorStage?:MirrorHardStopStage;geometricMultiple?:string;boxStop?:BoxStopRule;time?:AdditionMetricTime;saved?:QualityHoldingVeto};
 /** 【用户要求】2026-11-03 每套卖出算法的硬性终止框都默认带一条「盈亏比止盈」（不勾选、预填 5000R），用不用由用户选。 */
 export const PAYOFF_STOP_DEFAULT_R='5000';
 const withPayoffRow=(rows:HoldingVetoDraft[]):HoldingVetoDraft[]=>rows.some(r=>r.choice===PAYOFF_STOP_KIND)?rows:[...rows,{choice:PAYOFF_STOP_KIND,direction:'>=',threshold:PAYOFF_STOP_DEFAULT_R,enabled:false}];
-export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>(saved.length?saved.map(v=>({choice:isLimitedStaticDrawdownVeto(v)?LIMITED_STATIC_DRAWDOWN_CHOICE:v.kind===BOX_STOP_KIND&&v.boxStop?boxStopChoice(v.boxStop):v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.mirrorStage?{mirrorStage:structuredClone(v.mirrorStage)}:{}),...(v.activation?{activation:v.activation}:{}),...(v.snapshot&&v.kind==='indicator'?{saved:v,time:additionMetricTime(v.snapshot)}:{}),...((v.kind===MIRROR_DEADLINE_KIND||v.kind===MIRROR_LOSS_REVIEW_KIND)?{saved:structuredClone(v)}:{}),...(v.boxStop?{boxStop:structuredClone(v.boxStop)}:{}),...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
+export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>(saved.length?saved.map(v=>({choice:isLimitedStaticDrawdownVeto(v)?LIMITED_STATIC_DRAWDOWN_CHOICE:v.kind===BOX_STOP_KIND&&v.boxStop?boxStopChoice(v.boxStop):v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.mirrorStage?{mirrorStage:structuredClone(v.mirrorStage)}:{}),...(v.activation?{activation:v.activation}:{}),...(v.snapshot&&v.kind==='indicator'?{saved:v,time:additionMetricTime(v.snapshot)}:{}),...((v.kind===MIRROR_DEADLINE_KIND||v.kind===MIRROR_LOSS_REVIEW_KIND)?{saved:structuredClone(v)}:{}),...(v.mirrorLossThreshold?{lossThreshold:{...v.mirrorLossThreshold,value:String(v.mirrorLossThreshold.value)}}:{}),...(v.boxStop?{boxStop:structuredClone(v.boxStop)}:{}),...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
   [{choice:'static-drawdown',direction:'>=',threshold:'',enabled:false},{choice:'dynamic-drawdown',direction:'>=',threshold:'',enabled:false}]);
 /** 方案的硬性终止框（不含各次加仓后的否决）：默认多一条不勾选的盈亏比止盈。 */
 export const planHoldingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>withPayoffRow(holdingVetoDraft(saved));
@@ -104,12 +108,15 @@ export function parseHoldingVetoDraft(draft:HoldingVetoDraft[], definitions?:rea
   // 没勾选、还是默认 5000R 的那条盈亏比止盈只是预留位，不存进方案（下次打开会自动补上）
   const rules = draft.filter(d => (d.enabled || d.threshold.trim()) && !(d.choice === PAYOFF_STOP_KIND && !d.enabled && d.threshold.trim() === PAYOFF_STOP_DEFAULT_R)).map(d => {
     const build=():QualityHoldingVeto=>{const threshold = Number(d.threshold);
-    if((d.choice===MIRROR_DEADLINE_KIND||d.choice===MIRROR_LOSS_REVIEW_KIND)&&d.saved){const veto={...makeQualityHoldingVeto(d.choice,d.direction,threshold,d.enabled,definitions),mirrorDeadlineVersion:d.saved.mirrorDeadlineVersion};validateHoldingVeto(veto);return veto;}
+    if(d.lossThreshold&&(!d.lossThreshold.value.trim()||!Number.isFinite(Number(d.lossThreshold.value))||Number(d.lossThreshold.value)<0))throw Error('请填写大于或等于 0 的有限数字亏损门槛');
+    if(d.lossThreshold&&d.choice!==MIRROR_LOSS_REVIEW_KIND)throw Error('亏损门槛只适用于未镜像定时检查，不能套用到其他条件');
+    const loss=d.lossThreshold?{...d.lossThreshold,value:Number(d.lossThreshold.value)}:undefined;
+    if((d.choice===MIRROR_DEADLINE_KIND||d.choice===MIRROR_LOSS_REVIEW_KIND)&&d.saved){const veto={...makeQualityHoldingVeto(d.choice,d.direction,threshold,d.enabled,definitions,100,loss),mirrorDeadlineVersion:d.saved.mirrorDeadlineVersion};validateHoldingVeto(veto);return veto;}
     const saved = d.saved?.snapshot && qualityFilterChoiceKey({ snapshot:d.saved.snapshot, metric:d.saved.metric! }) === d.choice ? d.saved : undefined;
     const direction: '<' | '>' = d.direction.startsWith('<') ? '<' : '>';
     const veto = saved ? { ...saved, enabled:d.enabled, direction:d.direction, threshold,
       snapshot:{ ...saved.snapshot!, direction, threshold } }
-      : makeQualityHoldingVeto(d.choice,d.direction,threshold,d.enabled,definitions,d.geometricMultiple==null?100:d.geometricMultiple.trim()?Number(d.geometricMultiple):NaN);
+      : makeQualityHoldingVeto(d.choice,d.direction,threshold,d.enabled,definitions,d.geometricMultiple==null?100:d.geometricMultiple.trim()?Number(d.geometricMultiple):NaN,loss);
     if (veto.kind !== 'indicator') return veto;
     if (!saved && !Object.keys(d.time ?? {}).length) return veto;
     if (saved && saved.direction === d.direction && saved.threshold === threshold &&

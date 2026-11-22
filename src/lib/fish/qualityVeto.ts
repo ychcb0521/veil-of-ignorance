@@ -1,6 +1,6 @@
 import {validateMirrorHardStopStage,mirrorHardStopStageLabel,type MirrorHardStopStage} from './qualityMirrorHardStopStages';
 import {MIRROR_DEADLINE_KIND,MIRROR_DEADLINE_VERSION,MIRROR_DEADLINE_LABEL} from './qualityMirrorDeadline';
-import {MIRROR_LOSS_REVIEW_KIND,MIRROR_LOSS_REVIEW_VERSION,mirrorLossReviewSummary,type MirrorLossReviewCheck} from './qualityMirrorLossReview';
+import {MIRROR_LOSS_REVIEW_KIND,validateMirrorLossThreshold,mirrorLossReviewSummary,type MirrorLossReviewVersion,type MirrorLossThreshold,type MirrorLossReviewCheck} from './qualityMirrorLossReview';
 /** Frozen holding-period exit conditions. Any enabled condition can close the paper trade. */
 import type { FishSnapshot } from './algorithm';
 import {POST_MIRROR_PROTECTION_VERSION,POST_MIRROR_PROTECTION_LABEL,canGateAfterMirror} from './qualityPostMirrorProtection';
@@ -16,7 +16,8 @@ export interface QualityHoldingVeto {
   activation?:typeof POST_MIRROR_PROTECTION_VERSION;
   mirrorStage?:MirrorHardStopStage;
   limitedStaticVersion?:typeof LIMITED_STATIC_DRAWDOWN_VETO_VERSION;
-  mirrorDeadlineVersion?:typeof MIRROR_DEADLINE_VERSION|typeof MIRROR_LOSS_REVIEW_VERSION;
+  mirrorDeadlineVersion?:typeof MIRROR_DEADLINE_VERSION|MirrorLossReviewVersion;
+  mirrorLossThreshold?:MirrorLossThreshold;
 }
 export const FREE_STATIC_DRAWDOWN_LABEL = '自由静态最大回撤';
 export const LIMITED_STATIC_DRAWDOWN_LABEL = '限制静态最大回撤';
@@ -33,16 +34,18 @@ export const PAYOFF_STOP_KIND='payoff-ratio' as const;
 export const PAYOFF_STOP_LABEL='盈亏比止盈';
 export const LIMITED_PAYOFF_RISK_VERSION = 'payoff-stop-limited-initial-risk-v2' as const;
 export const holdingVetoName = (v: { kind: string; label: string;activation?:string;mirrorStage?:MirrorHardStopStage;limitedStaticVersion?:string }) => (v.kind === 'static-drawdown' ? isLimitedStaticDrawdownVeto(v)?LIMITED_STATIC_DRAWDOWN_LABEL:FREE_STATIC_DRAWDOWN_LABEL : v.label)+(v.activation?'（'+POST_MIRROR_PROTECTION_LABEL+'）':'')+(v.mirrorStage?'（'+mirrorHardStopStageLabel(v.mirrorStage)+'）':'');
-export const holdingVetoLabel=(v:Pick<QualityHoldingVeto,'label'|'direction'|'threshold'|'geometricMultiple'|'activation'|'mirrorStage'|'limitedStaticVersion'>&{kind:string})=>v.kind===MIRROR_LOSS_REVIEW_KIND?mirrorLossReviewSummary(v.threshold):v.kind===MIRROR_DEADLINE_KIND?`持仓 ${v.threshold} 小时${MIRROR_DEADLINE_LABEL}即清仓`:v.kind===BOX_STOP_KIND&&'boxStop' in v?boxStopLabel((v as QualityHoldingVeto).boxStop!)+(v.activation?POST_MIRROR_PROTECTION_LABEL:'')+(v.mirrorStage?mirrorHardStopStageLabel(v.mirrorStage):''):v.kind===PAYOFF_STOP_KIND?`盈亏比 ≥ ${v.threshold}R${v.mirrorStage?mirrorHardStopStageLabel(v.mirrorStage):''}`:v.kind===ADDITION_PROFIT_KIND?`几何仓位 ≥ ${v.geometricMultiple??100}× 且 价格高出均衡价 ≥ ${v.threshold}%`:`${holdingVetoName(v)} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`;
+export const holdingVetoLabel=(v:Pick<QualityHoldingVeto,'label'|'direction'|'threshold'|'geometricMultiple'|'activation'|'mirrorStage'|'limitedStaticVersion'|'mirrorLossThreshold'>&{kind:string})=>v.kind===MIRROR_LOSS_REVIEW_KIND?mirrorLossReviewSummary(v.threshold,v.mirrorLossThreshold):v.kind===MIRROR_DEADLINE_KIND?`持仓 ${v.threshold} 小时${MIRROR_DEADLINE_LABEL}即清仓`:v.kind===BOX_STOP_KIND&&'boxStop' in v?boxStopLabel((v as QualityHoldingVeto).boxStop!)+(v.activation?POST_MIRROR_PROTECTION_LABEL:'')+(v.mirrorStage?mirrorHardStopStageLabel(v.mirrorStage):''):v.kind===PAYOFF_STOP_KIND?`盈亏比 ≥ ${v.threshold}R${v.mirrorStage?mirrorHardStopStageLabel(v.mirrorStage):''}`:v.kind===ADDITION_PROFIT_KIND?`几何仓位 ≥ ${v.geometricMultiple??100}× 且 价格高出均衡价 ≥ ${v.threshold}%`:`${holdingVetoName(v)} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`;
 export type QualityExitCause = Omit<Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'|'activation'|'mirrorStage'|'limitedStaticVersion'|'mirrorDeadlineVersion'>, 'kind'> & {mirrorLossReview?:MirrorLossReviewCheck;boxStopChannel?:'regular'|'impulse';boxStopChannelsVersion?:string;mirrorStageBoundary?:number;activationAt?:number;kind:QualityHoldingVeto['kind'] | 'mirror-take-profit' | 'addition-support' | 'sell-static-drawdown';/** 防守线 K：连续几根 5 分钟收盘低于 K 才确认。 */confirmCloses?:number;guardTimeframe?:'1h';boxStopEvidence?:{version:string;line:number;confirmedAt:number;confirmation:string;guardRegime?:BoxStopGuardRegime};boxBreakEvidence?:{version:string;event:`darvas_${import('@/lib/dbl5m').Dbl5Timeframe}_guard_broken`;confirmedAt:number;sourceBarOpenTime:number;breakCount?:number;firstBreakAt?:number};/** 【用户要求】2026-11-02 K 连续下移达到次数全仓卖出：次数与最后一次下移前后的 K。 */supportDrops?:{count:number;previousK:number;newK:number;support:number};additionBasis?:{geometricMultiple:number;equilibriumPrice:number;targetPrice:number};/** 几何仓位保住有效涨幅：当时的几何仓位、门槛、百分比与上移后的止损线。 */geometricLock?:{multiple:number;threshold:number;pct:number;line:number;k:number};/** 盈亏比止盈：L₀、目标价与成交时的整笔盈亏。 */payoffBasis?:{l0:number;l0Pct:number;targetPrice:number;pnl:number}};
 export const activeHoldingVetoes = (conditions: readonly QualityHoldingVeto[] = []) => conditions.filter(v => v.enabled);
 export const qualityConditionMet = (value: number, direction: QualityOperator, threshold: number) => direction === '<' ? value < threshold : direction === '>' ? value > threshold : direction === '<=' ? value <= threshold : value >= threshold;
 export function validateHoldingVeto(v: QualityHoldingVeto) {
   validateMirrorHardStopStage(v);
   if(v.kind===MIRROR_LOSS_REVIEW_KIND){
-    if(v.mirrorDeadlineVersion!==MIRROR_LOSS_REVIEW_VERSION||v.direction!=='>='||!Number.isFinite(v.threshold)||v.threshold<1/60||v.threshold>12||v.activation||v.mirrorStage?.stage==='after')throw Error('定时亏损终止须使用保留版本、放在镜像前，首次检查时间须为 1 分钟至 12 小时');
+    validateMirrorLossThreshold(v);
+    if(v.direction!=='>='||!Number.isFinite(v.threshold)||v.threshold<1/60||v.threshold>12||v.activation||v.mirrorStage?.stage==='after')throw Error('定时亏损终止须使用保留版本、放在镜像前，首次检查时间须为 1 分钟至 12 小时');
     return;
   }
+  if(v.mirrorLossThreshold!==undefined)throw Error('可编辑亏损门槛只适用于未镜像定时检查');
   if(v.kind===MIRROR_DEADLINE_KIND){
     if(v.mirrorDeadlineVersion!==MIRROR_DEADLINE_VERSION||v.direction!=='>='||!Number.isFinite(v.threshold)||v.threshold<1/60||v.threshold>24*366||v.activation||v.mirrorStage?.stage==='after')throw Error('镜像限时终止须使用保留版本、放在镜像前，并填写 1 分钟至 8784 小时的时长');
     return;
@@ -74,7 +77,7 @@ export function holdingBoxStopIdentity(v:QualityHoldingVeto){
   return boxStopIdentity((v.activation||v.mirrorStage)&&config?{...r,structure:{...r.structure,definition:{...r.structure.definition,DBL5_config:Object.fromEntries(Object.entries(config).sort(([a],[b])=>a.localeCompare(b)))}}}:r);
 }
 export function holdingVetoIdentity(vetoes: readonly QualityHoldingVeto[] = []): unknown[] {
-  return activeHoldingVetoes(vetoes).map(v => [v.kind,v.direction,v.threshold,v.metric ?? null,v.snapshot?.definitionKey ?? null,v.snapshot?.interval ?? null,...(v.kind===ADDITION_PROFIT_KIND?[v.geometricMultiple??100]:[]),...(v.kind===BOX_STOP_KIND?[holdingBoxStopIdentity(v)]:[]),...(v.activation?[v.activation]:[]),...(v.mirrorStage?[[v.mirrorStage.version,v.mirrorStage.stage]]:[]),...(v.limitedStaticVersion?[v.limitedStaticVersion]:[]),...(v.mirrorDeadlineVersion?[v.mirrorDeadlineVersion]:[])]).sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return activeHoldingVetoes(vetoes).map(v => [v.kind,v.direction,v.threshold,v.metric ?? null,v.snapshot?.definitionKey ?? null,v.snapshot?.interval ?? null,...(v.kind===ADDITION_PROFIT_KIND?[v.geometricMultiple??100]:[]),...(v.kind===BOX_STOP_KIND?[holdingBoxStopIdentity(v)]:[]),...(v.activation?[v.activation]:[]),...(v.mirrorStage?[[v.mirrorStage.version,v.mirrorStage.stage]]:[]),...(v.limitedStaticVersion?[v.limitedStaticVersion]:[]),...(v.mirrorDeadlineVersion?[v.mirrorDeadlineVersion]:[]),...(v.mirrorLossThreshold?[[v.mirrorLossThreshold.version,v.mirrorLossThreshold.unit,v.mirrorLossThreshold.value]]:[])]).sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
 export interface QualityHoldingPath { entry: number; peak: number; minimum: number; dynamic: number }
 /** OHLC cannot tell high/low order within a minute: use prior peak/open→low, and high→close, whose order is known. */

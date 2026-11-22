@@ -37,7 +37,7 @@ import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '
 import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
 import { initialPayoffRiskThreshold, isStaticDrawdownSell, qualityExitAlgorithmLabel, qualityExitThresholdText, validateQualityExitRule } from './qualityStaticDrawdownSell';
 import {MIRROR_DEADLINE_KIND,mirrorDeadlineAt,mirrorCompletedBy} from './qualityMirrorDeadline';
-import {MIRROR_LOSS_REVIEW_KIND,MIRROR_LOSS_REVIEW_VERSION,reviewMirrorLoss,type MirrorLossReviewStates,type MirrorLossReviewCheck} from './qualityMirrorLossReview';
+import {MIRROR_LOSS_REVIEW_KIND,reviewMirrorLoss,type MirrorLossReviewStates,type MirrorLossReviewCheck} from './qualityMirrorLossReview';
 import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVetoIdentity, LIMITED_PAYOFF_RISK_VERSION, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
@@ -739,7 +739,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       const bars=await load(row,at-QUALITY_MINUTE,at,pp,signal);validateFishBars(bars,at,1,QUALITY_MINUTE);return bars[0].close;
     };
     const lossTrigger=(rule:QualityHoldingVeto,check:MirrorLossReviewCheck,at:number):QualityTrigger=>({at,barOpenTime:at,atOpen:true,reading:check.pnl,
-      cause:{id:rule.id,label:holdingVetoName(rule),kind:rule.kind,direction:rule.direction,threshold:rule.threshold,mirrorDeadlineVersion:MIRROR_LOSS_REVIEW_VERSION,mirrorLossReview:check,...(rule.mirrorStage?{mirrorStage:rule.mirrorStage}:{})}});
+      cause:{id:rule.id,label:holdingVetoName(rule),kind:rule.kind,direction:rule.direction,threshold:rule.threshold,mirrorDeadlineVersion:rule.mirrorDeadlineVersion,mirrorLossReview:check,...(rule.mirrorStage?{mirrorStage:rule.mirrorStage}:{})}});
     if (!hasQualityExit(group)) {
       // Enter now, but wait for a chosen exit experiment before loading the whole holding history.
       const bars = await load(row, entry, entry + QUALITY_MINUTE, pp, signal);

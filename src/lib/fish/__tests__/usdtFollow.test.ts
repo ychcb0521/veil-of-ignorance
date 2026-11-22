@@ -23,7 +23,7 @@ import type { PreEntryRecord, PreEntryRound } from '../preEntryMonitor';
 import { USDT_FOLLOW_MONITOR_BASIS } from '../usdtFollowMonitorBasis';
 import {makeQualityHoldingVeto} from '../qualityFilters';
 import {MIRROR_DEADLINE_KIND} from '../qualityMirrorDeadline';
-import {MIRROR_LOSS_REVIEW_KIND} from '../qualityMirrorLossReview';
+import {MIRROR_LOSS_REVIEW_KIND,MIRROR_LOSS_THRESHOLD_VERSION} from '../qualityMirrorLossReview';
 
 const symbol = 'NIGHTUSDT', market = { symbol, step: '0.001', min: 1, max: 100000, minNotional: 5 };
 const owner = 'fixture-user';
@@ -179,7 +179,11 @@ function exchange() {
   } satisfies UsdtExchange & { readCampaign: typeof readCampaign };
 }
 
-it.each([MIRROR_DEADLINE_KIND,MIRROR_LOSS_REVIEW_KIND])('镜像一小时未成交时，不等模拟价格即由实际执行端发出无任何限价的全余仓卖出（%s）',async(kind)=>{
+it.each([
+ {label:'原限时版',kind:MIRROR_DEADLINE_KIND,loss:undefined},
+ {label:'零亏损门槛版',kind:MIRROR_LOSS_REVIEW_KIND,loss:undefined},
+ {label:'可编辑亏损门槛版',kind:MIRROR_LOSS_REVIEW_KIND,loss:{version:MIRROR_LOSS_THRESHOLD_VERSION,unit:'usdt' as const,value:.5}},
+])('镜像一小时未成交时，不等模拟价格即由实际执行端发出无任何限价的全余仓卖出（$label）',async({kind,loss})=>{
   const m=60000,at=Math.floor(Date.now()/m)*m;
   let clock=at+59*m;
   const anchor={symbol,positionSide:'LONG' as const,openedAt:at,openingOrderId:'800',openingTradeId:'801'};
@@ -188,7 +192,7 @@ it.each([MIRROR_DEADLINE_KIND,MIRROR_LOSS_REVIEW_KIND])('镜像一小时未成�
   const read=vi.fn(async()=>structuredClone(actual)),venue=exchange();
   const monitor={version:INSTANT_TEMPLATE_MONITOR,templateId:'deadline-template',name:'镜像限时终止',plan:freezeQualityPlan({
     ...makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE,'>=',5,[]),rule:undefined,
-    holdingVetoes:[makeQualityHoldingVeto(kind,'>=',1)],mirrorTakeProfit:{enabled:true,gainPct:2.5,sellPct:50}})};
+    holdingVetoes:[makeQualityHoldingVeto(kind,'>=',1,true,[],100,loss)],mirrorTakeProfit:{enabled:true,gainPct:2.5,sellPct:50}})};
   const runner=createUsdtFollower(makeStore(file()),venue,owner,'hedge',clock,read,()=>clock);
   const managed=(await runner.adopt(anchor,monitor))!,sample=binanceManualSample(managed),seed=binanceManualSeed(managed,sample);
   clock=at+60*m;
