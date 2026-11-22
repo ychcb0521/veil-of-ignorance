@@ -31,8 +31,8 @@ type ArchiveStream = {rows: BrowseRow[]; next: number; loading: boolean; error: 
 const archiveRowKey = (row: BrowseRow, index:number) => row[3]+'/'+index;
 const collator=new Intl.Collator('zh-CN',{numeric:true});
 
-function ArchiveRecords({owner, directory, pages, reload, pick, legacy, filter}: {
-  owner: string; directory: Directory; pages: string[]; reload: () => void; pick?:(ids:ReadonlySet<string>)=>void; legacy?:boolean; filter?:boolean;
+function ArchiveRecords({owner, directory, pages, reload, pick, filter}: {
+  owner: string; directory: Directory; pages: string[]; reload: () => void; pick?:(ids:ReadonlySet<string>)=>void; filter?:boolean;
 }) {
   const [stream, setStream] = useState<ArchiveStream>({rows: [], next: 0, loading: true, error: ''});
   const {rows, next, loading, error} = stream;
@@ -99,7 +99,7 @@ function ArchiveRecords({owner, directory, pages, reload, pick, legacy, filter}:
       <span>已选 {count} 条</span>
       <button type="button" disabled={!count||all&&!complete} className="rounded border px-2 py-1 text-primary"
         onClick={()=>pick(new Set(rows.filter(r=>checked(r[3])).map(r=>r[3])))}>
-        {legacy?'载入旧版完整档案并导入所选':'导入所选到组合表'}
+        导入所选到组合表
       </button>
     </div>}
     <FishContinuousTable items={sorted} getKey={archiveRowKey} columns={(pick?4:3)+(filter?3:0)} resetKey={JSON.stringify([owner,sort])}
@@ -205,16 +205,9 @@ export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSele
         {selectBeforeLoad&&opened!==item.id&&item.pages.length>0&&<button type="button" className="rounded-md border px-2 py-1 hover:bg-muted"
           onClick={()=>setOpened(item.id)}>载入所选目录</button>}
         {onViewDetectors&&'cloud' in directory&&!directory.cloud.detectorPreview&&item.count>0&&<button type="button" className="underline" onClick={()=>onViewDetectors(item.id)}>{legacySelection?'载入旧版完整档案查看探测值和百分位':'查看原始探测值和百分位'}</button>}
-        {onSelectRecords&&item.count>0&&(legacySelection
-          ? <details><summary className="cursor-pointer text-muted-foreground">旧归档导入</summary>
-            <div className="flex flex-wrap items-center gap-2 pt-2">
-              <span>此索引只保存预览字段。导入原始记录需要恢复旧版完整档案。</span>
-              <button type="button" className="rounded-md border px-2 py-1 text-primary hover:bg-muted" onClick={()=>onSelectRecords(item.id)}>载入旧版完整档案并选取记录</button>
-            </div>
-          </details>
-          : <button type="button" className="rounded-md border px-2 py-1 text-primary hover:bg-muted" onClick={()=>onSelectRecords(item.id)}>选取本目录记录</button>)}
+        {onSelectRecords&&!legacySelection&&item.count>0&&<button type="button" className="rounded-md border px-2 py-1 text-primary hover:bg-muted" onClick={()=>onSelectRecords(item.id)}>选取本目录记录</button>}
         {item.pages.length ? (!selectBeforeLoad||opened===item.id)&&<ArchiveRecords key={JSON.stringify([owner,item.id,'local' in directory?directory.local.id:directory.cloud.revisions,item.pages])}
-          owner={owner} directory={directory} filter={scope==='filter'} pages={item.pages} reload={reload} legacy={legacySelection} pick={pickRecords&&onSelectRecords?ids=>onSelectRecords(item.id,ids):undefined}/> : <p>{item.count?'该目录尚未建立记录索引':'本轮没有记录'}</p>}
+          owner={owner} directory={directory} filter={scope==='filter'} pages={item.pages} reload={reload} pick={pickRecords&&!legacySelection&&onSelectRecords?ids=>onSelectRecords(item.id,ids):undefined}/> : <p>{item.count?'该目录尚未建立记录索引':'本轮没有记录'}</p>}
       </div>}
     </div>)}
     {!matching.length&&<p>{groups.length?'没有匹配的归档目录。':'这个版本尚无可显示的归档目录。'}</p>}

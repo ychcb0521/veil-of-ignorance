@@ -6,7 +6,7 @@ import {newQualityStudy, type FishQualityStudy} from '@/lib/fish/quality';
 import {FishArchiveBrowse} from '../FishArchiveBrowse';
 import type {BrowseRow,BrowseScope} from '@/lib/fish/libraryBrowse';
 
-it.each([true,false])('imports a cold filter round without opening the other round (source picker %s)',async picker=>{
+it.each([true,false])('keeps cold archives read-only and imports checked records after viewing the complete round (source picker %s)',async picker=>{
   calls.directory.mockResolvedValue({groups:[
     {id:'one',title:'BSS 95',at:1,count:536,pages:['a']},
     {id:'two',title:'BSS 90',at:2,count:1251,pages:['b']},
@@ -36,16 +36,17 @@ it.each([true,false])('imports a cold filter round without opening the other rou
   fireEvent.click(screen.getByRole('button',{name:'载入所选目录'}));
   await screen.findByText('PIEVERSEUSDT');
   expect(configure).not.toHaveBeenCalled();
-  if(picker){fireEvent.click(screen.getByText('旧归档导入'));
-  fireEvent.click(screen.getByRole('button',{name:'载入旧版完整档案并选取记录'}));
-  }else{fireEvent.click(screen.getByRole('checkbox',{name:/勾选 PIEVERSE/}));fireEvent.click(screen.getByRole('button',{name:'载入旧版完整档案并导入所选'}));}
+  expect(screen.queryByText('旧归档导入')).toBeNull();
+  expect(screen.queryByRole('button',{name:/载入旧版完整档案并/})).toBeNull();
+  expect(screen.queryByRole('checkbox',{name:/勾选 PIEVERSE/})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'载入旧版完整档案查看探测值和百分位'}));
   expect(configure).toHaveBeenCalledOnce();
   view.rerender(panel(true));
   const checkbox=await screen.findByRole('checkbox',{name:/选取 PIEVERSEUSDT/});
   expect(screen.getByText('BSS · avg_BSS_2')).toBeInTheDocument();
   expect(screen.getByText('0.13146699636353357')).toBeInTheDocument();
   expect(screen.getByText('90.453877893559%（12934/14299）')).toBeInTheDocument();
-  if(picker)fireEvent.click(checkbox);else expect(checkbox).toBeChecked();
+  expect(checkbox).not.toBeChecked();fireEvent.click(checkbox);
   expect(screen.queryByRole('checkbox',{name:/选取 OTHERUSDT/})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'导入组合表'}));
   expect(onImport).toHaveBeenCalledWith(expect.objectContaining({
@@ -78,7 +79,7 @@ it.each<BrowseScope>(['mining','screen','filter'])('sorts across pages, keeps th
   ]});
   calls.body.mockImplementation((_,key)=>Promise.resolve(key==='first'?[['ZZZ',2,'甲','z']]:[['AAA',1,'乙','a']]));
   const pick=vi.fn();
-  render(<FishArchiveBrowse owner="alice" scope={scope} query="" pickRecords onSelectRecords={pick} legacySelection/>);
+  render(<FishArchiveBrowse owner="alice" scope={scope} query="" pickRecords onSelectRecords={pick}/>);
   fireEvent.click(await screen.findByRole('button',{name:/待排序/}));
   fireEvent.click(await screen.findByRole('checkbox',{name:/勾选 ZZZ/}));
   fireEvent.click(screen.getByRole('button',{name:'按标的排序'}));
@@ -87,7 +88,7 @@ it.each<BrowseScope>(['mining','screen','filter'])('sorts across pages, keeps th
   expect(screen.getByRole('checkbox',{name:/勾选 ZZZ/})).toBeChecked();
   fireEvent.click(screen.getByRole('checkbox',{name:'全选目录预览记录'}));
   fireEvent.click(screen.getByRole('checkbox',{name:/勾选 ZZZ/}));
-  fireEvent.click(screen.getByRole('button',{name:'载入旧版完整档案并导入所选'}));
+  fireEvent.click(screen.getByRole('button',{name:'导入所选到组合表'}));
   expect(pick).toHaveBeenCalledWith('chosen',new Set(['a']));
   expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['first','second']);
 });
