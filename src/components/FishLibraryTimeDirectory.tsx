@@ -106,7 +106,8 @@ export interface FishDirectoryPicker {
   footer: (close: () => void) => ReactNode;
 }
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
-export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more,browseArchive,directoryStatus,trashAccount,cleanupDirectory,selectBeforeLoad=false,directorySearch}:{
+export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,workingItems,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more,browseArchive,directoryStatus,trashAccount,cleanupDirectory,selectBeforeLoad=false,directorySearch}:{
+  workingItems?:()=>FishDirectoryItem[];
   trashAccount?:{owner?:string;scope:DirectoryScope};cleanupDirectory?:DirectoryCleanup;
   browseArchive?:{owner?:string;scope:BrowseScope;directoryOnly?:boolean;fullReady?:boolean;loadFull?:()=>void};
   selectBeforeLoad?:boolean;directorySearch?:ReactNode;
@@ -161,11 +162,14 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const [managementOwner,setManagementOwner]=useState<string>(),[catalogOwner,setCatalogOwner]=useState<string>();
   const directoryOnly = !!browseArchive?.owner && (browseArchive.directoryOnly || catalogOwner===browseArchive.owner) && managementOwner!==browseArchive.owner;
   const confirmBodyLoad=selectBeforeLoad&&!picker&&!managementOwner;
+  const localItems=useMemo(()=>open&&!trashView?(workingItems?.()??NO_DIRECTORY_ITEMS).filter(item=>!trash.marks.has(item.id)):NO_DIRECTORY_ITEMS,[open,trashView,workingItems,trash.marks]);
   const items = useMemo(() => {
-    if(!open||directoryOnly||directoryStatus||trashView)return NO_DIRECTORY_ITEMS;
-    const all=typeof itemsSource==='function'?itemsSource():itemsSource;
+    if(!open||trashView)return NO_DIRECTORY_ITEMS;
+    if(directoryOnly||directoryStatus)return localItems;
+    const source=typeof itemsSource==='function'?itemsSource():itemsSource;
+    const all=localItems.length?[...new Map([...source,...localItems].map(item=>[item.id,item])).values()]:source;
     return trash.marks.size?all.filter(item=>!trash.marks.has(item.id)):all;
-  },[open,directoryOnly,directoryStatus,itemsSource,trash.marks,trashView]);
+  },[open,directoryOnly,directoryStatus,itemsSource,localItems,trash.marks,trashView]);
   // Named rounds may share a template, or have no corresponding saved template at all.
   const searchAlgorithms=kind==='algorithm'&&selectBeforeLoad;
   const roundsView=canSwitchView&&(browseByRound??(confirmBodyLoad||browseArchive?.scope==='screen'||trashScope!=='monitor'&&items.some(item=>!edits?.[item.id]?.hidden&&
@@ -214,6 +218,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const archiveError=currentLoad?.error;
   const query=normalizeTemplateQuery(templateQuery);
   const visible=useMemo(()=>items.filter(item=>{
+    if(localItems.some(local=>local.id===item.id))return false;
     const hidden=!!edits?.[item.id]?.hidden;
     const group=item.templateGroup;
     if(templateView&&!group?.savedTemplate)return false;
@@ -222,7 +227,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       if(!fields.some(field=>field&&normalizeTemplateQuery(field).includes(query)))return false;
     }
     return compactDirectory ? hidden===showDeleted : showDeleted||!hidden;
-  }).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id)),[items,showDeleted,edits,kind,compactDirectory,templateView,roundsView,searchAlgorithms,query]);
+  }).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id)),[items,localItems,showDeleted,edits,kind,compactDirectory,templateView,roundsView,searchAlgorithms,query]);
   const deleted=items.filter(item=>edits?.[item.id]?.hidden).length,action=libraryDirectoryAction,noun=name.slice(0,-1)+'归档';
   const selectable=visible.filter(item=>purgeMode ? item.purgeable : !edits?.[item.id]?.hidden);
   const checkedSet=new Set(checkedIds),checked=selectable.filter(item=>checkedSet.has(item.id));
@@ -408,6 +413,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-fish-scroll data-testid={prefix+'-directory-scroll'}>
       {trashOwner&&open&&!picker&&<DirectoryTrashPanel toolbar={trashToolbar} known={trash.known} key={trashOwner+trashScope} owner={trashOwner} scope={trashScope} marks={trash.marks} reload={trash.reload} cleanup={cleanupDirectory} selection={trashSelection} clear={()=>setTrashSelection(undefined)} trashView={trashView} onTrashView={value=>{resetDirectorySelection();setTrashView(value);}}/>}
       {trashView&&trash.issue&&<p role="status" className="text-xs">{trash.issue} <button type="button" className="underline" onClick={trash.reload}>重试</button></p>}
+      {localItems.length>0&&<section className="space-y-2"><p className="text-xs text-muted-foreground">本机已保存的工作区结果</p>{localItems.filter(item=>!query||normalizeTemplateQuery(item.label).includes(query)).map(item=>renderItem(item))}</section>}
       {trashView ? null : directoryOnly && open && browseArchive?.owner ? <FishArchiveBrowse marks={trash.marks} selectBeforeLoad={selectBeforeLoad} legacySelection={selectBeforeLoad&&!browseArchive.fullReady} onViewDetectors={!workspaceImport?.onImportInformation&&browseArchive.scope==='filter'&&browseArchive.loadFull?selectArchiveRecords:undefined} pickRecords={(!!workspaceImport||importSelection)&&!picker} onSelectRecords={(workspaceImport&&!picker||importSelection)&&(workspaceImport?.onImportInformation||browseArchive.loadFull)?selectArchiveRecords:undefined} onDelete={trashOwner&&!picker?setTrashSelection:undefined} key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/> : <>
       {notice}
       {picked&&workspaceImport&&completedImport.current!==picked.operation&&<p role="status" className="text-xs">正在准备已勾选的 {picked.records.size} 条记录，完成后导入至组合表…</p>}
@@ -446,7 +452,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
         {loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">
           {loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}
         </p>}
-        {!loading&&!loadError&&!visible.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{emptyMessage}</p>}
+        {!loading&&!loadError&&!visible.length&&!localItems.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{emptyMessage}</p>}
         {templateView&&visible.length>0&&!grouping.length&&query&&<p role="status" className="py-5 text-center text-xs text-muted-foreground">没有匹配的模板。</p>}
         {kind==='template'&&!roundsView?grouping.map(({group,items:members},index)=>{
           const containsSelection=members.some(item=>item.id===selectedId);

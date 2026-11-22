@@ -164,6 +164,8 @@ export interface QualityBuyFilter { id: string; label: string; metric: string; d
 /** 买入时刻的读数缓存：与门槛无关，改门槛不必重新取数。 */
 export interface QualityFilterReading { key: string; value?: number; at?: number; error?: string }
 export interface FishQualityStudy {
+  /** Isolated working execution; never save this partial study over the historical archive. */
+  workspaceExecution?:1;
   sourceRatings?:import('./qualitySourceRatings').QualitySourceRatings;
   screeningResults?:import('./preEntryMonitor').PreEntryRecord[];
   screeningRounds?:import('./preEntryMonitor').PreEntryRound[];

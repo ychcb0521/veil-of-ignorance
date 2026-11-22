@@ -190,6 +190,8 @@ export function ensureQualityArchivesDetached(owner?: string, force = false): Pr
   return done;
 }
 export function saveQualityStudy(owner: string | undefined, study: FishQualityStudy, options?: { repairOnly?: boolean; remote?: {preferRemote:boolean; onFirstRestore?:()=>void} }): Promise<boolean> {
+  // An isolated table is not a replacement for the account's historical research.
+  if(study.workspaceExecution===1)return Promise.resolve(false);
   const key = keyOf(owner);
   // App studies use immutable updates. IndexedDB already clones on put; making
   // an eager deep copy for every queued save multiplies the entire archive.

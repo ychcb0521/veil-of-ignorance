@@ -27,7 +27,7 @@ import { activeStandaloneBuyFilters, newQualityStudy, qualityRunSamples, type Fi
 export type AutomaticScreeningMatch = { record: PreEntryRecord; round: PreEntryRound };
 type ScreeningLane = { controller?: AbortController; execution?: Promise<void>; timer?: ReturnType<typeof setTimeout> };
 
-export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, run: (options: QualityRunOptions) => Promise<void>, workspaceMode = false) {
+export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, run: (options: QualityRunOptions) => Promise<void>, workspaceMode = false, isolatedWorkspace = false) {
   const [library, setLibrary] = useState<PreEntryLibrary>(emptyPreEntryLibrary);
   const [ready, setReady] = useState(false), [running, setRunning] = useState(false);
   const [automaticRunning, setAutomaticRunning] = useState(false);
@@ -45,13 +45,14 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const lanes = useRef<{ manual: ScreeningLane; automatic: ScreeningLane }>({ manual: {}, automatic: {} });
   const epoch = useRef(0);
   const persistence = useMemo(() => createPreEntryCheckpoint(async value => {
+    if(isolatedWorkspace)return savePreEntryWorkspaceDraft(owner,value);
     if (!workspaceMode) return savePreEntryLibrary(owner,value);
     const draftIds = new Set(current.current.rounds.filter(round => round.workspaceDraft).map(round => round.id));
     const drafts = {version:1 as const,rounds:value.rounds.filter(round => draftIds.has(round.id)),records:value.records.filter(record => draftIds.has(record.roundId))};
     if (drafts.rounds.length || drafts.records.length) await savePreEntryWorkspaceDraft(owner,drafts);
     const saved = {...value,rounds:value.rounds.filter(round => !draftIds.has(round.id)),records:value.records.filter(record => !draftIds.has(record.roundId))};
     if (saved.rounds.length || saved.records.length || saved.settings || saved.settingsHistory || saved.directoryEdits || saved.tableClears) await savePreEntryLibrary(owner,saved);
-  },true), [owner,workspaceMode]);
+  },true), [owner,workspaceMode,isolatedWorkspace]);
   const savingDraft = useRef(false);
   const [savingWorkspaceDraft,setSavingWorkspaceDraft] = useState(false);
   const tableClearLock=useRef(false);
@@ -65,7 +66,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     setPreview(undefined); setInstantReady(false); setInstantLoadError(''); instantReadyRef.current = false;
     let reading = false, retryPositions: ReturnType<typeof setTimeout>;
     const restorePositions = async () => {
-      if (!owner || !workspaceMode || typeof indexedDB === 'undefined' || reading || instantReadyRef.current || readyRef.current) return;
+      if (isolatedWorkspace || !owner || !workspaceMode || typeof indexedDB === 'undefined' || reading || instantReadyRef.current || readyRef.current) return;
       reading = true; clearTimeout(retryPositions);
       try {
         const ids = await readActiveInstantRecordIds(owner);
@@ -96,7 +97,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       window.removeEventListener('focus', restorePositions);
       window.removeEventListener('online', restorePositions);
     };
-  }, [owner, commit, persistence, workspaceMode]);
+  }, [owner, commit, persistence, workspaceMode,isolatedWorkspace]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -104,8 +105,14 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     let active = true;
     const valid = () => active && epoch.current === generation;
     readyRef.current = false; setReady(false); setError('');
-    void readFishLibrary(owner, 'screening', async () => {
+    const read=isolatedWorkspace?(task:()=>Promise<void>)=>task():(task:()=>Promise<void>)=>readFishLibrary(owner,'screening',task);
+    void read(async () => {
       if (!valid()) return;
+      if(isolatedWorkspace){
+        const draft=await loadPreEntryWorkspaceDraft(owner)??emptyPreEntryLibrary();
+        if(valid()){commit(draft);readyRef.current=true;setReady(true);}
+        return;
+      }
       const newLibrary = await loadPreEntryLibraryV6(owner, preview => {
         if (valid()) setPreview(preview);
       }, reload > 0);
@@ -159,7 +166,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       }
     }).catch(reason => { if (valid()) setError(reason instanceof Error ? reason.message : '读取买前监测库失败'); });
     return () => { active = false; };
-  }, [owner, enabled, reload, commit, persistence, workspaceMode]);
+  }, [owner, enabled, reload, commit, persistence, workspaceMode,isolatedWorkspace]);
 
   const persistAdmission = useCallback(async (record: PreEntryRecord, completed: PreEntryRound, reserve: boolean) => {
     const occupied = reserve && completed.instantTrading && owner && !await reserveInstantAdmission(owner, record, completed);

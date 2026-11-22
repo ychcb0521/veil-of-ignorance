@@ -13,11 +13,11 @@ import { definitionKey } from '@/lib/deepDig/features';
 import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 import { freezeQualityPlan } from '@/lib/fish/qualityPlanVersions';
 
-const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), clear: vi.fn(), v5Load: vi.fn(), v5Save: vi.fn(), v4Load: vi.fn(), v4Save: vi.fn(), v2Load: vi.fn(), v2Save: vi.fn(), v1Load: vi.fn(), v1Save: vi.fn(), v3Load: vi.fn(), v3Save: vi.fn() }));
+const storage = vi.hoisted(() => ({ draftLoad:vi.fn(), draftSave:vi.fn(), load: vi.fn(), save: vi.fn(), clear: vi.fn(), v5Load: vi.fn(), v5Save: vi.fn(), v4Load: vi.fn(), v4Save: vi.fn(), v2Load: vi.fn(), v2Save: vi.fn(), v1Load: vi.fn(), v1Save: vi.fn(), v3Load: vi.fn(), v3Save: vi.fn() }));
 vi.mock('@/lib/fish/preEntryMonitorStore', () => ({ loadPreEntryLibrary: storage.v1Load, savePreEntryLibrary: storage.v1Save }));
 vi.mock('@/lib/fish/preEntryMonitorV2Store', () => ({ loadPreEntryLibraryV2: storage.v2Load, savePreEntryLibraryV2: storage.v2Save }));
 vi.mock('@/lib/fish/preEntryMonitorV3Store', () => ({ loadPreEntryLibraryV3: storage.v3Load, savePreEntryLibraryV3: storage.v3Save }));
-vi.mock('@/lib/fish/preEntryMonitorV6Store', () => ({ loadPreEntryLibraryV6: storage.load, loadPreEntryWorkspaceDraft: async()=>undefined, savePreEntryLibraryV6: storage.save, savePreEntryTableClears: storage.clear }));
+vi.mock('@/lib/fish/preEntryMonitorV6Store', () => ({ loadPreEntryLibraryV6: storage.load, loadPreEntryWorkspaceDraft: storage.draftLoad, savePreEntryWorkspaceDraft:storage.draftSave, savePreEntryLibraryV6: storage.save, savePreEntryTableClears: storage.clear }));
 vi.mock('@/lib/fish/preEntryMonitorV5Store', () => ({ loadPreEntryLibraryV5: storage.v5Load, savePreEntryLibraryV5: storage.v5Save }));
 vi.mock('@/lib/fish/preEntryMonitorV4Store', () => ({ loadPreEntryLibraryV4: storage.v4Load, savePreEntryLibraryV4: storage.v4Save }));
 const t = Date.UTC(2026, 2, 29, 5);
@@ -373,4 +373,19 @@ it('requires a dedicated screening plan for a new workspace run even if static f
  expect(result.current.library.rounds).toHaveLength(0);
  expect(result.current.library.settings).toBeUndefined();
  expect(result.current.error).toContain('设置筛选条件');
+});
+
+it('runs a checked working-table batch in an isolated draft without loading or writing historical screening archives',async()=>{
+ const input=study(),filter=input.buyFilters[0];
+ storage.draftLoad.mockResolvedValue({...emptyPreEntryLibrary(),settings:{updatedAt:t,hours:0,plans:[{id:'working',label:'当前筛选',metric:filter.metric,snapshot:filter.snapshot,preEntryThreeStage:emptyPreEntryThreeStage()}]}});
+ storage.draftSave.mockResolvedValue(undefined);
+ const run=vi.fn(async(task:QualityRunOptions)=>{});
+ const h=renderHook(()=>usePreEntryMonitor('isolated-owner',true,run,true,true));
+ await waitFor(()=>expect(h.result.current.ready).toBe(true));
+ expect(storage.load).not.toHaveBeenCalled();expect(storage.v5Load).not.toHaveBeenCalled();expect(storage.v1Load).not.toHaveBeenCalled();
+ await act(()=>h.result.current.start(input,0));
+ expect(run).toHaveBeenCalledOnce();expect(run.mock.calls[0][0].preEntry!.records).toHaveLength(1);
+ expect(h.result.current.library.rounds[0].workspaceDraft).toBe(true);
+ await waitFor(()=>expect(storage.draftSave).toHaveBeenCalled());expect(storage.save).not.toHaveBeenCalled();
+ h.unmount();
 });

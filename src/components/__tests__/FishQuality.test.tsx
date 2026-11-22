@@ -28,6 +28,22 @@ it('shows directly imported frozen readings and allows table selection before lo
   expect(screen.getByRole('button',{name:'删除所选行'})).toBeEnabled();
 });
 
+it('enables filtering and holding actions for a prepared imported workspace while its historical library stays unopened',async()=>{
+ const {browseInformationStudy}=await import('@/lib/fish/browseInformationStudy');
+ const {makeQualityBuyFilter}=await import('@/lib/fish/qualityFilters');
+ const s=state(),plans=s.study.sellPlans!;
+ s.study={...browseInformationStudy('filter','r',[['PICKED',T,'冻结读数','saved']]),sellPlans:plans,independentFilters:true,buyFilters:[makeQualityBuyFilter('state:state','>',.7)],workspaceExecution:1,workspaceUpdatedAt:T};
+ s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);
+ s.workspace={archiveReady:false,informationReady:true,importInformation:vi.fn(),importRows:vi.fn(),removeRows:vi.fn(),saveMonitoring:vi.fn(),saveFiltering:vi.fn(),sources:undefined};
+ s.runStaticSettings=vi.fn(async()=>{});
+ render(<FishQuality state={s}/>);
+ const filtering=screen.getByRole('button',{name:'开始过滤'}),holding=screen.getByRole('button',{name:'开始监测'});
+ expect(filtering).toBeEnabled();expect(holding).toBeEnabled();
+ fireEvent.click(filtering);expect(s.runStaticSettings).toHaveBeenCalledOnce();
+ fireEvent.click(holding);expect(screen.getByRole('button',{name:'基于信号时间'})).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'基于信号时间'}));expect(s.start).toHaveBeenCalledWith(false,undefined,false,'signal');
+});
+
 it('defaults the combination sell algorithm to 3% even when the independent stop stays empty', () => {
   const s = state();
   render(<FishQuality state={s}/>);
