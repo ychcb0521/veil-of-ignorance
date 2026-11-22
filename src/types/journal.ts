@@ -402,6 +402,8 @@ export interface TradeCampaign {
     holdingDrawdowns?: { staticDrawdown: number | null; drawdown: number | null };
     /** Frozen monitoring metrics shared with the fish-quality table. */
     holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;totalInvested?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
+    /** Entry risk from the exact linked campaign's frozen opening configuration. */
+    liveEntryRiskPct?: number;
     liveUsdt?: import('@/lib/fish/usdtLiveCampaign').UsdtLiveCampaign;
     instant?: {
       switches?: import('@/lib/fish/instantMonitorSwitchCheckpoint').InstantMonitorSwitch[];

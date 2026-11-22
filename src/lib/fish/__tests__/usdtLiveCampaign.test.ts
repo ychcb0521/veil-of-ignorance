@@ -1,7 +1,13 @@
 import { expect, it, vi } from 'vitest';
 import { createUsdtCampaignReader, reconstructUsdtCampaigns, type UsdtActualTrade } from '../../../../scripts/usdt-campaign-reader';
 import { findUsdtCampaignFollow, usdtCampaignAmounts, usdtLiveCampaignId } from '../usdtLiveCampaign';
-import { buildUsdtLiveCampaignData } from '../usdtLiveCampaignProjection';
+import { buildUsdtLiveCampaignData, mergeUsdtLiveCampaignRows } from '../usdtLiveCampaignProjection';
+import { usdtLiveRiskMetrics } from '../usdtLiveCampaignMetrics';
+import { paperCampaignPerformance } from '../qualityCampaignPerformance';
+import { summarizeCampaignPerformance } from '@/lib/kellySizing';
+import { buildCampaignPricePathTask } from '@/hooks/useCampaignPricePaths';
+import { rowAddCount, rowPayoffRatio } from '@/lib/campaignListSort';
+import type { InstantMonitorSettings } from '../instantMonitorSettings';
 import { buildCampaignCardData } from '@/lib/campaignListCache';
 import { sortCampaignRows } from '@/lib/campaignListSort';
 import { makeSortRow } from '@/test/fixtures/campaignSortRows';
@@ -29,6 +35,70 @@ it('keeps fills of the same opening order under open and records a later order a
   expect(campaign.fills.map(fill => [fill.id, fill.action])).toEqual([
     ['11', 'open'], ['12', 'open'], ['13', 'add'], ['14', 'reduce'],
   ]);
+});
+
+it('uses the actual first order, net fills and directed exit price across detail, card and statistics', () => {
+  const trades = [
+    { ...buy, price: '100', quantity: '1', commission: 0.1 },
+    { ...buy, id: '12', at: at + 1, price: '110', quantity: '1', commission: 0.1 },
+    { ...sell, id: '13', at: at + 2, price: '115', quantity: '0.5', realized: 5, commission: 0.1 },
+    { ...buy, id: '14', orderId: '103', at: at + 3, price: '115', quantity: '0.5', commission: 0.1 },
+    { ...buy, id: '15', orderId: '103', at: at + 4, price: '115', quantity: '1', commission: 0.1 },
+    { ...sell, id: '16', orderId: '104', at: at + 5, price: '120', quantity: '1', realized: 10, commission: 0.1 },
+    { ...sell, id: '17', orderId: '104', at: at + 6, price: '123', quantity: '2', realized: 26, commission: 0.1 },
+  ];
+  const [live] = reconstructUsdtCampaigns('BEATUSDT', [], trades);
+  const data = buildUsdtLiveCampaignData('owner', live);
+  const row = buildCampaignCardData(data);
+  const b = (41 - 0.7) / 6.3;
+  expect(usdtLiveRiskMetrics(data.campaign)).toMatchObject({ openingNotional: 210, entryPrice: 105, exitPrice: 122, frozen: false });
+  expect(row.initialExpectedMaxLoss).toBeCloseTo(6.3);
+  expect(rowPayoffRatio(row)).toBeCloseTo(b, 12);
+  expect(rowAddCount(row)).toBe(1);
+  expect(row.positionGeometricMultiple).toBeCloseTo(1.5);
+  expect(row.positionAmplification).toBeCloseTo(382.5 / 210);
+  expect(row.mainPriceChangePct).toBeCloseTo(100 * 17 / 105);
+  expect(buildCampaignPricePathTask(row)).toMatchObject({ entryPrice: 105, side: 'long' });
+  const summary = summarizeCampaignPerformance([{ campaign: row.campaign, payoffRatio: rowPayoffRatio(row) }]);
+  expect(summary.payoffRatio).toBeCloseTo(b, 12);
+  expect(summary.winCount).toBe(1);
+  expect(paperCampaignPerformance([data]).performance.payoffRatio).toBeCloseTo(b, 12);
+});
+
+it('resolves short, breakeven, open and mixed-fee campaigns without inventing a settled B', () => {
+  const [short] = reconstructUsdtCampaigns('BEATUSDT', [], [
+    { ...buy, side: 'SELL', positionSide: 'SHORT', price: '50', commission: 0 },
+    { ...sell, side: 'BUY', positionSide: 'SHORT', price: '49', realized: 100, commission: 0 },
+  ]);
+  const card = (position: typeof short) => buildCampaignCardData(buildUsdtLiveCampaignData('owner', position));
+  expect(card(short).mainPriceChangePct).toBeCloseTo(2);
+  expect(rowPayoffRatio(card(short))).toBeCloseTo(100 / 150);
+  expect(rowPayoffRatio(card({ ...short, closedAt: undefined, quantity: '100', fills: short.fills.slice(0, 1) }))).toBeNull();
+  expect(rowPayoffRatio(card({ ...short, fills: short.fills.map(f => ({ ...f, realized: 0 })) }))).toBe(0);
+  expect(rowPayoffRatio(card({ ...short, fills: short.fills.map(f => ({ ...f, commission: 1, commissionAsset: 'BNB' })) }))).toBeNull();
+});
+
+it('links only the original frozen follow risk and never uses a later management stop for entry', () => {
+  const [closed] = reconstructUsdtCampaigns('BEATUSDT', [], [buy, sell]);
+  const data = buildUsdtLiveCampaignData('owner', { ...closed, followId: 'fish-instant-a' });
+  const monitor = (threshold: number) => ({ templateId: 'tpl', name: 'test', plan: {
+    rule: { version: 'sell-static-drawdown-v1', metric: 'staticDrawdown', direction: '>=', threshold },
+  } }) as InstantMonitorSettings;
+  const from = monitor(5), to = monitor(9);
+  const paper = { ...data, campaign: { ...data.campaign, id: 'fish-instant-a', comparison: {
+    ...data.campaign.comparison!, liveUsdt: undefined, monitorPlan: to.plan, instant: {
+      source: { id: 'x', symbol: closed.symbol, timeMs: at }, marginUsdt: 1, drawdown: null, staticDrawdown: null,
+      switches: [{ at: at + 1000, effectiveAt: at + 1000, from, to }],
+    },
+  } } };
+  const [linked] = mergeUsdtLiveCampaignRows([data, paper]);
+  const facts = usdtLiveRiskMetrics(linked.campaign)!;
+  expect(facts).toMatchObject({ percent: 5, frozen: true });
+  expect(facts.loss).toBeCloseTo(100 * Number(buy.price) * 0.05);
+  const late = buildUsdtLiveCampaignData('owner', { ...closed, management: {
+    version: 'binance-manual-monitor-v1', armedAt: at + 1, monitor: to,
+  } });
+  expect(usdtLiveRiskMetrics(late.campaign)).toMatchObject({ percent: 3, frozen: false });
 });
 
 it('finds a manual round trip even when both fills happen before the next position read', async () => {

@@ -58,7 +58,7 @@ import { useUnrealizedChartSnapshot } from '@/hooks/useUnrealizedChartSnapshot';
 import { chartBoxHeightToFitViewport } from '@/lib/chartViewportFit';
 import { buildCampaignCardData, waitForCampaignListHeal, type CampaignCardData } from '@/lib/campaignListCache';
 import { formatLegPriceChangePct, legPriceChangeDirection, type LegPriceChangeDirection } from '@/lib/legPriceChange';
-import { PRICE_CHANGE_EXIT_RULE_TEXT, campaignHasMainAdd, computeAddEfficiency, formatEfficiency } from '@/lib/campaignMainPriceChange';
+import { PRICE_CHANGE_EXIT_RULE_TEXT, computeAddEfficiency, formatEfficiency } from '@/lib/campaignMainPriceChange';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
@@ -2188,7 +2188,7 @@ const CampaignCard = memo(function CampaignCard({
           <div
             data-testid="campaign-add-efficiency"
             aria-description={addEfficiency == null || mainPriceEfficiency == null
-              ? (campaignHasMainAdd(legs)
+              ? (rowAddCount(row) > 0
                 ? '加仓效用 = 盈亏比 ÷ |首仓涨跌幅倍数|：这场首仓涨跌幅倍数显示为 0.00 或算不出（或算不出盈亏比），不计算'
                 : '加仓效用：这场战役没有加仓，不计算')
                 : `方法一（括号外）：加仓效用 = 盈亏比 ${payoffReading} ÷ |首仓涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)}| = ${formatMainPriceEfficiency(addEfficiency)}。`
@@ -2721,10 +2721,16 @@ export default function JournalCampaignsPage() {
     && (isAllRange(operationRange) || isWithinOperationRange(rowOperationTime(row), operationRange))),
   [baseRows, selectedCampaignIds, operationRange]);
   const comparisonReturns = useMemo(() => {
-    const paper = statisticsRows.filter(row => !row.campaign.comparison?.liveUsdt);
-    const closed = paper.filter(row => isResolvedCampaign(row.campaign));
-    const values = closed.map(row => row.campaign.comparison?.instant ? row.campaign.comparison.holdingMetrics?.returnPct ?? 0 : row.campaign.final_realized_pnl!);
-    return { closed: closed.length, total: paper.length, wins: values.filter(v => v > 0).length, losses: values.filter(v => v < 0).length,
+    const closed = statisticsRows.filter(row => isResolvedCampaign(row.campaign));
+    const values = closed.flatMap(({ campaign }) => {
+      // Instant return % uses opening margin. A live net amount in USDT cannot be pooled into this average.
+      const pct = campaign.comparison?.section === 'instant'
+        ? campaign.comparison.holdingMetrics?.returnPct : campaign.final_realized_pnl;
+      return pct != null && Number.isFinite(pct) ? [pct] : [];
+    });
+    const pnls = closed.flatMap(({ campaign }) => campaign.final_realized_pnl == null ? [] : [campaign.final_realized_pnl]);
+    return { closed: closed.length, total: statisticsRows.length, rateSamples: values.length,
+      wins: pnls.filter(v => v > 0).length, losses: pnls.filter(v => v < 0).length,
       mean: values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null, worst: values.length ? Math.min(...values) : null };
   }, [statisticsRows]);
   /** 因为没有客观操作时间而被时间段挡在外面的场数——不声不响地少几场是不能接受的。 */
@@ -4583,7 +4589,7 @@ export default function JournalCampaignsPage() {
             categories: comparisonCategories, buyFilterLabel: comparisonList.buyFilterLabel, statsOpen: comparisonStatsOpen,
             onFilterChange: changeComparisonFilter, onStatsToggle: () => setComparisonStatsOpen(value => !value) }}
         />
-        {comparing && comparisonStatsOpen && <section id="comparison-campaign-overview" aria-label="比较统计"><div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-border/60 bg-card px-3 py-2 font-mono text-[11px]" data-testid="comparison-campaign-results"><span>已卖出 {comparisonReturns.closed} / {comparisonReturns.total}</span><span>盈利 {comparisonReturns.wins} · 亏损 {comparisonReturns.losses}</span><span>平均收益 {comparisonReturns.mean == null ? '—' : `${comparisonReturns.mean > 0 ? '+' : ''}${comparisonReturns.mean.toFixed(2)}%`}</span><span>最差收益 {comparisonReturns.worst == null ? '—' : `${comparisonReturns.worst > 0 ? '+' : ''}${comparisonReturns.worst.toFixed(2)}%`}</span></div><DetectCategoryStats rows={monitoringCategoryRows} active={categoryFilter} onSelect={c => changeComparisonFilter('category', c)}/></section>}
+        {comparing && comparisonStatsOpen && <section id="comparison-campaign-overview" aria-label="比较统计"><div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-border/60 bg-card px-3 py-2 font-mono text-[11px]" data-testid="comparison-campaign-results"><span>已卖出 {comparisonReturns.closed} / {comparisonReturns.total}</span><span>盈利 {comparisonReturns.wins} · 亏损 {comparisonReturns.losses}</span>{comparisonReturns.rateSamples < comparisonReturns.closed && <span>收益率样本 {comparisonReturns.rateSamples} 场</span>}<span>平均收益 {comparisonReturns.mean == null ? '—' : `${comparisonReturns.mean > 0 ? '+' : ''}${comparisonReturns.mean.toFixed(2)}%`}</span><span>最差收益 {comparisonReturns.worst == null ? '—' : `${comparisonReturns.worst > 0 ? '+' : ''}${comparisonReturns.worst.toFixed(2)}%`}</span></div><DetectCategoryStats rows={monitoringCategoryRows} active={categoryFilter} onSelect={c => changeComparisonFilter('category', c)}/></section>}
         {!comparing && activeCount > 0 && (
           <button
             type="button"

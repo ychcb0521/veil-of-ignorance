@@ -14,6 +14,7 @@ import { readInstantPositionProgress } from './instantPositionProgress';
 import { buildInstantCampaignData, buildOpenInstantCampaignData, buildSettlingInstantCampaignData, type InstantCampaignInput } from './instantCampaign';
 import { instantMonitorSize } from './instantMonitorExecution';
 import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot, readInstantCampaignJob, readLocalInstantCampaignJobs } from './instantCampaignStore';
+import { linkedUsdtEntryRiskPct } from './usdtLiveCampaignMetrics';
 import { isUsdtLiveCampaignId } from './usdtLiveCampaign';
 import { buildUsdtLiveCampaignData, mergeUsdtLiveCampaignRows } from './usdtLiveCampaignProjection';
 import { listCloudUsdtCampaigns, loadUsdtCampaign, readUsdtCampaigns } from './usdtLiveCampaignStore';
@@ -129,7 +130,18 @@ export async function loadQualityCampaignData(owner: string, id: string, signal?
   if (instant) {
     if (isUsdtLiveCampaignId(id)) {
       const real = await loadUsdtCampaign(owner, id, signal);
-      return applyTrash(buildUsdtLiveCampaignData(owner, real));
+      let entryRiskPct: number | undefined;
+      if (real.followId && isInstantCampaignId(real.followId) && !isUsdtLiveCampaignId(real.followId)) {
+        // Only the exact opening snapshot is needed. A paper row's later visibility does not change entry risk.
+        const job = await readInstantCampaignJob(owner, real.followId).catch(() => undefined);
+        throwIfReadAborted(signal);
+        const snapshot = job?.snapshot ?? (!job?.opened
+          ? await loadInstantCampaignSnapshot(owner, real.followId, signal, job).catch(() => undefined) : undefined);
+        const linked = snapshot ? buildInstantCampaignData(owner, snapshot)
+          : job?.opened ? buildOpenInstantCampaignData(owner, job.opened) : undefined;
+        entryRiskPct = linkedUsdtEntryRiskPct(real, owner, linked?.campaign);
+      }
+      return applyTrash(buildUsdtLiveCampaignData(owner, real, entryRiskPct));
     }
     const job = await readInstantCampaignJob(owner, id);
     throwIfReadAborted(signal);
@@ -184,12 +196,10 @@ export async function loadQualityCampaignPerformance(owner: string, section: 'se
   throwIfReadAborted(signal);
   const excluded = Object.keys(trash).filter(key => trash[key].state !== 'active');
   if (section === 'instant') {
-    const { snapshots, warning } = await listInstantCampaignSnapshots(owner, signal);
+    const { rows, warning } = await listQualityCampaignData(owner, 'instant', signal);
     throwIfReadAborted(signal);
-    if (warning && !snapshots.length) throw Error(warning);
-    return paperCampaignPerformance((function* () {
-      for (const snapshot of snapshots) yield buildInstantCampaignData(owner, snapshot);
-    })(), excluded);
+    if (warning && !rows.length) throw Error(warning);
+    return paperCampaignPerformance(rows, excluded);
   }
   if (typeof Worker === 'function') {
     const prepared = await prepareQualityCampaignRead(owner);

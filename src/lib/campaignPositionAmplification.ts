@@ -3,6 +3,7 @@
  * 分母保留入场时主力与镜像的初始敞口；分子排除同方向镜像、挂单和反向对冲。
  * 详情页盈亏概览、战役封面、排序、散点图与导出都读这一处。
  */
+import { usdtLiveFillMetrics } from '@/lib/fish/usdtLiveCampaignMetrics';
 import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import type { LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { buildLegPositionShareInputs, campaignMainSideNotional } from '@/lib/legPositionShareInputs';
@@ -31,6 +32,11 @@ export function computeCampaignPositionAmplification(
   corrections?: LegExitPriceCorrections,
   evidence: LegFillEvidence = {},
 ): number | null {
+  const live = campaign.comparison?.liveUsdt;
+  if (live) {
+    const { openingNotional, totalEntryNotional } = usdtLiveFillMetrics(live);
+    return computePositionAmplification(openingNotional, totalEntryNotional);
+  }
   const initial = computeInitialMainExposureNotional(campaign, legs, tradeRecords);
   if (!Number.isFinite(initial) || initial <= 0) return null;
   const inputs = buildLegPositionShareInputs(legs, buildTradeRecordLookup(tradeRecords), corrections, { events: campaign.actual_evolution, ...evidence });

@@ -2,7 +2,7 @@ import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { InstantOpenCampaignQuote } from '@/components/journal/InstantOpenCampaignQuote';
 import { UsdtLiveCampaignFills, usdtCampaignFillLabel, usdtFillTime } from '@/components/journal/UsdtLiveCampaignFills';
 import { useCampaignTemplateNames } from '@/contexts/QualityTemplateNamesContext';
-import { usdtCampaignAmounts } from '@/lib/fish/usdtLiveCampaign';
+import { usdtLiveRiskMetrics } from '@/lib/fish/usdtLiveCampaignMetrics';
 import { usdtAmountText } from '@/lib/fish/usdtPositionMirror';
 import { subscribeInstantCampaigns } from '@/lib/fish/instantCampaignStore';
 import { InstantCampaignMetadataButtons } from '@/components/journal/InstantCampaignMetadata';
@@ -831,7 +831,9 @@ async function loadAccountCampaignPerformance(
     );
     const reconciledCampaign = reconcileCampaignWithSettlement(details.campaign, details.legs, settlement);
     const initialRisk = computeInitialExpectedMaxLoss(details.campaign, details.legs, details.tradeRecords, details.reverseHedgeOrders);
-    return { campaign: reconciledCampaign, payoffRatio: computeSettlementPayoffRatio(reconciledCampaign.final_realized_pnl, initialRisk) };
+    const live = usdtLiveRiskMetrics(details.campaign);
+    return { campaign: reconciledCampaign, payoffRatio: live ? live.payoffRatio
+      : computeSettlementPayoffRatio(reconciledCampaign.final_realized_pnl, initialRisk) };
   };
   const settledSamples = await Promise.allSettled(campaigns.map(loadSample));
   let missing: TradeCampaign[] = [];
@@ -1237,6 +1239,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const instantSummary = campaign?.comparison?.instant;
   const instantOpen = instantSummary?.openPosition;
   const liveUsdt = campaign?.comparison?.liveUsdt;
+  const liveMetrics = useMemo(() => usdtLiveRiskMetrics(campaign), [campaign]);
   const instantCampaignId = campaign?.comparison?.section === 'instant' ? campaign.id : undefined;
   const watchInstant = !!instantOpen || !!instantSummary?.settlementPending || (!!liveUsdt && !liveUsdt.closedAt);
 
@@ -1780,7 +1783,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     : null, [campaign, legs, tradeRecords, reverseHedgeOrders, legExitPriceCorrections, localOrderFacts]);
   const campaignMetricValues = useMemo(() => {
     if (!campaign || !displayCampaign || !accuracy) return null;
-    const profitCaptureRatio = accuracy.initial_expected_max_loss > 0
+    const profitCaptureRatio = liveMetrics ? liveMetrics.payoffPercent : accuracy.initial_expected_max_loss > 0
       ? accuracy.profit_capture_ratio
       : null;
     const initialExpectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(
@@ -1805,6 +1808,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     };
   }, [
     accuracy,
+    liveMetrics,
     campaign,
     campaignGeometricMetrics,
     displayCampaign,
@@ -1900,25 +1904,25 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     // 14 项的顺序、文案与着色只在 buildCampaignPnlOverviewItems 里写一次；
     // 这里只负责把真实战役的各个 memo 收成一个纯数字对象。反事实面板走同一个构造器。
     const items = buildCampaignPnlOverviewItems({
-      realizedPnl: pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl,
+      realizedPnl: liveMetrics ? (liveMetrics.payoffPercent != null ? liveMetrics.net : null) : pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl,
       settlement: pnlSettlement
         ? { basis: pnlSettlement.basis, stored: pnlSettlement.stored, drift: pnlDrift }
         : null,
       mainLeverage: resolveCampaignMainLeverage(campaign, legs, tradeRecords),
-      initialMainExposureNotional: computeInitialMainExposureNotional(campaign, legs, tradeRecords),
+      initialMainExposureNotional: liveMetrics?.openingNotional ?? computeInitialMainExposureNotional(campaign, legs, tradeRecords),
       peakUnrealizedPnl: campaign.comparison?.instant ? campaign.peak_unrealized_pnl : accuracy.campaign_max_profit_real,
       peakPriceChangePct,
       halfMirror:campaignHalfMirror(campaign),
       dynamicMaxDrawdownPct,
       staticMaxDrawdownPct,
       initialExpectedMaxLoss: accuracy.initial_expected_max_loss,
-      mainSideNotional,
+      mainSideNotional: liveMetrics && liveUsdt ? { side: liveUsdt.direction, total: liveMetrics.totalEntryNotional, mirrorTotal: 0 } : mainSideNotional,
       expectedMaxDrawdownPct: campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0,
       payoffRatio: campaignMetricValues?.profitCaptureRatio ?? null,
       mainPriceChangePct: actualPriceChange.pct,
       mainPriceChangeBasis: { entryPrice: actualPriceChange.entryPrice, exitPrice: actualPriceChange.exitPrice, exitSource: actualPriceChange.exitSource },
-      hasMainAdd: campaignHasMainAdd(legs),
-      addCount: campaignMainAddCount(legs),
+      hasMainAdd: liveMetrics ? liveMetrics.addCount > 0 : campaignHasMainAdd(legs),
+      addCount: liveMetrics?.addCount ?? campaignMainAddCount(legs),
       asymmetricRiskContribution,
       arithmeticExpectancy: campaignMetricValues?.arithmeticExpectancy ?? null,
       geometricExpectancy: campaignMetricValues?.geometricExpectancy ?? null,
@@ -1948,6 +1952,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       : item));
   }, [
     accuracy,
+    liveMetrics,
+    liveUsdt,
     asymmetricRiskContribution,
     campaign,
     campaignMetricValues,
@@ -1964,22 +1970,27 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     tradeRecords,
   ]);
   const livePnlOverviewItems = useMemo<Array<OverviewPanelItem & { color?: string }> | undefined>(() => {
-    if (!liveUsdt) return undefined;
-    const { realized, fees, net } = usdtCampaignAmounts(liveUsdt);
+    if (!liveUsdt || !liveMetrics) return undefined;
+    const { realized, fees, net, openingNotional, entryPrice } = liveMetrics;
     const amount = (value: number) => usdtAmountText(value) + ' ' + liveUsdt.asset;
-    const openOrder = liveUsdt.fills[0].orderId;
-    const opening = liveUsdt.fills.filter(fill => fill.orderId === openOrder && fill.action !== 'reduce');
-    const openingSize = opening.reduce((sum, fill) => sum + Number(fill.positionQuantity), 0);
-    const openingNotional = opening.reduce((sum, fill) => sum + Number(fill.price) * Number(fill.positionQuantity), 0);
+    const readings = new Set(['payoffRatio', 'initialExpectedMaxLoss', 'expectedMaxDrawdownPct', 'addCount', 'mainPriceChange',
+      'mainPriceEfficiency', 'geometricExpectancy', 'arithmeticExpectancy', 'mainSideNotional', 'positionAmplification',
+      'positionGeometricMultiple', 'addEfficiency', 'peakPriceChange', 'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct']);
     return [
       { key: 'realizedPnl', label: '已实现 P&L', value: amount(realized), help: '币安逐笔成交中的已实现盈亏合计。', column: 0 },
       { key: 'commissions', label: '手续费', value: [...fees].map(([asset, fee]) => usdtAmountText(fee) + ' ' + asset).join(' / '), help: '按币安实际扣费币种汇总。', column: 0 },
       { key: 'netPnl', label: '扣手续费后', value: net == null ? '—' : amount(net), help: '从已实现盈亏扣除同币种手续费。', column: 0 },
       { key: 'initialMainExposureNotional', label: '首仓名义金额', value: amount(openingNotional), help: '首个开仓委托的实际成交金额合计。', column: 1 },
-      { key: 'averageEntry', label: '首仓开仓均价', value: openingSize > 0 ? usdtAmountText(openingNotional / openingSize) : '—', help: '首个开仓委托按成交数量加权的成交价。', column: 1 },
+      { key: 'averageEntry', label: '首仓开仓均价', value: entryPrice != null ? usdtAmountText(entryPrice) : '—', help: '首个开仓委托按成交数量加权的成交价。', column: 1 },
       { key: 'remainingQuantity', label: '余仓数量', value: liveUsdt.quantity, help: '币安成交确认后的剩余持仓数量。', column: 1 },
+      { key: 'liveEntryRiskBasis', label: '初始风险依据', value: liveMetrics.frozen ? '开仓冻结风控' : '首仓名义金额 × 3%',
+        help: '按首个开仓委托全部成交计算初始风险。缺少开仓风控时统一取首仓名义金额的 3%。整场盈亏比在全部平仓且手续费可核算后显示。', column: 1 },
+      ...campaignPnlOverviewItems.filter(item => readings.has(item.key)).map(item => item.key === 'payoffRatio'
+        ? { ...item, help: liveUsdt.closedAt == null ? '仓位尚未全部平仓，整场盈亏比待结算。'
+          : net == null ? '手续费含其他币种，缺少成交时折算金额，整场净盈亏和盈亏比暂缺。'
+          : '整场盈亏比 = 币安逐笔成交的已实现盈亏扣除手续费后 ÷ 首仓初始风险。' } : item),
     ];
-  }, [liveUsdt]);
+  }, [liveUsdt, liveMetrics, campaignPnlOverviewItems]);
   const overviewItems: Array<OverviewPanelItem & { color?: string }> = livePnlOverviewItems ?? campaignPnlOverviewItems;
   const campaignMetadataMetrics = useMemo<Array<OverviewPanelItem & { color?: string }>>(() => {
     if (liveUsdt) {

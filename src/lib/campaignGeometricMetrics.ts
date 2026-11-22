@@ -1,3 +1,4 @@
+import { usdtLiveRiskMetrics } from '@/lib/fish/usdtLiveCampaignMetrics';
 import { computeInitialExpectedMaxDrawdownPct, computeInitialExpectedMaxLoss, computeInitialMainExposureNotional, resolveInitialExposureLegAttribution, resolveMainRiskAnchors, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
 import { evaluateCampaignAddSizing, resolveCampaignAddQuantitySteps, type AddSizingVerdict } from '@/lib/campaignAddSizingCheck';
 import { resolveLegExecution, tradeRecordNotionalAt, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
@@ -178,6 +179,13 @@ export function computeCampaignGeometricMetrics(
     unitRise: null, unitProfit: null, positionProfit: null, positionProfitTheoretical: null,
     geometricMetricBasis: { initialCoins: null, initialEntryPrice: null, initialStopPrice: null, earlyReductionFraction: null, addRatios: null, finalExitPrice: null, lastSupport: null },
   };
+  const live = usdtLiveRiskMetrics(campaign);
+  if (live) {
+    const multiple = positionGeometricMultiple(live.addRatios, live.earlyReduction);
+    return { ...empty, positionGeometricMultiple: multiple, positionGeometricMultipleTheoretical: live.addCount ? null : multiple,
+      geometricMetricBasis: { initialCoins: live.openingSize || null, initialEntryPrice: live.entryPrice, initialStopPrice: live.stop,
+        earlyReductionFraction: live.earlyReduction, addRatios: live.addRatios, finalExitPrice: live.exitPrice, lastSupport: null } };
+  }
   if (campaign.direction !== 'main_long') return empty;
   const lookup = buildTradeRecordLookup(tradeRecords);
   const executions = new Map(legs.map(leg => [leg.id, resolveLegExecution(leg, leg.trade_record_id ? lookup.get(leg.trade_record_id) ?? null : null, corrections)]));

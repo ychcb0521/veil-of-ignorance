@@ -1,7 +1,7 @@
 import { computeEntryEffectiveRisePct, computeGeometricGrowth, geometricGrowthBinValue, unitRiseBinValue, unitUsdBinValue } from '@/lib/campaignUnitProfit';
 import { compactExecutionWearR } from '@/lib/campaignExecutionWear';
 import type { CampaignCardData } from '@/lib/campaignListCache';
-import { campaignHasMainAdd, campaignMainAddCount, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
+import { campaignMainAddCount, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
 import { computeUnrealizedPriceChangePct } from '@/lib/campaignPnlOverview';
 import { campaignAchievedMirrorTp, mirrorTpRank } from '@/lib/mirrorTpSummary';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
@@ -222,15 +222,15 @@ export function rowUnrealizedPriceChangePct(row: Pick<CampaignCardData, 'mainPri
 }
 
 /** 加仓效用 = 盈亏比 ÷ 涨跌幅倍数（见 computeAddEfficiency）。 */
-export function rowAddEfficiency(row: Pick<CampaignCardData, 'profitCaptureRatio' | 'legs' | 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct'>): number | null {
+export function rowAddEfficiency(row: Pick<CampaignCardData, 'profitCaptureRatio' | 'liveAddCount' | 'legs' | 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct'>): number | null {
   // 【用户要求】没有加仓的战役不算加仓效用（campaignHasMainAdd，与盈亏概览同一个判断）
-  if (!campaignHasMainAdd(row.legs)) return null;
+  if (rowAddCount(row) === 0) return null;
   return computeAddEfficiency(rowPayoffRatio(row), rowMainPriceEfficiency(row));
 }
 
 /** 加仓次数（成交过的加仓腿条数，见 campaignMainAddCount）：卡片、散点图与排序共用。 */
-export function rowAddCount(row: Pick<CampaignCardData, 'legs'>): number {
-  return campaignMainAddCount(row.legs);
+export function rowAddCount(row: Pick<CampaignCardData, 'legs' | 'liveAddCount'>): number {
+  return row.liveAddCount ?? campaignMainAddCount(row.legs);
 }
 
 /** 没带现成读数的行（旧缓存、手工拼的行）按腿现算一次，按行对象缓存：行对象不变读数就不变。 */

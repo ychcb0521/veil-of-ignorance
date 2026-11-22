@@ -400,6 +400,27 @@ describe('JournalCampaignsPage · 自评（五点评分）', () => {
 });
 
 
+it('shows the settled Binance fill-to-risk multiple on its instant campaign card', async () => {
+  const { buildUsdtLiveCampaignData } = await import('@/lib/fish/usdtLiveCampaignProjection');
+  const at = Date.parse('2026-11-21T15:55:00Z');
+  const fill = { id: '101', orderId: '501', at, price: '100', quantity: '1', positionQuantity: '1',
+    realized: 0, commission: 1, commissionAsset: 'USDT', side: 'BUY' as const, action: 'open' as const };
+  const data = buildUsdtLiveCampaignData('user-1', { symbol: 'XMRUSDT', asset: 'USDT', direction: 'long',
+    positionSide: 'LONG', openedAt: at, closedAt: at + 10000, quantity: '0',
+    fills: [fill, { ...fill, id: '102', orderId: '502', at: at + 10000, action: 'reduce', side: 'SELL', price: '108', realized: 8 }] });
+  const load = vi.spyOn(qualityCampaignApi, 'listQualityCampaignData').mockResolvedValue({
+    rows: [data], warning: undefined, selectedSellKey: undefined, buyFilterLabel: '', repair: undefined,
+  });
+  const local = vi.spyOn(qualityCampaignApi, 'listLocalInstantCampaignData').mockResolvedValue([]);
+  try {
+    renderPage('/journal/campaigns?section=instant');
+    const card = await screen.findByTestId('campaign-card');
+    expect(within(card).getByText('币安实盘', { exact: true })).toBeVisible();
+    expect(within(card).getByTestId('campaign-capture-rate-value')).toHaveTextContent('2.00');
+    expect(within(card).getByTestId('campaign-add-count-value')).toHaveTextContent('0');
+  } finally { load.mockRestore(); local.mockRestore(); }
+});
+
 it('keeps monitoring filters, explanations and statistics closed while preserving the campaign list', async () => {
   const details = await getCampaignFullData('newest');
   const load = vi.spyOn(qualityCampaignApi, 'listQualityCampaignData').mockResolvedValue({

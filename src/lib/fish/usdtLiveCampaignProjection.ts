@@ -1,18 +1,17 @@
 import { campaignStatusFromRealizedPnl } from '@/lib/campaignRealizedPnl';
 import type { TradeCampaign } from '@/types/journal';
 import type { QualityCampaignData } from './qualityCampaignProjection';
-import { usdtCampaignAmounts, usdtLiveCampaignId, type UsdtLiveCampaign } from './usdtLiveCampaign';
+import { linkedUsdtEntryRiskPct, usdtLiveFillMetrics } from './usdtLiveCampaignMetrics';
+import { usdtLiveCampaignId, type UsdtLiveCampaign } from './usdtLiveCampaign';
 
-export function buildUsdtLiveCampaignData(owner: string, position: UsdtLiveCampaign): QualityCampaignData {
+export function buildUsdtLiveCampaignData(owner: string, position: UsdtLiveCampaign, liveEntryRiskPct?: number): QualityCampaignData {
   const id = usdtLiveCampaignId(position);
   const opened = new Date(position.openedAt).toISOString();
   const closed = position.closedAt ? new Date(position.closedAt).toISOString() : null;
   const last = position.fills.at(-1)!;
   const updated = new Date(last.at).toISOString();
   const opening = position.fills[0];
-  const initialNotional = position.fills.filter(fill => fill.orderId === opening.orderId && fill.action !== 'reduce')
-    .reduce((sum, fill) => sum + Number(fill.price) * Number(fill.positionQuantity), 0);
-  const { realized, net } = usdtCampaignAmounts(position);
+  const { openingNotional: initialNotional, realized, net } = usdtLiveFillMetrics(position);
   const source = position.followId ? '系统跟单' : position.management ? '币安手动开仓 · 策略托管' : '币安开仓';
   const campaign: TradeCampaign = {
     id, user_id: owner, campaign_code: 'BN-' + opening.id, symbol: position.symbol,
@@ -30,7 +29,7 @@ export function buildUsdtLiveCampaignData(owner: string, position: UsdtLiveCampa
       ...(fill.action !== 'reduce' ? { entry_price: Number(fill.price) } : { exit_price: Number(fill.price) }), notes: null,
     })),
     comparison: { section: 'instant', runKey: id, sellKey: 'binance-live', sellLabel: '币安实盘', detectors: [],
-      valuedAt: last.at, liveUsdt: position },
+      valuedAt: last.at, liveUsdt: position, ...(liveEntryRiskPct != null ? { liveEntryRiskPct } : {}) },
   };
   return { campaign, legs: [], tradeRecords: [], pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [],
     legExitPriceCorrections: {}, timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0,
@@ -39,5 +38,18 @@ export function buildUsdtLiveCampaignData(owner: string, position: UsdtLiveCampa
 
 export function mergeUsdtLiveCampaignRows(rows: QualityCampaignData[]) {
   const linked = new Set(rows.flatMap(row => row.campaign.comparison?.liveUsdt?.followId ?? []));
-  return [...new Map(rows.filter(row => !linked.has(row.campaign.id)).map(row => [row.campaign.id, row])).values()];
+  const byId = new Map<string, QualityCampaignData>();
+  for (const row of rows) {
+    const previous = byId.get(row.campaign.id);
+    const current = row.campaign.comparison?.liveUsdt, prior = previous?.campaign.comparison?.liveUsdt;
+    if (current && prior && (prior.closedAt && !current.closedAt || prior.fills.length > current.fills.length)) continue;
+    byId.set(row.campaign.id, row);
+  }
+  return [...byId.values()].filter(row => !linked.has(row.campaign.id)).map(row => {
+    const comparison = row.campaign.comparison;
+    const live = comparison?.liveUsdt;
+    if (!live?.followId) return row;
+    const percent = linkedUsdtEntryRiskPct(live, row.campaign.user_id, byId.get(live.followId)?.campaign);
+    return percent == null ? row : { ...row, campaign: { ...row.campaign, comparison: { ...comparison, liveEntryRiskPct: percent } } };
+  });
 }

@@ -1,3 +1,4 @@
+import { usdtLiveFillMetrics } from '@/lib/fish/usdtLiveCampaignMetrics';
 import {isQualityCampaignId} from '@/lib/campaignSections';
 import { resolveCampaignEquityPathLegFacts, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
@@ -319,6 +320,11 @@ export function campaignPriceChangeLegInputs(
   corrections: LegExitPriceCorrections = {},
   localOrders: CampaignLocalOrderFacts = {},
 ): PriceChangeLegInput[] {
+  const live = campaign.comparison?.liveUsdt;
+  if (live) {
+    const { entryPrice, exitPrice } = usdtLiveFillMetrics(live);
+    return [{ id: campaign.id, role: 'main_open', side: live.direction, entryPrice, exitPrice, openTime: live.openedAt, closeTime: live.closedAt ?? null }];
+  }
   const mirrorOnly=isQualityCampaignId(campaign.id)&&campaign.comparison?.sellEvidence?.mirrorFill?.fraction===1&&!legs.some(leg=>leg.leg_role==='main_open');
   const lookup = buildTradeRecordLookup(tradeRecords);
   const facts = resolveCampaignEquityPathLegFacts(campaign, legs, tradeRecords, localOrders);

@@ -1,4 +1,5 @@
 import { computeInitialExpectedMaxLoss } from '@/lib/campaignAnalysis';
+import { usdtLiveRiskMetrics } from './usdtLiveCampaignMetrics';
 import { computeSettlementPayoffRatio } from '@/lib/campaignB';
 import { computeCampaignRealizedPnl, reconcileCampaignWithSettlement } from '@/lib/campaignRealizedPnl';
 import { summarizeCampaignPerformance, type CampaignPerformanceSample } from '@/lib/kellySizing';
@@ -24,9 +25,10 @@ export function paperCampaignPerformance(rows: Iterable<import('./qualityCampaig
       const settlement = computeCampaignRealizedPnl(details.campaign, details.legs, details.tradeRecords, {});
       const campaign = reconcileCampaignWithSettlement(details.campaign, details.legs, settlement);
       const risk = computeInitialExpectedMaxLoss(details.campaign, details.legs, details.tradeRecords, details.reverseHedgeOrders);
+      const live = usdtLiveRiskMetrics(details.campaign);
       samples.push({
         campaign: { id: campaign.id, status: campaign.status, final_realized_pnl: campaign.final_realized_pnl } as typeof campaign,
-        payoffRatio: computeSettlementPayoffRatio(campaign.final_realized_pnl, risk),
+        payoffRatio: live ? live.payoffRatio : computeSettlementPayoffRatio(campaign.final_realized_pnl, risk),
       });
     } catch { /* Detail summaries historically omit individual unreadable samples. */ }
   }

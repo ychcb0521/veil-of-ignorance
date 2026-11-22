@@ -1,8 +1,12 @@
+import { usdtLiveRiskMetrics } from './usdtLiveCampaignMetrics';
 import type {TradeCampaign} from '@/types/journal';
 import { initialLimitedDrawdownPct, qualityLimitedDrawdownText } from './qualityStaticDrawdownSell';
 /** The denominator is frozen initial risk, never the later enlarged investment or realized drawdown. */
 export function qualityCampaignStaticRisk(campaign?:TradeCampaign){
  if(!campaign?.comparison)return;
+ const live = usdtLiveRiskMetrics(campaign);
+ if (live) return live.loss > 0 && campaign.comparison.liveUsdt?.asset === 'USDT'
+   ? { percent: live.percent, notional: live.openingNotional, loss: live.loss, entry: live.entryPrice ?? undefined, stop: live.stop } : undefined;
  const evidence=campaign.comparison.sellEvidence;
  const stops=(evidence?.holdingVetoes??[]).filter(v=>v.kind==='static-drawdown'&&(v.direction==='>='||v.direction==='>')&&Number.isFinite(v.threshold)&&v.threshold>0&&v.threshold<=100);
  const plan=campaign.comparison.monitorPlan;

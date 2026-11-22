@@ -26,6 +26,7 @@ import {
   materiallyDifferentPnl,
   type CampaignRealizedPnl,
 } from '@/lib/campaignRealizedPnl';
+import { usdtLiveRiskMetrics } from '@/lib/fish/usdtLiveCampaignMetrics';
 import { campaignMainLegPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { computeCampaignPositionAmplification } from '@/lib/campaignPositionAmplification';
 import { computeCampaignGeometricMetrics, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
@@ -44,6 +45,7 @@ export type CampaignCardData = {
   /** 列表、散点图、一键结束共用包含平仓价校正的同一份结算。 */
   settlement: CampaignRealizedPnl;
   profitCaptureRatio: number | null;
+  liveAddCount?: number;
   initialExpectedMaxLoss: number;
   initialExpectedMaxDrawdownPct: number;
   /** 战役的涨跌幅（%，按主力方向计：开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价）；主力都未平仓时为 null。「涨跌幅」排序与卡片读数用它。 */
@@ -115,7 +117,8 @@ export function buildCampaignCardData(
   };
   const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(campaign, legs, tradeRecords, reverseHedgeOrders);
   const initialExpectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(campaign, legs, tradeRecords, reverseHedgeOrders);
-  const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
+  const live = usdtLiveRiskMetrics(campaign);
+  const profitCaptureRatio = live ? live.payoffPercent : Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
     ? computeProfitCaptureRatio(campaign, legs, tradeRecords, reverseHedgeOrders, corrections)
     : null;
   const geometricMetrics = geometricMetricsOf(reconciledCampaign, details, corrections);
@@ -124,6 +127,7 @@ export function buildCampaignCardData(
     legs,
     tradeRecords,
     settlement,
+    ...(live ? { liveAddCount: live.addCount } : {}),
     initialExpectedMaxLoss,
     initialExpectedMaxDrawdownPct,
     profitCaptureRatio,

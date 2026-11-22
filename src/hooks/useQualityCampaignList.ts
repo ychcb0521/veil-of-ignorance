@@ -4,6 +4,7 @@ import { listLocalInstantCampaignData, listQualityCampaignData } from '@/lib/fis
 import { qualityCampaignTrashKey, type CampaignSection } from '@/lib/campaignSections';
 import { loadQualityCampaignTrash, readQualityCampaignTrash, subscribeQualityCampaignTrash, type QualityCampaignTrash } from '@/lib/fish/qualityCampaignTrash';
 
+import { buildUsdtLiveCampaignData } from '@/lib/fish/usdtLiveCampaignProjection';
 import { subscribeInstantCampaigns } from '@/lib/fish/instantCampaignStore';
 
 function mergeInstantCampaignCards(current: CampaignCardData[], incoming: CampaignCardData[]) {
@@ -17,7 +18,13 @@ function mergeInstantCampaignCards(current: CampaignCardData[], incoming: Campai
     const live = row.campaign.comparison?.liveUsdt;
     const previousLive = previous?.campaign.comparison?.liveUsdt;
     if (live && previousLive && live.fills.length < previousLive.fills.length) continue;
-    byId.set(row.campaign.id, row);
+    const priorRisk = previous?.campaign.comparison?.liveEntryRiskPct;
+    if (live?.followId && live.followId === previousLive?.followId && priorRisk != null && row.campaign.comparison?.liveEntryRiskPct == null) {
+      const enriched = buildUsdtLiveCampaignData(row.campaign.user_id, live, priorRisk);
+      byId.set(row.campaign.id, { ...row, ...buildCampaignCardData(enriched) });
+    } else {
+      byId.set(row.campaign.id, row);
+    }
   }
   const linked = new Set([...byId.values()].flatMap(row => row.campaign.comparison?.liveUsdt?.followId ?? []));
   return [...byId.values()].filter(row => !linked.has(row.campaign.id));
