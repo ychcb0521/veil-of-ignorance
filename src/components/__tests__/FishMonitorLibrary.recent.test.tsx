@@ -19,7 +19,9 @@ it('shows the latest 12 entries while the whole study is pending and reads only 
  fireEvent.click(screen.getByRole('button',{name:'打开监测归档 round-0'}));
  await screen.findByText('所选正文');expect(store.body).toHaveBeenCalledTimes(1);
  expect(screen.queryByRole('button',{name:'复制至组合表'})).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'加载更早记录'}));expect(screen.getAllByTestId('monitor-archive-item')).toHaveLength(14);
+ const viewport=screen.getByTestId('monitor-directory-scroll');
+ Object.defineProperties(viewport,{clientHeight:{value:200},scrollHeight:{value:1000}});
+ fireEvent.scroll(viewport,{target:{scrollTop:720}});expect(screen.getAllByTestId('monitor-archive-item')).toHaveLength(14);
  expect(store.body).toHaveBeenCalledTimes(1);
  view.rerender(<FishMonitorLibrary {...props} ready/>);
  expect(screen.getByText('所选正文')).toBeInTheDocument();expect(store.body).toHaveBeenCalledTimes(1);
@@ -59,4 +61,20 @@ it('shows a newly completed local round immediately instead of shadowing it with
  fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
  fireEvent.click(screen.getByRole('button',{name:'打开监测归档 local-new'}));
  expect(screen.getByText('最新本机轮次')).toBeInTheDocument();expect(store.directory).not.toHaveBeenCalled();expect(store.body).not.toHaveBeenCalled();
+});
+it('retains a partial index after the automatic lookup fails and retries without reading bodies',async()=>{
+ const partial={...directory(),entries:directory().entries.slice(0,12)};
+ store.directory.mockResolvedValueOnce(partial).mockRejectedValueOnce(Error('offline')).mockResolvedValueOnce(directory());
+ render(<FishMonitorLibrary study={newQualityStudy(at)} ready={false} account="alice"/>);
+ fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
+ await waitFor(()=>expect(screen.getAllByTestId('monitor-archive-item')).toHaveLength(12));
+ const viewport=screen.getByTestId('monitor-directory-scroll');
+ Object.defineProperties(viewport,{clientHeight:{value:200},scrollHeight:{value:1000}});
+ fireEvent.scroll(viewport,{target:{scrollTop:780}});
+ const retry=await screen.findByRole('button',{name:'刷新目录索引'});
+ expect(screen.getAllByTestId('monitor-archive-item')).toHaveLength(12);
+ fireEvent.scroll(viewport);expect(store.directory).toHaveBeenCalledTimes(2);
+ fireEvent.click(retry);
+ await waitFor(()=>expect(screen.getAllByTestId('monitor-archive-item')).toHaveLength(14));
+ expect(store.body).not.toHaveBeenCalled();
 });

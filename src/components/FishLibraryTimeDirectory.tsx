@@ -320,7 +320,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
         </div>}
         <DialogDescription className={compactDirectory&&(!browseRounds||loading||loadError)?"sr-only":"text-[11px] text-muted-foreground"}>{directoryOnly ? '选择目录查看归档记录' : browseRounds&&(loading||loadError) ? `读取账号保存的${name.slice(0,-1)}轮次` : typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
       </DialogHeader>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-testid={prefix+'-directory-scroll'}>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-fish-scroll data-testid={prefix+'-directory-scroll'}>
       {trashOwner&&open&&!picker&&!trash.waiting&&<DirectoryTrashPanel key={trashOwner+trashScope} owner={trashOwner} scope={trashScope} marks={trash.marks} reload={trash.reload} cleanup={cleanupDirectory} selection={trashSelection} clear={()=>setTrashSelection(undefined)} trashView={trashView} onTrashView={value=>{resetDirectorySelection();setTrashView(value);}}/>}
       {trash.waiting&&<p role="status" className="text-xs">{trash.issue||'正在核对已删除目录…'} {trash.issue&&<button type="button" className="underline" onClick={trash.reload}>重试</button>}</p>}
       {trashView ? null : directoryOnly && open && browseArchive?.owner ? <FishArchiveBrowse pendingVisibility={trash.waiting} marks={trash.marks} onDelete={trashOwner&&!picker?setTrashSelection:undefined} key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/> : trash.waiting ? null : <>

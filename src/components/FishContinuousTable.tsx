@@ -6,11 +6,11 @@ function rowAt(offsets:readonly number[],y:number){let lo=0,hi=offsets.length-1;
 function windowAt(offsets:readonly number[],top:number,height:number){const count=offsets.length-1;return {start:Math.max(0,rowAt(offsets,top)-OVERSCAN),end:Math.min(count,rowAt(offsets,top+height)+OVERSCAN+1)};}
 interface View {top:number;height:number;revision:number}
 interface Props<T>{
- items:readonly T[];getKey:(item:T)=>string;row:(item:T)=>ReactElement;header:ReactNode;columns:number;
- resetKey:string;label:string;testId:string;className?:string;tableClassName?:string;headClassName?:string;estimate?:number;empty?:ReactNode;
+ items:readonly T[];getKey:(item:T,index:number)=>string;row:(item:T)=>ReactElement;header:ReactNode;columns:number;
+ resetKey:string;label:string;testId:string;className?:string;tableClassName?:string;headClassName?:string;estimate?:number;empty?:ReactNode;footer?:ReactNode;
 }
 /** Shared by mining, filter, monitoring and imported collections. All selection/export still operates on the full input. */
-export function FishContinuousTable<T>({items,getKey,row,header,columns,resetKey,label,testId,className='',tableClassName='',headClassName='',estimate=72,empty}:Props<T>){
+export function FishContinuousTable<T>({items,getKey,row,header,columns,resetKey,label,testId,className='',tableClassName='',headClassName='',estimate=72,empty,footer}:Props<T>){
  const host=useRef<HTMLDivElement>(null),nodes=useRef(new Map<string,HTMLTableRowElement>()),heights=useRef(new Map<string,number>());
  const keys=useMemo(()=>items.map(getKey),[items,getKey]),[view,setView]=useState<View>({top:0,height:VIEWPORT,revision:0});
  const [focused,setFocused]=useState<string>(),[expanded,setExpanded]=useState<Set<string>>(()=>new Set());
@@ -50,11 +50,12 @@ export function FishContinuousTable<T>({items,getKey,row,header,columns,resetKey
  const rows:ReactNode[]=[];let cursor=0;
  const spacer=(from:number,to:number)=>{if(to>from)rows.push(<tr key={`gap:${from}`} aria-hidden="true" data-continuous-spacer><td colSpan={columns} style={{height:layout.offsets[to]-layout.offsets[from],padding:0,border:0}}/></tr>);};
  for(const i of [...indices].sort((a,b)=>a-b)){spacer(cursor,i);const key=keys[i];rows.push(<MeasuredRow key={key} id={key} index={i} attach={attach}>{row(items[i])}</MeasuredRow>);cursor=i+1;}spacer(cursor,items.length);
- return <div ref={host} role="region" tabIndex={0} aria-label={label} data-testid={testId} className={`overflow-auto [overflow-anchor:none] ${className}`}
+ return <div ref={host} data-fish-scroll role="region" tabIndex={0} aria-label={label} data-testid={testId} className={`overflow-auto [overflow-anchor:none] ${className}`}
   onFocusCapture={e=>{const key=(e.target as HTMLElement).closest('tr[data-continuous-row]')?.getAttribute('data-continuous-row');setFocused(key??undefined);}}
   onBlurCapture={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node|null))setFocused(undefined);}}>
   <table className={`w-full border-separate border-spacing-0 ${tableClassName}`} aria-rowcount={items.length+1}><thead className={`sticky top-0 z-20 bg-background ${headClassName}`}>{header}</thead><tbody>{rows}</tbody></table>
   {!items.length&&empty}
+  {footer}
  </div>;
 }
 function MeasuredRow({id,index,attach,children}:{id:string;index:number;attach:(id:string,node:HTMLTableRowElement|null)=>void;children:ReactElement}){

@@ -4,6 +4,8 @@ import {readBrowseCatalog,readBrowsePage,type BrowseCatalog,type BrowseRow,type 
 import {mergeLibraryDirectoryEdits,type LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {readScreenCatalog,readScreenPage,type LocalScreenCatalog} from '@/lib/fish/preEntryPersistence';
 
+import {FishContinuousTable} from './FishContinuousTable';
+import {FishScrollBoundary} from './FishScrollBoundary';
 import {DirectoryDeleteButton} from './FishDirectoryTrash';
 import type {DirectoryMarks,DirectoryRef} from '@/lib/fish/directoryTrash';
 type Directory = {local:LocalScreenCatalog} | {cloud:BrowseCatalog};
@@ -24,23 +26,50 @@ async function readDirectory(owner:string, scope:BrowseScope, signal:AbortSignal
   return cloud?{cloud}:emptyLocal?{local:emptyLocal}:undefined;
 }
 
-function ArchivePage({owner,directory,pageKey,reload}:{owner:string;directory:Directory;pageKey:string;reload:()=>void}){
-  const [rows,setRows]=useState<BrowseRow[]>(),[error,setError]=useState('');
-  useEffect(()=>{
-    let active=true;
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
-    const request='cloud' in directory?readBrowsePage(directory.cloud,pageKey,controller.signal):readScreenPage(owner,directory.local.id,pageKey);
-    void request.then(value=>{if(active)setRows(value);},cause=>{
-      if(active)setError(cause instanceof Error?cause.message:'记录页读取失败');
-    }).finally(()=>clearTimeout(timer));
-    return ()=>{active=false;clearTimeout(timer);controller.abort();};
-  },[owner,directory,pageKey]);
-  if(error)return <p role="alert">{error} <button type="button" className="underline" onClick={reload}>重新读取目录</button></p>;
-  if(!rows)return <p role="status">正在读取本页…</p>;
-  return <div className="max-h-72 overflow-auto">
-    <table className="w-full text-left"><thead><tr><th>标的</th><th>信号时间（北京时间）</th><th>归档记录</th></tr></thead>
-      <tbody>{rows.map((row,i)=><tr key={row[3]+'-'+i} className="border-t"><td className="pr-2 font-mono">{row[0]}</td><td className="pr-2 whitespace-nowrap">{formatUTC8(row[1])}</td><td>{row[2]}</td></tr>)}</tbody></table>
-  </div>;
+type ArchiveStream = {rows: BrowseRow[]; next: number; loading: boolean; error: string};
+const archiveRowKey = (_: BrowseRow, index: number) => String(index);
+
+function ArchiveRecords({owner, directory, pages, reload}: {
+  owner: string; directory: Directory; pages: string[]; reload: () => void;
+}) {
+  const [stream, setStream] = useState<ArchiveStream>({rows: [], next: 0, loading: true, error: ''});
+  const {rows, next, loading, error} = stream;
+  const loadNext = () => setStream(s => s.loading ? s : {...s, loading: true, error: ''});
+
+  useEffect(() => {
+    if (!loading || next >= pages.length) return;
+    const controller = new AbortController();
+    const fail = (message: string) => setStream(s => ({...s, loading: false, error: message}));
+    const timer = setTimeout(() => {
+      controller.abort();
+      fail('归档记录读取超时');
+    }, 15000);
+    const key = pages[next];
+    const request = 'cloud' in directory
+      ? readBrowsePage(directory.cloud, key, controller.signal)
+      : readScreenPage(owner, directory.local.id, key);
+    void request.then(batch => {
+      if (!controller.signal.aborted) {
+        setStream(s => ({rows: s.rows.concat(batch), next: next + 1, loading: false, error: ''}));
+      }
+    }, cause => {
+      if (!controller.signal.aborted) fail(cause instanceof Error ? cause.message : '归档记录读取失败');
+    }).finally(() => clearTimeout(timer));
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [owner, directory, pages, next, loading]);
+
+  return <>
+    <FishContinuousTable items={rows} getKey={archiveRowKey} columns={3} resetKey={owner}
+      label="归档记录连续滚动列表" testId="archive-record-scroll" estimate={24} className="max-h-72"
+      tableClassName="text-left" header={<tr><th>标的</th><th>信号时间（北京时间）</th><th>归档记录</th></tr>}
+      row={row => <tr className="[&>td]:border-t"><td className="pr-2 font-mono">{row[0]}</td>
+        <td className="whitespace-nowrap pr-2">{formatUTC8(row[1])}</td><td>{row[2]}</td></tr>}
+      footer={!loading && !error && next < pages.length ? <FishScrollBoundary key={next} onReach={loadNext}/> : null}/>
+    {loading && <p role="status">{rows.length ? '正在读取后续记录…' : '正在读取归档记录…'}</p>}
+    {error && <p role="alert">{error} <button type="button" className="underline" onClick={loadNext}>重试读取</button>
+      {' · '}<button type="button" className="underline" onClick={reload}>重新读取目录</button></p>}
+    {!loading && !error && !rows.length && next === pages.length && <p>本轮没有记录</p>}
+  </>;
 }
 
 function LegacyScreenIndex({owner,onReady}:{owner:string;onReady:()=>void}){
@@ -90,8 +119,8 @@ function RebuildHistoricalIndex({owner,onReady}:{owner:string;onReady:()=>void})
 export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,pendingVisibility}:Props){
   const [historicalOnly,setHistoricalOnly]=useState(false);
   const [directory,setDirectory]=useState<Directory>(),[issue,setIssue]=useState(''),[attempt,setAttempt]=useState(0);
-  const [selected,setSelected]=useState(''),[page,setPage]=useState(0);
-  const reload=()=>{setDirectory(undefined);setIssue('');setSelected('');setPage(0);setAttempt(n=>n+1);};
+  const [selected,setSelected]=useState('');
+  const reload=()=>{setDirectory(undefined);setIssue('');setSelected('');setAttempt(n=>n+1);};
   useEffect(()=>{
     let active=true;
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
@@ -124,12 +153,12 @@ export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,pendin
     {'local' in directory&&<button type="button" className="underline" onClick={()=>switchSource(true)}>查看 v5 历史目录</button>}
     {historical&&(backToLocal||legacyIndex)}
     {matching.map(item=><div key={item.id} className="rounded border">
-      <div className="flex items-center"><button type="button" aria-expanded={selected===item.id} className="flex w-full items-center justify-between gap-4 p-2 text-left" onClick={()=>{setSelected(selected===item.id?'':item.id);setPage(0);}}>
+      <div className="flex items-center"><button type="button" aria-expanded={selected===item.id} className="flex w-full items-center justify-between gap-4 p-2 text-left" onClick={()=>setSelected(selected===item.id?'':item.id)}>
         <span>{item.title} · {formatUTC8(item.at)}</span><span>{item.count} 条</span>
       </button>{onDelete&&<DirectoryDeleteButton item={item} onChoose={onDelete}/>}</div>
       {selected===item.id&&<div className="border-t p-2">
-        {item.pages[page]?<ArchivePage key={item.id+'-'+page} owner={owner} directory={directory} pageKey={item.pages[page]} reload={reload}/>:<p>{item.count?'该页尚未建立索引':'本轮没有记录'}</p>}
-        {item.pages.length>1&&<div className="mt-2 flex items-center gap-3"><button type="button" disabled={!page} onClick={()=>setPage(n=>n-1)}>上一页</button><span>{page+1} / {item.pages.length}</span><button type="button" disabled={page+1>=item.pages.length} onClick={()=>setPage(n=>n+1)}>下一页</button></div>}
+        {item.pages.length ? <ArchiveRecords key={JSON.stringify([owner,item.id,'local' in directory?directory.local.id:directory.cloud.revisions,item.pages])}
+          owner={owner} directory={directory} pages={item.pages} reload={reload}/> : <p>{item.count?'该目录尚未建立记录索引':'本轮没有记录'}</p>}
       </div>}
     </div>)}
     {!matching.length&&<p>{groups.length?'没有匹配的归档目录。':'这个版本尚无可显示的归档目录。'}</p>}

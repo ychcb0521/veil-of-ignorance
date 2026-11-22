@@ -1,5 +1,6 @@
 import {formatUTC8} from '@/lib/timeFormat';
 import type {DirectoryCleanup} from './FishDirectoryTrash';
+import {FishScrollBoundary} from './FishScrollBoundary';
 import {FishStudyRecoveryStatus} from './FishStudyRecoveryStatus';
 import {createLibraryRoundReader} from '@/lib/fish/libraryRounds';
 import {createQualityTemplateDirectory, unknownTemplateGroup} from '@/lib/fish/qualityTemplateDirectory';
@@ -21,12 +22,13 @@ export function FishMonitorLibrary({study,ready=true,account,requestWorkspace,cl
  const library=study.monitorLibrary;
  const [recentSession,setRecentSession]=useState(false),[pageSize,setPageSize]=useState(RECENT_MONITOR_PAGE_SIZE);
  const [search,setSearch]=useState('');
+ const [checkedIndex,setCheckedIndex]=useState('');
  const [preferLocal,setPreferLocal]=useState(false);
  const usingLocalRecent=recentSession&&preferLocal&&ready&&!!library;
  const recent=useRecentMonitorDirectory(account,recentSession&&!usingLocalRecent),directory=recent.directory;
  const usingCloudRecent=recentSession&&!usingLocalRecent&&!!directory,usingRecent=usingLocalRecent||usingCloudRecent;
  const recentPending=recentSession&&!usingLocalRecent&&!!account&&!directory&&recent.loading;
- const changeOpen=useCallback((open:boolean)=>{setRecentSession(open);if(open){setPreferLocal(ready&&!!library);setPageSize(RECENT_MONITOR_PAGE_SIZE);setSearch('');}onOpenChange?.(open);},[onOpenChange,ready,library]);
+ const changeOpen=useCallback((open:boolean)=>{setRecentSession(open);if(open){setPreferLocal(ready&&!!library);setCheckedIndex('');setPageSize(RECENT_MONITOR_PAGE_SIZE);setSearch('');}onOpenChange?.(open);},[onOpenChange,ready,library]);
  const recentItems=useMemo<FishDirectoryItem[]>(()=>!directory?[]:directory.entries.filter(entry=>!directory.edits?.[entry.id]?.hidden).map(entry=>{
   const read=(signal?:AbortSignal)=>readRecentMonitorBody(directory,entry,signal);
   return {id:entry.id,at:entry.at,label:entry.templateDirectory.title+' · '+entry.label,summary:entry.summary,
@@ -83,9 +85,16 @@ export function FishMonitorLibrary({study,ready=true,account,requestWorkspace,cl
  const records=useMemo(()=>(library?.records??[]).filter(r=>settings.has(r.settingId)),[library?.records,settings]);
  const rounds=library?.rounds??[], archives=library?.archives??[];
  const visibleRecent=matching.length;
+ const partialIndex=usingCloudRecent&&directory.entries.length<directory.total
+   ? JSON.stringify([account,directory.sourceRevision,directory.entries.length]) : '';
+ const checkIndex=()=>{setCheckedIndex(partialIndex);recent.retry();};
  return <FishLibraryTimeDirectory trashAccount={{owner:account,scope:'monitor'}} cleanupDirectory={cleanupDirectory} browseRounds={!usingRecent} loading={recentPending||!usingRecent&&!ready&&!loadError} loadError={usingRecent||recentPending?undefined:loadError} onRetry={onRetry}
   notice={usingRecent?<><input type="search" aria-label="搜索监测目录" placeholder="搜索轮次、模板或日期…" value={search} onChange={event=>{setSearch(event.target.value);setPageSize(RECENT_MONITOR_PAGE_SIZE);}} className="rounded border bg-background px-2 py-1 text-xs"/><p role="status" className="text-xs text-muted-foreground">目录按时间倒序排列，展开时读取该项正文。{!ready?(loadError?<>完整研究尚未恢复。{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试完整研究</button>}</>:null):<button type="button" className="ml-2 underline" onClick={()=>setRecentSession(false)}>查看全部轮次</button>}{!ready&&!!directory!.olderMonitorRounds?<>另有 {directory!.olderMonitorRounds} 轮尚无独立目录。{requestWorkspace&&<button type="button" className="underline" onClick={()=>{setPreferLocal(true);requestWorkspace();}}>载入旧版完整研究</button>}</>:''}</p></>:recentSession&&recent.error?<p role="alert" className="text-xs text-muted-foreground">{recent.error} <button type="button" className="underline" onClick={recent.retry}>重试近期目录</button>{requestWorkspace&&<button type="button" className="ml-2 underline" onClick={()=>{setPreferLocal(true);requestWorkspace();}}>载入旧版完整研究</button>}</p>:undefined}
-  more={usingRecent&&(pageSize<visibleRecent||usingCloudRecent&&directory!.entries.length<directory!.total)?<button type="button" className="rounded border px-3 py-2 text-xs" disabled={usingCloudRecent&&recent.loading} onClick={()=>{setPageSize(n=>n+RECENT_MONITOR_PAGE_SIZE);if(usingCloudRecent&&pageSize>=visibleRecent)recent.retry();}}>{usingCloudRecent&&recent.loading?'正在读取更早记录…':'加载更早记录'}</button>:undefined}
+  more={usingRecent && (pageSize<visibleRecent
+    ? <FishScrollBoundary key={'rows-'+pageSize} onReach={()=>setPageSize(n=>n+RECENT_MONITOR_PAGE_SIZE)}/>
+    : partialIndex && (recent.loading ? <p role="status">正在读取更早目录…</p>
+      : checkedIndex!==partialIndex ? <FishScrollBoundary key={partialIndex} onReach={checkIndex}/>
+      : <p className="text-xs text-muted-foreground">{recent.error||'更早轮次的目录索引尚未就绪。'} <button type="button" className="underline" onClick={checkIndex}>刷新目录索引</button></p>))}
   loadingStatus={recentPending?<p role="status" className="text-xs text-muted-foreground">正在读取近期目录…</p>:<FishStudyRecoveryStatus owner={account}/>} renderTemplate={renderTemplate} name="监测库" prefix="monitor" kind={usingRecent?'time':'template'} openRequest={openRequest} picker={picker} onOpenChange={changeOpen} items={usingRecent?shownRecent:recentPending?EMPTY_MONITOR_DIRECTORY:getItems} edits={usingCloudRecent?directory?.edits:library?.directoryEdits} onSetHidden={ready&&!usingRecent?onSetHidden:undefined} onPurgeDirectory={picker||!ready||usingRecent?undefined:onPurgeDirectory} onRename={ready&&!usingRecent?onRename:undefined} onCopyStudy={ready?onCopyStudy:undefined} renderStudy={renderStudy} recordCount={ready?records.length:0} download={()=>downloadMonitorRecords(records,settings)} transferMenu={!picker?(ready?actions=><FishStoredLibraryTransferMenu scope="monitor" actions={actions}/>:()=>null):undefined}
   description={usingRecent?`${search?'匹配':'共'} ${visibleRecent} 项目录 · 已显示 ${shownRecent.length} 项`:`${library?.records.length??0} 条记录 · ${rounds.filter(r=>!r.legacy).length} 轮监测 · ${archives.length} 份完整归档${rounds.some(r=>r.legacy)?' · 含历史快照':''}`}
   info={<><p>模板下的监测轮次和归档按时间排列，保留每份运行的条件和结果。目录菜单可编辑名称、删除并恢复目录，保存后保留原时间和全部内容。</p><p>展开目录后可选择记录导入组合表，原归档保留。</p><p>早期轮次只展示仍保存的记录和条件，不补造缺失读数。完整下载、导入及导出保留。</p></>}

@@ -12,7 +12,6 @@ import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 
 export const fishSourceButton = 'inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40';
 const field = 'h-7 min-w-36 rounded-md border border-border bg-background px-2 text-xs';
-const pageSize = 60;
 
 type ImportRows = (snapshot: FishQualityStudy, ids: readonly string[]) => boolean;
 
@@ -32,7 +31,7 @@ function compareValues(a:string|number|null, b:string|number|null, direction:Sor
 export function FishWorkspaceRows({snapshot,onImport,onDone,mining}:{
   snapshot: FishQualityStudy; onImport?: ImportRows; onDone?: () => void; mining?:MiningDirectoryEvidence;
 }) {
-  const [query,setQuery] = useState(''), [page,setPage] = useState(0);
+  const [query,setQuery] = useState('');
   const [selected,setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [error,setError] = useState('');
   const [sort,setSort] = useState<{column:SortColumn;direction:SortDirection}>({column:'signalTime',direction:'descending'});
@@ -58,8 +57,6 @@ export function FishWorkspaceRows({snapshot,onImport,onDone,mining}:{
       ?compareValues(Number(sortSelection?.has(a.id)),Number(sortSelection?.has(b.id)),direction)
       :compareValues(a[column],b[column],direction));
   },[found,sort,sortSelection]);
-  const lastPage = Math.max(0,Math.ceil(found.length/pageSize)-1);
-  const currentPage = Math.min(page,lastPage);
   const eligibleSelected = useMemo(() => rows.filter(row => selected.has(row.id)).map(row => row.id), [rows, selected]);
   const checked = !!found.length && found.every(row => selected.has(row.id));
   function header(column:SortColumn){
@@ -70,7 +67,7 @@ export function FishWorkspaceRows({snapshot,onImport,onDone,mining}:{
       {mining?<button type="button" className="inline-flex items-center gap-1 hover:text-primary" aria-label={'按'+label+'排序'}
         title={column==='percentile'?percentileHelp:column==='reading'?'同系列有多项命中时，按最大已知读数排序':'按'+label+'排序'} onClick={()=>{
           setSort(prior=>({column,direction:prior.column===column?(prior.direction==='ascending'?'descending':'ascending'):
-            column==='symbol'||column==='market'?'ascending':'descending'}));setPage(0);
+            column==='symbol'||column==='market'?'ascending':'descending'}));
         }}>{label}<Icon aria-hidden="true" className={'h-3 w-3 '+(active?'text-primary':'text-muted-foreground')}/></button>:label}
     </th>;
   }
@@ -97,7 +94,7 @@ export function FishWorkspaceRows({snapshot,onImport,onDone,mining}:{
   const empty=<p className="py-3 text-muted-foreground">{onImport?'没有可导入的记录。':'没有匹配的记录。'}</p>;
   return <div className="space-y-2 text-[11px]" data-testid="quality-workspace-source-rows">
     <div className="flex flex-wrap items-center gap-2">
-      <input aria-label="搜索来源标的" className={field} placeholder="搜索标的" value={query} onChange={e => {setQuery(e.target.value);setPage(0);}}/>
+      <input aria-label="搜索来源标的" className={field} placeholder="搜索标的" value={query} onChange={e => setQuery(e.target.value)}/>
       {onImport && <><label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={checked} disabled={!found.length} onChange={e=>toggle(found.map(row=>row.id),e.target.checked)}/>全选搜索结果</label>
       <span className="text-muted-foreground">已选 {eligibleSelected.length} 条</span>
       <button type="button" className={fishSourceButton+' ml-auto text-primary'} disabled={!eligibleSelected.length} onClick={()=>{
@@ -106,20 +103,11 @@ export function FishWorkspaceRows({snapshot,onImport,onDone,mining}:{
       }}><Download aria-hidden className="h-3 w-3"/>导入组合表</button></>}
     </div>
     {error && <p role="alert" className="text-destructive">{error}</p>}
-    {mining ? <FishContinuousTable items={sorted} getKey={rowKey} row={renderRow} header={headings}
-      columns={onImport?7:6} resetKey={JSON.stringify([family,query,sort.column,sort.direction])}
-      label="捕捞明细" testId="mining-directory-table" estimate={28} empty={empty}
-      className="max-h-[50dvh] rounded-md border border-border/60" tableClassName="whitespace-nowrap text-left" headClassName="bg-card"/>
-    : sorted.length ? <div className="max-h-64 overflow-auto rounded-md border border-border/60">
-      <table className="w-full text-left"><thead className="sticky top-0 bg-card">{headings}</thead><tbody>
-        {sorted.slice(currentPage*pageSize,(currentPage+1)*pageSize).map(renderRow)}
-      </tbody></table>
-    </div> : empty}
-    {!mining&&lastPage > 0 && <div className="flex items-center justify-end gap-2">
-      <button type="button" className={fishSourceButton} disabled={currentPage===0} onClick={()=>setPage(currentPage-1)}>上一页</button>
-      <span className="text-muted-foreground">{currentPage+1} / {lastPage+1}</span>
-      <button type="button" className={fishSourceButton} disabled={currentPage===lastPage} onClick={()=>setPage(currentPage+1)}>下一页</button>
-    </div>}
+    <FishContinuousTable items={sorted} getKey={rowKey} row={renderRow} header={headings}
+      columns={(mining?6:4)+(onImport?1:0)} resetKey={JSON.stringify([family,query,sort.column,sort.direction])}
+      label={mining?'捕捞明细':'归档来源明细'} testId={mining?'mining-directory-table':'workspace-directory-table'}
+      estimate={28} empty={empty} className={`rounded-md border border-border/60 ${mining?'max-h-[50dvh]':'max-h-64'}`}
+      tableClassName="whitespace-nowrap text-left" headClassName="bg-card"/>
   </div>;
 }
 
