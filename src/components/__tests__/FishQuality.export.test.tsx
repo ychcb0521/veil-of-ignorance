@@ -1,7 +1,7 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {FishQuality} from '../FishQuality';
-import {importQualityLibrary,newQualityStudy,qualityDisplayRows} from '@/lib/fish/quality';
+import {importQualityLibrary,newQualityStudy,qualityDisplayRows,qualityComparisonRows,qualityResultKey} from '@/lib/fish/quality';
 import type {FishQualityState} from '@/hooks/useFishQuality';
 import {enableQualityComparison} from '@/lib/fish/qualityComparison';
 import type {XlsxSheet} from '@/lib/xlsxWorkbook';
@@ -34,6 +34,21 @@ it('uses bounded batches without changing the virtual table or exporting uncheck
  const live=screen.getByTestId('quality-fish-table'),before=within(live).getAllByTestId('quality-fish-row').length;live.scrollLeft=77;
  fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));expect(within(screen.getByTestId('quality-export-batch')).getAllByTestId('quality-fish-row')).toHaveLength(40);
  expect(within(live).getAllByTestId('quality-fish-row')).toHaveLength(before);await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(1),{timeout:10000});expect(capture.download.mock.calls[0][0].rows).toHaveLength(125);expect(live.scrollLeft).toBe(77);
+});
+
+it('exports mirror duration between mirror reduction and holding duration using the displayed frozen fill', async () => {
+ const s=state(2),plan=s.study.sellPlans![0],sample=qualityComparisonRows(s.study).find(row=>row.source.symbol==='COIN000USDT')!;
+ s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);
+ s.study.results=[{key:qualityResultKey(sample,plan,0),sampleId:sample.id,groupId:plan.id,evaluatedAt:T+7200000,status:'closed',entryTime:T,entryPrice:100,endTime:T+7200000,endPrice:110,heldHours:2,mirrorFill:{at:T+1800000,price:105,fraction:.5,gainPct:5,atOpen:false}}];
+ const before=JSON.stringify(s.study);
+ render(<FishQuality state={s}/>);
+ fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));
+ await waitFor(()=>expect(capture.download).toHaveBeenCalledOnce());
+ const sheet=capture.download.mock.calls[0][0] as XlsxSheet,headers=sheet.columns.map(column=>column.header),index=headers.indexOf('镜像时间');
+ expect(headers[index-1]).toBe('镜像平衡减仓');expect(headers[index+1]).toBe('持仓时间');
+ const row=sheet.rows.find(row=>row[1]==='COIN000USDT')!;
+ expect(row[index]).toBe('30 分钟');expect(sheet.rows.every(row=>row.length===headers.length)).toBe(true);
+ expect(JSON.stringify(s.study)).toBe(before);expect(capture.restore).not.toHaveBeenCalled();
 });
 it('does not export selected rows outside the current table filter',async()=>{
  const s=state(5);s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);render(<FishQuality state={s}/>);

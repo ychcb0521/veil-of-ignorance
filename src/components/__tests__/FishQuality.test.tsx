@@ -712,7 +712,8 @@ it('edits standalone filters without masking sell outcomes, with sortable holdin
   expect(headers[peak + 2]).toMatch(/^镜像平衡减仓/);
   // 2026-11-01 半仓镜像后重复的「加仓次数」列已删（卖出列里已有）
   // 2026-11-02 持仓监测里的「探测标签」已删（买前过滤已有）
-  expect(headers[peak + 3]).toMatch(/^持仓时间/);
+  expect(headers[peak + 3]).toMatch(/^镜像时间/);
+  expect(headers[peak + 4]).toMatch(/^持仓时间/);
   expect(headers.some(h=>h.startsWith('动态最大回撤'))).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '按CDA-5mins 原始值持仓时间排序' }));
   const order = () => [...new Set(screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/[A-Z]{3}USDT/)![0]))];
@@ -919,7 +920,7 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 
 it('keeps the actual drawdown and removes the threshold column from the combination table and export', async () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', '14');
+  expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', '16');
   expect(screen.queryByRole('columnheader', { name: '限制静态最大回撤' })).not.toBeInTheDocument();
   expect(screen.queryByTestId('quality-limited-drawdown')).not.toBeInTheDocument();
   const table = screen.getByTestId('quality-fish-table').querySelector('table')!;
@@ -1031,10 +1032,52 @@ it('shows executed mirror reductions after each peak column and sorts actual mir
  // 未启用镜像的方案也保留独立状态列，不能挤入探测标签。
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')).toHaveLength(2);
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')[1]).toHaveTextContent('未启用');
- expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 7));
+ expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 8));
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值镜像平衡减仓实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值镜像平衡减仓实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);
+});
+
+it('places mirror elapsed time immediately after mirror reduction, sorts it numerically, and leaves missing executions last', () => {
+ const s=state();s.study=importQualityLibrary(s.study,['FAST','LATE','ZERO','NONE','MISSING'].map(symbol=>({id:symbol,symbol,timeMs:T,timeLabel:'',fallbackZone:''})));
+ const plan=s.study.sellPlans![0];
+ for(const row of qualityComparisonRows(s.study).filter(row=>row.origin==='library')) {
+  const symbol=row.source.symbol,elapsed=symbol==='LATE'?7200000:symbol==='FAST'?600000:0;
+  s.study.results.push({key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T+10800000,status:'closed',entryTime:symbol==='MISSING'?undefined:T,entryPrice:100,endTime:T+10800000,endPrice:110,heldHours:3,
+   ...(symbol==='NONE'?{}:{mirrorFill:{at:T+elapsed,price:105,fraction:.5,gainPct:5,atOpen:false}})});
+ }
+ const before=JSON.stringify(s.study);
+ render(<FishQuality state={s}/>);
+ const row=(symbol:string)=>screen.getAllByTestId('quality-fish-row').find(row=>row.textContent?.includes(symbol))!;
+ const duration=(symbol:string)=>within(row(symbol)).getAllByTestId('quality-mirror-time')[0];
+ expect(duration('FAST')).toHaveTextContent('10 分钟');expect(duration('LATE')).toHaveTextContent('2.0 小时');
+ expect(duration('ZERO')).toHaveTextContent('0 秒');expect(duration('NONE')).toHaveTextContent('—');expect(duration('MISSING')).toHaveTextContent('—');
+ expect(within(row('FAST')).getAllByTestId('quality-half-mirror')[0].nextElementSibling).toBe(duration('FAST'));
+ expect(duration('FAST').nextElementSibling).toHaveAttribute('data-testid','quality-held-time');
+ const table=screen.getByTestId('quality-fish-table').querySelector('table')!;
+ expect(table.querySelectorAll('colgroup col')).toHaveLength(table.tHead!.rows[2].cells.length);
+ fireEvent.click(screen.getByRole('button',{name:`按${plan.label}镜像时间排序`}));
+ expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('LATE');
+ fireEvent.click(screen.getByRole('button',{name:`按${plan.label}镜像时间排序`}));
+ expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
+ const values=screen.getAllByTestId('quality-fish-row').map(row=>within(row).getAllByTestId('quality-mirror-time')[0].textContent);
+ expect(values.slice(0,3)).toEqual(['0 秒','10 分钟','2.0 小时']);expect(values.slice(3).every(value=>value==='—')).toBe(true);
+ fireEvent.click(screen.getByRole('button',{name:`展开${plan.label}卖后反事实`}));
+ expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan',String(s.study.sellPlans!.length*8+9));
+ expect(table.querySelectorAll('colgroup col')).toHaveLength(table.tHead!.rows[2].cells.length);
+ expect(JSON.stringify(s.study)).toBe(before);
+});
+
+it.each([true,false])('keeps merged mirror time consistent with all constituent buys, complete=%s', complete => {
+ const s=state(),first=s.study.samples[0],plan=s.study.sellPlans![0];
+ s.study.samples=[first,{...first,id:'later',enteredAt:first.enteredAt!+60000,groups:[s.study.groups[1].id],source:{...first.source,fish:s.study.samples[1].source.fish}}];
+ plan.rule={metric:plan.metric,direction:'<',threshold:.5};
+ s.study.results=qualityComparisonRows(s.study).map((row,i)=>({key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T+10800000,status:'closed',entryTime:T+i*60000,entryPrice:100,endTime:T+10800000,endPrice:110,
+  ...(complete||i===0?{mirrorFill:{at:T+i*60000+(i+1)*600000,price:105,fraction:.5,gainPct:5,atOpen:false}}:{})}));
+ s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);
+ render(<FishQuality state={s}/>);chooseSource('fish');
+ expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
+ expect(screen.getAllByTestId('quality-mirror-time')[0]).toHaveTextContent(complete?'10 分钟～20 分钟':'—');
 });
 
 it('places folded capture values after ratings, aligns each detector reading after expansion and sorts numerically without changing selection',()=>{

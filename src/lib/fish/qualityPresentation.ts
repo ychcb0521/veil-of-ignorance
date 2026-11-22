@@ -93,6 +93,23 @@ export function halfMirrorSummary(rule:QualityMirrorTakeProfit|undefined,result?
 }
 export const qualityHalfMirror = (plan:QualityGroup,result?:QualityResult)=>halfMirrorSummary(plan.mirrorTakeProfit,result);
 
+/** Elapsed time from the original entry to the saved mirror execution, in hours.
+ * Read frozen fills only; current settings, price peaks and later additions do not infer a fill. */
+export function qualityMirrorTimeHours(result?: QualityResult): number | null {
+ if (!result || !['open','closed'].includes(result.status)) return null;
+ const entry = result.entryTime, fill = result.mirrorFill;
+ if (entry == null || !Number.isFinite(entry) || entry <= 0 || !fill || !Number.isFinite(fill.at) || fill.at < entry
+   || !Number.isFinite(fill.fraction) || fill.fraction <= 0 || fill.fraction > 1) return null;
+ return (fill.at - entry) / 3_600_000;
+}
+export function qualityMirrorTimeText(hours: number | null | undefined): string {
+ if (hours == null || !Number.isFinite(hours) || hours < 0) return '—';
+ if (hours < 1 / 60) return `${+(hours * 3600).toFixed(1)} 秒`;
+ if (hours < 1) return `${+(hours * 60).toFixed(1)} 分钟`;
+ if (hours < 48) return `${hours.toFixed(1)} 小时`;
+ return `${(hours / 24).toFixed(1)} 天`;
+}
+
 export function campaignHalfMirror(campaign:Pick<TradeCampaign,'comparison'>):HalfMirrorSummary|undefined {
  const evidence=campaign.comparison?.instant ?? campaign.comparison?.sellEvidence,metrics=campaign.comparison?.holdingMetrics;
  return evidence?halfMirrorSummary(evidence.mirrorTakeProfit,metrics?{status:metrics.status,returnPct:metrics.returnPct??undefined,entryPrice:metrics.entryPrice,initialNotional:metrics.initialNotional,mirrorRealizedPnl:metrics.mirrorRealizedPnl,remainingPnl:metrics.remainingPnl,mirrorFill:evidence.mirrorFill,marginUsdt:campaign.comparison?.instant?.marginUsdt}:undefined):undefined;

@@ -34,8 +34,8 @@ it('uses identical frozen values in the table export and campaign, including leg
  const sheets=buildQualitySheets(study,[sample]),headers=sheets[0].columns.map(c=>c.header),row=sheets[0].rows[0];
  expect(row).toHaveLength(headers.length);
  expect(row[headers.indexOf(`${plan.label} · 峰值涨幅 %`)]).toBe(18);
- expect(row[headers.indexOf(`${plan.label} · 半仓镜像实际涨幅 %`)]).toBeCloseTo(5);
- expect(row[headers.indexOf(`${plan.label} · 半仓镜像状态`)]).toBe('已卖 50%');
+ expect(row[headers.indexOf(`${plan.label} · 镜像平衡减仓实际涨幅 %`)]).toBeCloseTo(5);
+ expect(row[headers.indexOf(`${plan.label} · 镜像平衡减仓状态`)]).toBe('已卖 50%');
  expect(headers.some(h=>h.includes('动态最大回撤'))).toBe(false);
  expect(campaignHalfMirror({comparison:undefined})).toBeUndefined();
 });
