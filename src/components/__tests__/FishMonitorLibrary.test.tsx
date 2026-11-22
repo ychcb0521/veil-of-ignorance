@@ -41,7 +41,7 @@ it('opens the time directory directly and removes both redundant views without a
 it('retains full-record export while the directory is the only visible view',()=>{
  const study=archived();render(<FishMonitorLibrary study={study}/>);fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
  expect(screen.queryByRole('button',{name:'导出监测库数据'})).toBeNull();
- fireEvent.keyDown(screen.getByRole('button',{name:'监测库导入导出'}),{key:'Enter'});
+ fireEvent.keyDown(screen.getByRole('button',{name:'监测库更多操作'}),{key:'Enter'});
  fireEvent.click(screen.getByRole('menuitem',{name:'导出库内记录（Excel）'}));
  expect(download).toHaveBeenCalledWith(study.monitorLibrary!.records,expect.any(Map));
 });
@@ -56,10 +56,10 @@ it('offers the existing copy callback for earlier record-only rounds too, using 
 });
 it('keeps an empty directory clear and disables export when no records exist',()=>{
  render(<FishMonitorLibrary study={newQualityStudy(T)}/>);fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
- expect(screen.getByText(/暂无监测归档/)).toBeInTheDocument();fireEvent.keyDown(screen.getByRole('button',{name:'监测库导入导出'}),{key:'Enter'});expect(screen.getByRole('menuitem',{name:'导出库内记录（Excel）'})).toHaveAttribute('aria-disabled','true');
+ expect(screen.getByText(/暂无监测归档/)).toBeInTheDocument();fireEvent.keyDown(screen.getByRole('button',{name:'监测库更多操作'}),{key:'Enter'});expect(screen.getByRole('menuitem',{name:'导出库内记录（Excel）'})).toHaveAttribute('aria-disabled','true');
 });
 it('reports export failure without clearing the saved directory',()=>{
  download.mockImplementation(()=>{throw Error('导出失败');});const study=archived();render(<FishMonitorLibrary study={study}/>);
- fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));fireEvent.keyDown(screen.getByRole('button',{name:'监测库导入导出'}),{key:'Enter'});fireEvent.click(screen.getByRole('menuitem',{name:'导出库内记录（Excel）'}));
- expect(screen.getByRole('alert')).toHaveTextContent('导出失败');expect(screen.getAllByTestId('monitor-template-group')).toHaveLength(2);
+ fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));fireEvent.keyDown(screen.getByRole('button',{name:'监测库更多操作'}),{key:'Enter'});fireEvent.click(screen.getByRole('menuitem',{name:'导出库内记录（Excel）'}));
+ expect(screen.getByRole('alert')).toHaveTextContent('导出失败');expect(screen.getAllByTestId('monitor-archive-item')).toHaveLength(2);
 });

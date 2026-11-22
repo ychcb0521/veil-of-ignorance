@@ -4,8 +4,10 @@ import {readBrowseCatalog,readBrowsePage,type BrowseCatalog,type BrowseRow,type 
 import {mergeLibraryDirectoryEdits,type LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {readScreenCatalog,readScreenPage,type LocalScreenCatalog} from '@/lib/fish/preEntryPersistence';
 
+import {DirectoryDeleteButton} from './FishDirectoryTrash';
+import type {DirectoryMarks,DirectoryRef} from '@/lib/fish/directoryTrash';
 type Directory = {local:LocalScreenCatalog} | {cloud:BrowseCatalog};
-type Props = {owner:string;scope:BrowseScope;query:string;edits?:LibraryDirectoryEdits};
+type Props = {owner:string;scope:BrowseScope;query:string;pendingVisibility?:boolean;edits?:LibraryDirectoryEdits;marks?:DirectoryMarks;onDelete?:(item:DirectoryRef)=>void};
 
 async function readDirectory(owner:string, scope:BrowseScope, signal:AbortSignal, historicalOnly:boolean, edits?:LibraryDirectoryEdits):Promise<Directory|undefined>{
   let emptyLocal:LocalScreenCatalog|undefined;
@@ -85,7 +87,7 @@ function RebuildHistoricalIndex({owner,onReady}:{owner:string;onReady:()=>void})
   return <div className="text-xs"><button type="button" className="underline" disabled={busy} onClick={()=>void rebuild()}>{busy?'正在核验 v5 归档并建立目录…':'从账号 v5 归档重建目录'}</button>{error&&<p role="alert">{error}</p>}</div>;
 }
 
-export function FishArchiveBrowse({owner,scope,query,edits}:Props){
+export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,pendingVisibility}:Props){
   const [historicalOnly,setHistoricalOnly]=useState(false);
   const [directory,setDirectory]=useState<Directory>(),[issue,setIssue]=useState(''),[attempt,setAttempt]=useState(0);
   const [selected,setSelected]=useState(''),[page,setPage]=useState(0);
@@ -105,13 +107,14 @@ export function FishArchiveBrowse({owner,scope,query,edits}:Props){
     const local='local' in directory?directory.local:undefined;
     const changes=mergeLibraryDirectoryEdits(local?.edits,edits);
     return ('cloud' in directory?directory.cloud.groups:directory.local.groups)
-      .filter(group=>!changes[group.id]?.hidden||scope==='mining')
+      .filter(group=>!marks?.has(group.id)&&(!changes[group.id]?.hidden||scope==='mining'))
       .map(group=>({...group,title:changes[group.id]?.name??group.title}))
       .sort((a,b)=>b.at-a.at||b.id.localeCompare(a.id));
-  },[edits,directory,scope]);
+  },[edits,directory,scope,marks]);
   const legacyIndex=scope==='screen'?<LegacyScreenIndex owner={owner} onReady={reload}/>:null;
   const switchSource=(historical:boolean)=>{setHistoricalOnly(historical);reload();};
   const backToLocal=historicalOnly&&<button type="button" className="underline" onClick={()=>switchSource(false)}>返回本机目录</button>;
+  if(pendingVisibility)return null;
   if(issue)return <><p role="alert" className="text-xs">{issue} <button type="button" className="underline" onClick={reload}>重新读取目录</button></p>{backToLocal||legacyIndex}{scope==='screen'&&<RebuildHistoricalIndex owner={owner} onReady={reload}/>}</>;
   if(!directory)return <p role="status" className="text-xs">正在读取目录…</p>;
   const historical='cloud' in directory&&scope==='screen';
@@ -121,9 +124,9 @@ export function FishArchiveBrowse({owner,scope,query,edits}:Props){
     {'local' in directory&&<button type="button" className="underline" onClick={()=>switchSource(true)}>查看 v5 历史目录</button>}
     {historical&&(backToLocal||legacyIndex)}
     {matching.map(item=><div key={item.id} className="rounded border">
-      <button type="button" aria-expanded={selected===item.id} className="flex w-full items-center justify-between gap-4 p-2 text-left" onClick={()=>{setSelected(selected===item.id?'':item.id);setPage(0);}}>
+      <div className="flex items-center"><button type="button" aria-expanded={selected===item.id} className="flex w-full items-center justify-between gap-4 p-2 text-left" onClick={()=>{setSelected(selected===item.id?'':item.id);setPage(0);}}>
         <span>{item.title} · {formatUTC8(item.at)}</span><span>{item.count} 条</span>
-      </button>
+      </button>{onDelete&&<DirectoryDeleteButton item={item} onChoose={onDelete}/>}</div>
       {selected===item.id&&<div className="border-t p-2">
         {item.pages[page]?<ArchivePage key={item.id+'-'+page} owner={owner} directory={directory} pageKey={item.pages[page]} reload={reload}/>:<p>{item.count?'该页尚未建立索引':'本轮没有记录'}</p>}
         {item.pages.length>1&&<div className="mt-2 flex items-center gap-3"><button type="button" disabled={!page} onClick={()=>setPage(n=>n-1)}>上一页</button><span>{page+1} / {item.pages.length}</span><button type="button" disabled={page+1>=item.pages.length} onClick={()=>setPage(n=>n+1)}>下一页</button></div>}

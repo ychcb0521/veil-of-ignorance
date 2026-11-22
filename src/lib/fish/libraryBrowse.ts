@@ -56,7 +56,11 @@ export async function readBrowseCatalog(owner:string,scope:BrowseScope,signal:Ab
   if(catalog&&!catalog.recent||!revisions)return catalog;
   const fullKey=fullBrowseKey(scope,revisions),recentKey=recentBrowseKey(scope,revisions);
   const next=await read(owner,scope,fullKey,signal,[recentKey]);
-  return validate(next.doc,next.rows)??validate(next.rows.get(recentKey)?.document,next.rows)??validate(catalog,next.rows);
+  const saved=validate(next.doc,next.rows)??validate(next.rows.get(recentKey)?.document,next.rows)??validate(catalog,next.rows);
+  if(saved||scope==='filter')return saved;
+  const {data,error}=await supabase.rpc('read_fish_catalog_after_purge' as never,{p_owner:owner,p_scope:scope} as never).abortSignal(signal);
+  if(error)throw Error('归档目录版本核验失败，请重试');
+  return validate(data,next.rows);
 }
 export async function readBrowsePage(catalog: BrowseCatalog, hash: string, signal: AbortSignal): Promise<BrowseRow[]> {
   if(!catalog.groups.some(group=>group.pages.includes(hash)))throw Error('该页不在当前目录内');

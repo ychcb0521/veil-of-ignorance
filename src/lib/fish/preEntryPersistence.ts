@@ -20,10 +20,38 @@ interface LocalScreenHeader extends LocalScreenCatalog {meta:string}
 
 function storeScreenIndex(store:IDBObjectStore,owner:string|undefined,library:PreEntryLibrary,meta:string){
   const prefix=browseKey(owner),snapshot=screenBrowse(library,{});
-  store.delete(IDBKeyRange.bound(prefix,prefix+'\uffff'));
-  const header:LocalScreenHeader={id:crypto.randomUUID(),groups:snapshot?.groups??[],edits:library.directoryEdits,meta};
-  store.put(header,prefix+'header');
-  for(const [key,rows] of Object.entries(snapshot?.pages??{}))store.put(rows,prefix+'page:'+key);
+  const retired=store.get('retired:'+prefix);
+  retired.onsuccess=()=>{
+    const ids=new Set<string>(retired.result??[]);
+    store.delete(IDBKeyRange.bound(prefix,prefix+'\uffff'));
+    const groups=(snapshot?.groups??[]).filter(group=>!ids.has(group.id));
+    const header:LocalScreenHeader={id:crypto.randomUUID(),groups,edits:library.directoryEdits,meta};
+    store.put(header,prefix+'header');
+    for(const group of groups)for(const key of group.pages)store.put(snapshot!.pages[key],prefix+'page:'+key);
+  };
+}
+
+/** Keep the raw screening ledger for trading; remove only its browse projection. */
+export async function retireScreenDirectory(owner:string,ids:readonly string[]){
+  if(!ids.length||typeof indexedDB==='undefined')return;
+  const db=await open();
+  try{await new Promise<void>((resolve,reject)=>{
+    const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),prefix=browseKey(owner);
+    const retired=store.get('retired:'+prefix),header=store.get(prefix+'header');
+    header.onsuccess=()=>{
+      const marks=new Set<string>(retired.result??[]);
+      for(const id of ids)marks.add(id);
+      if(marks.size!==(retired.result?.length??0))store.put([...marks],'retired:'+prefix);
+      const old=header.result as LocalScreenHeader|undefined;
+      if(!old)return;
+      const groups=old.groups.filter(group=>!marks.has(group.id));
+      if(groups.length===old.groups.length)return;
+      const shared=new Set(groups.flatMap(group=>group.pages));
+      for(const group of old.groups)if(marks.has(group.id))for(const key of group.pages)if(!shared.has(key))store.delete(prefix+'page:'+key);
+      store.put({...old,id:crypto.randomUUID(),groups},prefix+'header');
+    };
+    tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error??Error('本机目录删除失败'));
+  });}finally{db.close();}
 }
 
 /** Explicit compatibility action for accounts with a verified pre-index local snapshot. */

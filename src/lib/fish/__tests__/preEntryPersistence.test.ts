@@ -45,6 +45,20 @@ it('restores only requested open admissions, rejects an incomplete checkpoint an
   expect(await readAutomaticPreEntryCheckpoint('alice', 'new', true)).toBeUndefined();
 });
 
+it('removes only retired v6 browse pages and preserves raw records on index rebuild',async()=>{
+ const {retireScreenDirectory}=await import('../preEntryPersistence');
+ const lib=fixture();lib.records[0].status='matched';
+ await writePreEntrySnapshot('alice',lib);await cachePreEntryReadModel('alice',lib);
+ await writePreEntrySnapshot('bob',lib);await cachePreEntryReadModel('bob',lib);
+ const old=(await readScreenCatalog('alice'))!;
+ await retireScreenDirectory('alice',['r']);await retireScreenDirectory('alice',['r']);
+ expect((await readScreenCatalog('alice'))!.groups).toEqual([]);
+ await expect(readScreenPage('alice',old.id,old.groups[0].pages[0])).rejects.toThrow();
+ await indexExistingScreenSnapshot('alice');expect((await readScreenCatalog('alice'))!.groups).toEqual([]);
+ expect((await readPreEntrySnapshot('alice'))!.records[0].id).toBe(lib.records[0].id);
+ expect((await readScreenCatalog('bob'))!.groups).toHaveLength(1);
+});
+
 it('reads only the v6 directory and selected page, including display clears and revision changes',async()=>{
  const library=fixture();
  library.records[0].status='matched';

@@ -102,7 +102,9 @@ async function publish(owner:string,sourceRevision:string,study:FishQualityStudy
  const key=complete?fullMonitorDirectoryKey(sourceRevision):recentMonitorDirectoryKey(sourceRevision);
  const existing=(await readRows(owner,[key])).get(key);
  if(validRecentMonitorDirectory(existing,owner,sourceRevision)&&existing.entries.length===existing.total)return;
- const snapshots=recentMonitorSnapshots(study),entries:RecentMonitorEntry[]=[];
+ const {retiredDirectoryIds}=await import('./directoryTrash');
+ const retired=await retiredDirectoryIds(owner,'monitor',AbortSignal.timeout(15000));
+ const snapshots=recentMonitorSnapshots(study).filter(s=>!retired.has(s.entry.id)),entries:RecentMonitorEntry[]=[];
  const deletionsKey=recentMonitorDeletionsKey(sourceRevision);
  const {encoded}=await prepareAccountBlobEncoding({deletedSources:study.deletedSources,deletedReadings:study.deletedReadings,resolvedLegacySources:study.resolvedLegacySources});
  const deletionRow={user_id:owner,key:deletionsKey,value:{version:1,owner,sourceRevision,encoded}};

@@ -1,3 +1,4 @@
+import {retiredDirectoryIds} from './directoryTrash';
 import {supabase} from '@/integrations/supabase/client';
 import {readImmutableAccountBlobForVerification} from '../accountBlobSync';
 import {preEntryV5AccountBlob} from './preEntryMonitorV5Store';
@@ -22,8 +23,10 @@ export async function rebuildHistoricalScreenCatalog(owner:string,signal:AbortSi
    revisions['idb:pre-entry-monitor-v5']!==library.revision||
    revisions['idb:pre-entry-table-clears-v1']!==(marks.revision??''))throw Error('历史归档版本已更新，请重试');
  const snapshot=screenBrowse(library.value,marks.value??{},directory.edits)??{groups:[],pages:{}};
+ const retired=await retiredDirectoryIds(owner,'screen',signal);
  const groups:BrowseGroup[]=[];
  for(const group of snapshot.groups){
+   if(retired.has(group.id))continue;
    const pages:string[]=[];
    for(const page of group.pages){
      signal.throwIfAborted();

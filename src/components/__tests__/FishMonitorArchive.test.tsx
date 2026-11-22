@@ -19,6 +19,7 @@ it('opens one monitoring result table per template and keeps saved results from 
  const view=state(study);
  render(<FishQuality state={view}/>);
  fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
+ fireEvent.click(screen.getByRole('button',{name:'查看全部轮次'}));
  expect(screen.queryByRole('button',{name:'管理轮次与归档'})).not.toBeInTheDocument();
  expect(screen.queryByTestId('monitor-archive-item')).not.toBeInTheDocument();
  const group=screen.getAllByTestId('monitor-template-group')[0];
@@ -37,6 +38,7 @@ it('omits unmatched historical snapshots from the default list without removing 
  const study=monitorArchiveFixture(),before=structuredClone(study);
  render(<FishQuality state={state(study)}/>);
  fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
+ fireEvent.click(screen.getByRole('button',{name:'查看全部轮次'}));
  expect(screen.queryByTestId('monitor-template-group')).not.toBeInTheDocument();
  expect(screen.getByText('暂无与已保存模板对应的记录。')).toBeVisible();
  fireEvent.keyDown(screen.getByRole('button',{name:'监测库更多操作'}),{key:'Enter'});

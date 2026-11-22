@@ -175,7 +175,9 @@ export async function purgeLocalQualityArchives(owner: string | undefined, ids: 
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
       for (const id of ids) {
-        store.put(true,purgedKey(owner,id));
+        // Directory projections are content-addressed and may be legitimately
+        // shared by a future round. Only original archive IDs are terminal.
+        if(!/^recent-v1-[a-f0-9]{64}$/.test(id))store.put(true,purgedKey(owner,id));
         store.delete(bodyKey(owner,id));
       }
       tx.oncomplete = () => resolve();

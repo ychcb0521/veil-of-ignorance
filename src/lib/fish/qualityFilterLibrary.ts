@@ -8,6 +8,7 @@
  *   记录（record）  = 条件组 × 信号（交易所、市场、标的、信号时间、买入时刻），同一条件下同一信号合并为一条、保留最新判断；
  *   轮次（round）   = 这一轮判断了哪些记录（只存与上一轮的差异，见 libraryRounds）。
  */
+import {mergeFilterRemovals,pruneFilterDirectories,type FilterDirectoryRemoval} from './qualityFilterDeletion';
 import { shortFishHash } from './algorithm';
 import {qualityMonitoringSample} from './qualityAdmissionTime';
 import { activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, qualityFilterStatus, qualityRunSamples, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityFilterStatus, type QualitySample } from './quality';
@@ -30,7 +31,7 @@ export interface QualityFilterRoundSnapshot {
   signalMetrics?: QualitySignalMetric[]; signalReadings?: QualityFilterReading[];
 }
 export interface QualityFilterRound extends LibraryRound { filterSnapshot?:QualityFilterRoundSnapshot }
-export interface QualityFilterLibrary { version: 1; settings: QualityFilterSetting[]; records: QualityFilterRecord[]; rounds: QualityFilterRound[] }
+export interface QualityFilterLibrary { removals?:FilterDirectoryRemoval; version: 1; settings: QualityFilterSetting[]; records: QualityFilterRecord[]; rounds: QualityFilterRound[] }
 interface FilterTask { id: string; setting: QualityFilterSetting; sample: QualitySample }
 export interface QualityFilterCapture {
   roundId: string; tasks: FilterTask[]; readings: Map<string, QualityFilterReading>;
@@ -109,10 +110,11 @@ export function recoverQualityFilterRounds(study: FishQualityStudy, at = Date.no
 /** 只增不减：旧标签页或只写修复的保存不能抹掉过滤库。 */
 export function preserveQualityFilterLibrary(saved: FishQualityStudy | undefined, incoming: FishQualityStudy): FishQualityStudy {
   const a = saved?.filterLibrary, b = incoming.filterLibrary;
-  if (!a) return incoming;
-  if (!b) return { ...incoming, filterLibrary: a };
+  if (!a) return b?.removals ? {...incoming,filterLibrary:pruneFilterDirectories(b)} : incoming;
+  if (!b) return { ...incoming, filterLibrary: pruneFilterDirectories(a) };
   const settings = new Map(a.settings.map(s => [s.id, s]));
   for (const s of b.settings) { const old = settings.get(s.id); settings.set(s.id, old ? { ...s, plans: [...new Set([...old.plans, ...s.plans])] } : s); }
   const snapshots=new Map<string,QualityFilterRoundSnapshot>();for(const round of [...a.rounds,...b.rounds]){const s=round.filterSnapshot;if(s&&s.at>=(snapshots.get(round.id)?.at??-1))snapshots.set(round.id,s);}
-  return { ...incoming, filterLibrary: { ...a,...b,version: 1, settings: [...settings.values()], records: mergeLibraryRecords(a.records, b.records), rounds: mergeLibraryRounds(a.rounds, b.rounds).map(r=>snapshots.has(r.id)?{...r,filterSnapshot:snapshots.get(r.id)}:r) } };
+  const removals=mergeFilterRemovals(a.removals,b.removals);
+  return { ...incoming, filterLibrary: pruneFilterDirectories({ ...a,...b,...(removals?{removals}:{}),version: 1, settings: [...settings.values()], records: mergeLibraryRecords(a.records, b.records), rounds: mergeLibraryRounds(a.rounds, b.rounds).map(r=>snapshots.has(r.id)?{...r,filterSnapshot:snapshots.get(r.id)}:r) }) };
 }

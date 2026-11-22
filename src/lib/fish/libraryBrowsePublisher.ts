@@ -1,3 +1,4 @@
+import {retiredDirectoryIds} from './directoryTrash';
 import {supabase} from '@/integrations/supabase/client';
 import {syncedImmutableAccountBlobRevision} from '../accountBlobSync';
 import {runAccountSyncRequest} from '../accountSyncTransport';
@@ -36,11 +37,13 @@ async function publish(owner:string,scope:BrowseScope,revision:string,source:(re
    const main=scope==='filter'?'fish-quality':'fish-mining-library';
    const receipt=scope==='mining'?'fish-mining-library-pages-v1':main;
    if(revisions['idb:'+main]!==revision||await syncedImmutableAccountBlobRevision(receipt,owner)!==revision)return;
+   const retired=await retiredDirectoryIds(owner,scope,AbortSignal.timeout(15000));
    const input=await source(revisions);
    if(!input)return;
    const groups:BrowseGroup[]=[];
    // Publish immutable pages first. Losing the network cannot expose a partial catalog.
    for(const {rows,...group} of input.sort((a,b)=>b.at-a.at)){
+     if(retired.has(group.id))continue;
      const pages:string[]=[];
      rows.sort(byTime);
      for(let start=0;start<rows.length;start+=350){
