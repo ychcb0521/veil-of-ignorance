@@ -734,8 +734,10 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     lossReviewRules.forEach(validateHoldingVeto);
     const started=sample.binanceEntry?sample.source.timeMs:sample.enteredAt;
     const reviewObservedFrom=Math.max(sample.enteredAt,sample.importedAt,previous?.instantMonitorSwitches?.at(-1)?.effectiveAt??0);
+    let reviewPriceSource:readonly ResearchBar[]|undefined,reviewPriceIndex:Map<number,number>|undefined;
     const readReviewPrice=async(at:number,known:readonly ResearchBar[]=[])=>{
-      const saved=known.find(b=>b.openTime===at-QUALITY_MINUTE);if(saved)return saved.close;
+      if(known!==reviewPriceSource){reviewPriceSource=known;reviewPriceIndex=new Map(known.map(b=>[b.openTime,b.close]));}
+      const saved=reviewPriceIndex!.get(at-QUALITY_MINUTE);if(saved!==undefined)return saved;
       const bars=await load(row,at-QUALITY_MINUTE,at,pp,signal);validateFishBars(bars,at,1,QUALITY_MINUTE);return bars[0].close;
     };
     const lossTrigger=(rule:QualityHoldingVeto,check:MirrorLossReviewCheck,at:number):QualityTrigger=>({at,barOpenTime:at,atOpen:true,reading:check.pnl,

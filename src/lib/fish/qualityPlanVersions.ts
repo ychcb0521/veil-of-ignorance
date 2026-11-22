@@ -166,7 +166,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   const lossReviews=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(v=>v.kind===MIRROR_LOSS_REVIEW_KIND);
   lossReviews.forEach(validateHoldingVeto);
   if(lossReviews.length)add('hard-stop-mirror-loss-review','硬性终止','未镜像且亏损定时终止',[...new Set(lossReviews.map(v=>v.mirrorDeadlineVersion))].sort().join(' · ')+' · 参数 #'+shortFishHash(JSON.stringify(holdingVetoIdentity(lossReviews))),
-    lossReviews.some(v=>v.mirrorLossThreshold)?'从首次建仓计时，每 0.5 小时检查至 12 小时。仅未实际镜像且整笔亏损达到所设门槛时全余仓市价退出；亏损百分比以累计投入金额为分母，金额单位为 USDT；门槛为 0 时仅实际亏损触发，持平继续观察。单位、数值和执行版本独立冻结。':'从首次建仓计时，默认 1 小时首次检查，此后每 0.5 小时检查至 12 小时。仅未实际镜像且整笔账面盈亏 < 0 时全余仓市价退出；盈利和持平继续观察，已镜像后停止本项，检查区间结束不强制清仓。旧限时版本保持原语义。');
+    lossReviews.some(v=>v.mirrorReviewSchedule)?'开始检查时间、判断间隔和亏损门槛独立冻结；按所设间隔检查至持仓 12 小时，仅未镜像且达到亏损门槛时全余仓市价平仓。百分比以累计投入金额为分母，旧金额条件保留 USDT 口径。':lossReviews.some(v=>v.mirrorLossThreshold)?'从首次建仓计时，每 0.5 小时检查至 12 小时。仅未实际镜像且整笔亏损达到所设门槛时全余仓市价退出；亏损百分比以累计投入金额为分母，金额单位为 USDT；门槛为 0 时仅实际亏损触发，持平继续观察。单位、数值和执行版本独立冻结。':'从首次建仓计时，默认 1 小时首次检查，此后每 0.5 小时检查至 12 小时。仅未实际镜像且整笔账面盈亏 < 0 时全余仓市价退出；盈利和持平继续观察，已镜像后停止本项，检查区间结束不强制清仓。旧限时版本保持原语义。');
   const deadlines=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(v=>v.kind===MIRROR_DEADLINE_KIND);
   deadlines.forEach(validateHoldingVeto);
   if(deadlines.length)add('hard-stop-mirror-deadline','硬性终止','限时未实现镜像平衡减仓',MIRROR_DEADLINE_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(holdingVetoIdentity(deadlines))),
