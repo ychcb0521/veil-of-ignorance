@@ -105,7 +105,7 @@ it('shows only the detectors that actually caught each signal, merges identical 
   const hold = new Set([fishCatchKey(ake), fishVisibleCatchKey(ake)]);
   render(<FishMiningLibrary account="u" holdKeys={() => hold}/>);
   fireEvent.click(screen.getByRole('button', { name: '打开捕捞库' }));
-  fireEvent.click(screen.getByRole('button', { name: '载入完整库并管理' }));await openFamily();
+  fireEvent.click(screen.getByText('旧归档与整库管理'));fireEvent.click(screen.getByRole('button', { name: '载入完整库并管理' }));await openFamily();
   const rows=await screen.findAllByTestId('mining-library-row');expect(rows).toHaveLength(1);
   const cells=within(rows[0]).getAllByRole('cell').map(c=>c.textContent);
   expect(cells[0]).toBe('AKEUSDT');expect(cells[3]).toContain('CBI-2');expect(cells[3]).toContain('avg_CBA_2');expect(cells[3]).not.toContain('avg_state_2');

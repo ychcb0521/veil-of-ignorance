@@ -1,9 +1,9 @@
-import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {FishLibraryTimeDirectory} from '../FishLibraryTimeDirectory';
 import {newQualityStudy} from '@/lib/fish/quality';
 import type {DirectoryMark,DirectoryScope} from '@/lib/fish/directoryTrash';
-import {changeDirectory,readDirectoryMarks} from '@/lib/fish/directoryTrash';
+import {cacheDirectoryMarks,changeDirectory,publishDirectoryChange,readDirectoryMarks} from '@/lib/fish/directoryTrash';
 import {readBrowseCatalog,readBrowsePage} from '@/lib/fish/libraryBrowse';
 
 vi.mock('@/lib/fish/directoryTrash',async original=>({
@@ -18,7 +18,7 @@ const groups=[{id:'one',title:'一轮',at:1000,count:176,pages:['a']},{id:'two',
 let marks:Map<string,DirectoryMark>;
 const body=vi.fn(()=>newQualityStudy()),load=vi.fn(),remove=vi.fn(async()=>true);
 beforeEach(()=>{
-  vi.resetAllMocks();marks=new Map();
+  vi.resetAllMocks();localStorage.clear();marks=new Map();
   body.mockImplementation(()=>newQualityStudy());remove.mockResolvedValue(true);
   vi.mocked(readDirectoryMarks).mockImplementation(async()=>new Map(marks));
   vi.mocked(readBrowseCatalog).mockImplementation(async(owner,scope)=>({version:1,owner,scope,revisions:{},groups}));
@@ -26,10 +26,10 @@ beforeEach(()=>{
   vi.mocked(changeDirectory).mockImplementation(async(account,scope,item,action,token)=>{
     expect(account).toBe(owner);
     expect(token).toBe(marks.get(item.id)?.token);
-    if(action==='restore'){marks.delete(item.id);return {state:'active'};}
+    if(action==='restore'){marks.delete(item.id);const result={state:'active' as const};publishDirectoryChange({owner:account,scope,item,result});return result;}
     const state=action==='begin'?'purging':action==='finish'?'purged':'trash';
     const mark={...item,state,token:action+item.id} as DirectoryMark;
-    marks.set(item.id,mark);return mark;
+    marks.set(item.id,mark);publishDirectoryChange({owner:account,scope,item,result:mark});return mark;
   });
 });
 afterEach(cleanup);
@@ -43,9 +43,14 @@ function directory(scope:DirectoryScope,ready=true,account=owner){
 async function click(name:string|RegExp){fireEvent.click(await screen.findByRole('button',{name}));}
 it.each(['mining','filter','screen','monitor'] as const)('%s deletes and restores from its cold directory and purges only a confirmed item',async scope=>{
   render(directory(scope));await click('打开'+names[scope]);
+  const entry=await screen.findByRole('button',{name:'已删除目录（0）'});
+  expect(entry).toHaveAttribute('title','已删除目录（0）');
+  expect(entry).toHaveTextContent(/^$/);
+  expect(entry.parentElement).toHaveClass('absolute','right-10');
   await click('删除目录 一轮');await click('取消');expect(changeDirectory).not.toHaveBeenCalled();
   await click('删除目录 一轮');await click('确认删除目录');
   await click('已删除目录（1）');await click('恢复目录');await screen.findByText('没有已删除的目录。');
+  expect(readDirectoryMarks).toHaveBeenCalledOnce();
   await click('返回目录');await click('删除目录 一轮');await click('确认删除目录');
   await click('已删除目录（1）');await click('彻底删除');await click('取消');
   expect(remove).not.toHaveBeenCalled();await click('彻底删除');await click('确认彻底删除');
@@ -73,13 +78,31 @@ it('waits for source verification, leaves a protected round recoverable and resu
   await click('继续彻底删除');await click('确认彻底删除');await screen.findByText('没有已删除的目录。');
   expect(marks.get('one')?.state).toBe('purged');expect(readBrowsePage).not.toHaveBeenCalled();
 });
-it('shows a retry on failed verification and discards the previous account’s trash on account change',async()=>{
+it('keeps browsing available on failed sync and isolates deletion state by account',async()=>{
   vi.mocked(readDirectoryMarks).mockRejectedValueOnce(Error('offline'));
-  const view=render(directory('monitor'));await click('打开监测库');await screen.findByText(/目录删除状态暂时无法核对/);
-  expect(body).not.toHaveBeenCalled();expect(screen.queryByRole('button',{name:'删除目录 一轮'})).toBeNull();
-  await click('重试');await click('删除目录 一轮');await click('确认删除目录');await click('已删除目录（1）');
+  const view=render(directory('monitor'));await click('打开监测库');await screen.findByRole('button',{name:'删除目录 一轮'});
+  expect(body).not.toHaveBeenCalled();await click('已删除目录');await screen.findByText(/删除状态暂时无法同步/);
+  await click('重试');await click('返回目录');await click('删除目录 一轮');await click('确认删除目录');await click('已删除目录（1）');
   marks.clear();const next='22222222-2222-4222-8222-222222222222';
   view.rerender(directory('monitor',true,next));
   await waitFor(()=>expect(screen.queryByRole('button',{name:'恢复目录'})).toBeNull());
   await screen.findByRole('button',{name:'已删除目录（0）'});
+});
+
+it('reopens the filter catalog from cache and ignores an earlier read after a deletion',async()=>{
+  cacheDirectoryMarks(owner,'filter',new Map(),Date.now()-120_000);
+  let finish!:(value:Map<string,DirectoryMark>)=>void;
+  vi.mocked(readDirectoryMarks).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  const first=render(directory('filter'));await click('打开过滤库');
+  await click('删除目录 一轮');await click('确认删除目录');
+  await waitFor(()=>expect(screen.queryByRole('button',{name:'删除目录 一轮'})).toBeNull());
+  await act(async()=>finish(new Map()));
+  expect(readDirectoryMarks).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('button',{name:'删除目录 一轮'})).toBeNull();
+  first.unmount();
+  vi.mocked(readDirectoryMarks).mockImplementationOnce(()=>new Promise(()=>{}));
+  render(directory('filter'));await click('打开过滤库');
+  await click(/二轮.*43 条/);await screen.findByText('合成信号');
+  expect(screen.queryByRole('button',{name:'删除目录 一轮'})).toBeNull();
+  expect(readBrowsePage).toHaveBeenCalledWith(expect.anything(),'b',expect.anything());
 });

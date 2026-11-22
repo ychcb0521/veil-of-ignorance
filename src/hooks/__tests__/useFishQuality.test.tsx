@@ -1,5 +1,6 @@
-import { act, cleanup, renderHook } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { FishWorkspaceSource } from '@/components/FishWorkspaceSource';
 import { useFishQuality } from '@/hooks/useFishQuality';
 import { newQualityStudy, importQualityFish, importQualityLibrary, qualityResultKey, qualityComparisonRows, qualityDisplayRows, qualityRunSamples, type QualityRunOptions } from '@/lib/fish/quality';
 import { definitionKey, BSS_DEF, STATE_DEF, FEATURES_KEY } from '@/lib/deepDig/features';
@@ -21,6 +22,52 @@ const chooseAndStart = (h: { result: { current: ReturnType<typeof useFishQuality
   act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
   act(() => { void h.result.current.start(); });
 };
+it('opens the three workspace sources before recovery and imports into the restored study', async () => {
+  const replay = { ...signal, id: 'replay', symbol: 'TURING:TEST' };
+  const { result, rerender } = renderHook(({ enabled }) =>
+    useFishQuality('cold-sources', [signal], async () => {}, [signal], [], enabled, [replay], true, false),
+    { initialProps: { enabled: false } });
+  await flush();
+  expect(storage.load).not.toHaveBeenCalled();
+  expect(result.current.ready).toBe(false);
+
+  const sources = result.current.workspace!.sources!;
+  const library = sources.library();
+  const row = qualityComparisonRows(library)[0];
+  expect(row.source.symbol).toBe(signal.symbol);
+  expect(qualityComparisonRows(sources.fish())[0].source.symbol).toBe(signal.symbol);
+  expect(qualityComparisonRows(sources.turing())[0].source.symbol).toBe(replay.symbol);
+  expect(result.current.workspace!.importRows(library, [row.id])).toBe(false);
+  expect(storage.save).not.toHaveBeenCalled();
+
+  rerender({ enabled: true });
+  await flush();
+  expect(result.current.ready).toBe(true);
+  act(() => expect(result.current.workspace!.importRows(library, [row.id])).toBe(true));
+  expect(qualityComparisonRows(result.current.study)).toEqual([expect.objectContaining({ source: expect.objectContaining({ symbol: signal.symbol }) })]);
+});
+
+it('keeps selected source records while the combination table loads', () => {
+  const snapshot = importQualityLibrary(newQualityStudy(T), [signal]);
+  const loadSnapshot = vi.fn(() => snapshot);
+  const loadWorkspace = vi.fn();
+  const onImport = vi.fn(() => true);
+  const view = render(<FishWorkspaceSource name="信号库" loadSnapshot={loadSnapshot} onImport={onImport}
+    prepareImport={{ label: '载入组合表', onClick: loadWorkspace }}/>);
+  expect(loadSnapshot).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '信号库' }));
+  const dialog = within(screen.getByRole('dialog', { name: '信号库' }));
+  fireEvent.click(dialog.getByRole('checkbox', { name: /选取 AAAUSDT/ }));
+  fireEvent.click(dialog.getByRole('button', { name: '载入组合表' }));
+  expect(loadWorkspace).toHaveBeenCalledOnce();
+  expect(onImport).not.toHaveBeenCalled();
+  view.rerender(<FishWorkspaceSource name="信号库" loadSnapshot={loadSnapshot} onImport={onImport}/>);
+  expect(dialog.getByRole('checkbox', { name: /选取 AAAUSDT/ })).toBeChecked();
+  fireEvent.click(dialog.getByRole('button', { name: '导入组合表' }));
+  expect(onImport).toHaveBeenCalledWith(snapshot, [qualityComparisonRows(snapshot)[0].id]);
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
 it('keeps generated readings in the workspace until explicitly saving a frozen filtering round', async () => {
   const { signalReadingKey } = await import('@/lib/fish/qualitySignalReadings');
   const { filterDirectoryStudy } = await import('@/lib/fish/qualityLibraryDirectory');

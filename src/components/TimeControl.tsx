@@ -234,7 +234,8 @@ export function TimeControl({
   entrySignalsRef.current = entrySignals;
   const [savedTuringSignals, setSavedTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_SIGNALS);
   const [workspaceRequested, setWorkspaceRequested] = useState(fishOpen);
-  const needsTuringArchive = (turing && signalLibOpen) || (fishOpen && workspaceRequested) || isTuringCupSymbol(activeSymbol ?? '');
+  const [workspaceTuringOpen, setWorkspaceTuringOpen] = useState(false);
+  const needsTuringArchive = (turing && signalLibOpen) || (fishOpen && workspaceTuringOpen) || isTuringCupSymbol(activeSymbol ?? '');
   const turingArchive = useTuringReplayArchive(user?.id, needsTuringArchive);
   const replaySamples = useMemo(() => turingArchive.archive ? turingReplaySamples(turingArchive.archive) : EMPTY_SIGNALS, [turingArchive.archive]);
   const replayIds = useMemo(() => new Set(replaySamples.map(signal => signal.id)), [replaySamples]);
@@ -247,7 +248,16 @@ export function TimeControl({
     return replaySamples.length ? mergeSignals(saved, replaySamples) : saved;
   }, [savedTuringSignals, replaySamples, replayIds]);
   const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs, workspaceRequested || (signalLibOpen && !entryPeriod), workspaceRequested);
-  const panelQuality = workspaceRequested ? fishQuality : { ...fishQuality, requestWorkspace: () => setWorkspaceRequested(true) };
+  const panelQuality = {
+    ...fishQuality,
+    ...(!workspaceRequested ? { requestWorkspace: () => setWorkspaceRequested(true) } : {}),
+    workspaceTuringSource: {
+      onOpenChange: setWorkspaceTuringOpen,
+      loading: turingArchive.loading,
+      error: turingArchive.error,
+      retry: turingArchive.retry,
+    },
+  };
   const instant = useScreenedInstantPositions();
   const openScreenedPositions = instant?.positions;
   const openBinanceCampaigns = instant?.usdtLive?.openCampaigns;
@@ -811,7 +821,7 @@ export function TimeControl({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <button type="button" aria-expanded={fishOpen} onClick={() => { collapseSignalLibrary(); if(!fishOpen)armQualityReturn(Date.now(),fishQuality.account); setFishOpen(o => !o); }}
+        <button type="button" aria-expanded={fishOpen} onClick={() => { collapseSignalLibrary(); if(!fishOpen)armQualityReturn(Date.now(),fishQuality.account); else setWorkspaceTuringOpen(false); setFishOpen(o => !o); }}
           className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${fishOpen ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'}`}>
           <Fish className="w-3 h-3" />渔
           <ChevronDown className={`w-3 h-3 transition-transform ${fishOpen ? 'rotate-180' : ''}`} />

@@ -9,7 +9,7 @@ import {FishScrollBoundary} from './FishScrollBoundary';
 import {DirectoryDeleteButton} from './FishDirectoryTrash';
 import type {DirectoryMarks,DirectoryRef} from '@/lib/fish/directoryTrash';
 type Directory = {local:LocalScreenCatalog} | {cloud:BrowseCatalog};
-type Props = {owner:string;scope:BrowseScope;query:string;pendingVisibility?:boolean;edits?:LibraryDirectoryEdits;marks?:DirectoryMarks;onDelete?:(item:DirectoryRef)=>void};
+type Props = {owner:string;scope:BrowseScope;query:string;edits?:LibraryDirectoryEdits;marks?:DirectoryMarks;onDelete?:(item:DirectoryRef)=>void;onSelectRecords?:(id:string)=>void;selectBeforeLoad?:boolean;legacySelection?:boolean};
 
 async function readDirectory(owner:string, scope:BrowseScope, signal:AbortSignal, historicalOnly:boolean, edits?:LibraryDirectoryEdits):Promise<Directory|undefined>{
   let emptyLocal:LocalScreenCatalog|undefined;
@@ -116,11 +116,12 @@ function RebuildHistoricalIndex({owner,onReady}:{owner:string;onReady:()=>void})
   return <div className="text-xs"><button type="button" className="underline" disabled={busy} onClick={()=>void rebuild()}>{busy?'正在核验 v5 归档并建立目录…':'从账号 v5 归档重建目录'}</button>{error&&<p role="alert">{error}</p>}</div>;
 }
 
-export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,pendingVisibility}:Props){
+export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSelectRecords,selectBeforeLoad,legacySelection}:Props){
   const [historicalOnly,setHistoricalOnly]=useState(false);
   const [directory,setDirectory]=useState<Directory>(),[issue,setIssue]=useState(''),[attempt,setAttempt]=useState(0);
   const [selected,setSelected]=useState('');
-  const reload=()=>{setDirectory(undefined);setIssue('');setSelected('');setAttempt(n=>n+1);};
+  const [opened,setOpened]=useState('');
+  const reload=()=>{setOpened('');setDirectory(undefined);setIssue('');setSelected('');setAttempt(n=>n+1);};
   useEffect(()=>{
     let active=true;
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
@@ -140,10 +141,10 @@ export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,pendin
       .map(group=>({...group,title:changes[group.id]?.name??group.title}))
       .sort((a,b)=>b.at-a.at||b.id.localeCompare(a.id));
   },[edits,directory,scope,marks]);
+  useEffect(()=>{if(selected&&marks?.has(selected))setSelected('');},[selected,marks]);
   const legacyIndex=scope==='screen'?<LegacyScreenIndex owner={owner} onReady={reload}/>:null;
   const switchSource=(historical:boolean)=>{setHistoricalOnly(historical);reload();};
   const backToLocal=historicalOnly&&<button type="button" className="underline" onClick={()=>switchSource(false)}>返回本机目录</button>;
-  if(pendingVisibility)return null;
   if(issue)return <><p role="alert" className="text-xs">{issue} <button type="button" className="underline" onClick={reload}>重新读取目录</button></p>{backToLocal||legacyIndex}{scope==='screen'&&<RebuildHistoricalIndex owner={owner} onReady={reload}/>}</>;
   if(!directory)return <p role="status" className="text-xs">正在读取目录…</p>;
   const historical='cloud' in directory&&scope==='screen';
@@ -153,11 +154,21 @@ export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,pendin
     {'local' in directory&&<button type="button" className="underline" onClick={()=>switchSource(true)}>查看 v5 历史目录</button>}
     {historical&&(backToLocal||legacyIndex)}
     {matching.map(item=><div key={item.id} className="rounded border">
-      <div className="flex items-center"><button type="button" aria-expanded={selected===item.id} className="flex w-full items-center justify-between gap-4 p-2 text-left" onClick={()=>setSelected(selected===item.id?'':item.id)}>
+      <div className="flex items-center"><button type="button" aria-expanded={selected===item.id} className="flex w-full items-center justify-between gap-4 p-2 text-left" onClick={()=>{setOpened('');setSelected(selected===item.id?'':item.id);}}>
         <span>{item.title} · {formatUTC8(item.at)}</span><span>{item.count} 条</span>
       </button>{onDelete&&<DirectoryDeleteButton item={item} onChoose={onDelete}/>}</div>
-      {selected===item.id&&<div className="border-t p-2">
-        {item.pages.length ? <ArchiveRecords key={JSON.stringify([owner,item.id,'local' in directory?directory.local.id:directory.cloud.revisions,item.pages])}
+      {selected===item.id&&<div className="space-y-2 border-t p-2">
+        {selectBeforeLoad&&opened!==item.id&&item.pages.length>0&&<button type="button" className="rounded-md border px-2 py-1 hover:bg-muted"
+          onClick={()=>setOpened(item.id)}>载入所选目录</button>}
+        {onSelectRecords&&item.count>0&&(legacySelection
+          ? <details><summary className="cursor-pointer text-muted-foreground">旧归档导入</summary>
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              <span>此索引只保存预览字段。导入原始记录需要恢复旧版完整档案。</span>
+              <button type="button" className="rounded-md border px-2 py-1 text-primary hover:bg-muted" onClick={()=>onSelectRecords(item.id)}>载入旧版完整档案并选取记录</button>
+            </div>
+          </details>
+          : <button type="button" className="rounded-md border px-2 py-1 text-primary hover:bg-muted" onClick={()=>onSelectRecords(item.id)}>选取本目录记录</button>)}
+        {item.pages.length ? (!selectBeforeLoad||opened===item.id)&&<ArchiveRecords key={JSON.stringify([owner,item.id,'local' in directory?directory.local.id:directory.cloud.revisions,item.pages])}
           owner={owner} directory={directory} pages={item.pages} reload={reload}/> : <p>{item.count?'该目录尚未建立记录索引':'本轮没有记录'}</p>}
       </div>}
     </div>)}

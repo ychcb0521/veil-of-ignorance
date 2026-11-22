@@ -84,15 +84,25 @@ function FishTemplateDirectoryTable({members,renderTemplate,close,importSelectio
   </>;
 }
 
+export function FishDirectorySearch({value,onChange,label,placeholder}:{
+  value:string;onChange:(value:string)=>void;label:string;placeholder:string;
+}){
+  return <div className="relative w-full min-w-0">
+    <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"/>
+    <input type="search" value={value} onChange={event=>onChange(event.target.value)} aria-label={label}
+      placeholder={placeholder} className="h-9 w-full rounded-md border border-border/60 bg-background pl-9 pr-3 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"/>
+  </div>;
+}
 export interface FishDirectoryRequest {key:number;selectedId?:string;selectedIds?:string[];importSelection?:boolean}
 export interface FishDirectoryPicker {
   triggerLabel: string;
   footer: (close: () => void) => ReactNode;
 }
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
-export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more,browseArchive,directoryStatus,trashAccount,cleanupDirectory}:{
+export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more,browseArchive,directoryStatus,trashAccount,cleanupDirectory,selectBeforeLoad=false,directorySearch}:{
   trashAccount?:{owner?:string;scope:DirectoryScope};cleanupDirectory?:DirectoryCleanup;
-  browseArchive?:{owner?:string;scope:BrowseScope;directoryOnly?:boolean;loadFull?:()=>void};
+  browseArchive?:{owner?:string;scope:BrowseScope;directoryOnly?:boolean;fullReady?:boolean;loadFull?:()=>void};
+  selectBeforeLoad?:boolean;directorySearch?:ReactNode;
   directoryStatus?:ReactNode;notice?:ReactNode;more?:ReactNode;browseRounds?:boolean;loadingStatus?:ReactNode;loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
   picker?:FishDirectoryPicker;
@@ -106,6 +116,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,study:FishQualityStudy,ids?:string[])=>Promise<boolean>;
 }){
   const [open,setOpen]=useState(false),[selectedId,setSelectedId]=useState(''),[showDeleted,setShowDeleted]=useState(false),[deleteId,setDeleteId]=useState(''),[busy,setBusy]=useState(''),[error,setError]=useState('');
+  const [bodyId,setBodyId]=useState('');
+  const [trashToolbar,setTrashToolbar]=useState<HTMLDivElement|null>(null);
   const trashScope=trashAccount?.scope??browseArchive?.scope??'filter';
   const possibleOwner=trashAccount?.owner??browseArchive?.owner;
   const trashOwner=directoryAccount(possibleOwner)?possibleOwner:undefined;
@@ -134,31 +146,39 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   useEffect(()=>()=>{selectionEpoch.current++;},[]);
   const [managementOwner,setManagementOwner]=useState<string>(),[catalogOwner,setCatalogOwner]=useState<string>();
   const directoryOnly = !!browseArchive?.owner && (browseArchive.directoryOnly || catalogOwner===browseArchive.owner) && managementOwner!==browseArchive.owner;
+  const confirmBodyLoad=selectBeforeLoad&&!picker&&!managementOwner;
   const items = useMemo(() => {
-    if(!open||directoryOnly||directoryStatus||trash.waiting||trashView)return NO_DIRECTORY_ITEMS;
+    if(!open||directoryOnly||directoryStatus||trashView)return NO_DIRECTORY_ITEMS;
     const all=typeof itemsSource==='function'?itemsSource():itemsSource;
     return trash.marks.size?all.filter(item=>!trash.marks.has(item.id)):all;
-  },[open,directoryOnly,directoryStatus,itemsSource,trash.waiting,trash.marks,trashView]);
+  },[open,directoryOnly,directoryStatus,itemsSource,trash.marks,trashView]);
   // Named rounds may share a template, or have no corresponding saved template at all.
-  const roundsView=canSwitchView&&(browseByRound??(browseArchive?.scope==='screen'||trashScope!=='monitor'&&items.some(item=>!edits?.[item.id]?.hidden&&
+  const searchAlgorithms=kind==='algorithm'&&selectBeforeLoad;
+  const roundsView=canSwitchView&&(browseByRound??(confirmBodyLoad||browseArchive?.scope==='screen'||trashScope!=='monitor'&&items.some(item=>!edits?.[item.id]?.hidden&&
     (!!edits?.[item.id]?.name||!item.templateGroup?.savedTemplate))));
   const templateView=kind==='template'&&!!renderTemplate&&!picker&&!manage&&!purgeMode&&!showDeleted&&!roundsView;
   const selected=items.find(item=>item.id===selectedId&&(showDeleted||!edits?.[item.id]?.hidden)),itemRef=useRef(selected);itemRef.current=selected;
   const openCallback=useRef(onOpenChange);openCallback.current=onOpenChange;const requestRef=useRef(openRequest);requestRef.current=openRequest;
-  useEffect(()=>{const request=requestRef.current;if(request){selectionEpoch.current++;setCatalogOwner(browseArchive?.directoryOnly?browseArchive.owner:undefined);setOpen(true);setImportSelection(!!request.importSelection);if(request.selectedId||request.selectedIds!==undefined)setManage(true);setSelectedId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
+  useEffect(()=>{const request=requestRef.current;if(request){selectionEpoch.current++;setCatalogOwner(browseArchive?.directoryOnly?browseArchive.owner:undefined);setOpen(true);setImportSelection(!!request.importSelection);if(request.importSelection)setBrowseByRound(true);if(request.selectedId||request.selectedIds!==undefined)setManage(true);setSelectedId(request.selectedId??'');setBodyId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
   useEffect(()=>{
     const item=itemRef.current;
-    if(!open||!selectedId||!item){setLoaded(undefined);return;}
+    if(!open||!selectedId||!item||(confirmBodyLoad&&bodyId!==selectedId)){setLoaded(undefined);return;}
     const controller=new AbortController();
     let active=true;setLoaded({id:item.id});
     try{
-      const result=item.study(controller.signal);
+      const read=confirmBodyLoad ? item.preview??item.study : item.study;
+      const result=read(controller.signal);
       if(result instanceof Promise)void result.then(study=>{if(active)setLoaded({id:item.id,study});},e=>{if(active)setLoaded({id:item.id,error:e instanceof Error?e.message:'归档读取失败，请重试'});});
       else setLoaded({id:item.id,study:result});
     }catch(e){setLoaded({id:item.id,error:e instanceof Error?e.message:'归档读取失败，请重试'});}
     return()=>{active=false;controller.abort();};
-  },[open,selectedId,selected?.id,selected?.revision,loadAttempt]);
-  const currentLoad=loaded?.id===selectedId?loaded:undefined;
+  },[open,selectedId,selected?.id,selected?.revision,loadAttempt,bodyId,confirmBodyLoad]);
+  const selectArchiveRecords=(id:string)=>{
+    if(!browseArchive?.owner||!browseArchive.loadFull)return;
+    setTemplateQuery('');setBrowseByRound(true);setSelectedId(id);setBodyId(id);
+    setManagementOwner(browseArchive.owner);if(!browseArchive.fullReady)browseArchive.loadFull();
+  };
+  const currentLoad=loaded?.id===selectedId&&(!confirmBodyLoad||bodyId===selectedId)?loaded:undefined;
   const snapshot=currentLoad?.study;
   const archiveError=currentLoad?.error;
   const query=normalizeTemplateQuery(templateQuery);
@@ -166,12 +186,12 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
     const hidden=!!edits?.[item.id]?.hidden;
     const group=item.templateGroup;
     if(templateView&&!group?.savedTemplate)return false;
-    if(roundsView&&query){
+    if((roundsView||searchAlgorithms)&&query){
       const fields=[item.id,edits?.[item.id]?.name,item.label,formatUTC8(item.at),group?.title,group?.originalTitle];
       if(!fields.some(field=>field&&normalizeTemplateQuery(field).includes(query)))return false;
     }
     return compactDirectory ? hidden===showDeleted : showDeleted||!hidden;
-  }).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id)),[items,showDeleted,edits,kind,compactDirectory,templateView,roundsView,query]);
+  }).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id)),[items,showDeleted,edits,kind,compactDirectory,templateView,roundsView,searchAlgorithms,query]);
   const deleted=items.filter(item=>edits?.[item.id]?.hidden).length,action=libraryDirectoryAction,noun=name.slice(0,-1)+'归档';
   const selectable=visible.filter(item=>purgeMode ? item.purgeable : !edits?.[item.id]?.hidden);
   const checkedSet=new Set(checkedIds),checked=selectable.filter(item=>checkedSet.has(item.id));
@@ -239,7 +259,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const changeOpen=(value:boolean)=>{
     if(!value&&busy==='purge')return;
     selectionEpoch.current++;setCatalogOwner(value&&browseArchive?.directoryOnly?browseArchive.owner:undefined);setOpen(value);onOpenChange?.(value);
-    if(!value){setManagementOwner(undefined);setBrowseByRound(undefined);setTemplateQuery('');setImportSelection(false);setShowDeleted(false);setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
+    if(!value){setBodyId('');setManagementOwner(undefined);setBrowseByRound(undefined);setTemplateQuery('');setImportSelection(false);setShowDeleted(false);setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
   };
   const canExport=!!recordCount&&!busy&&!loading&&!loadError&&!selectedExport?.busy;
   const handleExport=()=>{
@@ -275,7 +295,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
     id:item.id, name:formatUTC8(item.at)+' '+(edits?.[item.id]?.name||item.label), load:item.settings,
   }] : [];
   const renderItem = (item: FishDirectoryItem) => <div key={item.id} className={'group/archive rounded-lg border border-border/60 '+(edits?.[item.id]?.hidden?'opacity-60':'')} data-testid={prefix+'-archive-item'}>
-          <div className="flex items-center">{(onSelectDirectory||purgeMode)&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||confirmPurge||(purgeMode ? !item.purgeable : !!edits?.[item.id]?.hidden)} checked={checkedSet.has(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={selectedId===item.id} onClick={()=>setSelectedId(selectedId===item.id?'':item.id)}><ChevronDown className={'h-3 w-3 '+(selectedId===item.id?'rotate-180':'')}/>{kind!=='algorithm'&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span>{roundsView&&browseArchive?.scope==='screen'&&item.templateGroup&&<span>{item.templateGroup.title}</span>}<span className="text-muted-foreground">{item.summary}</span></button>
+          <div className="flex items-center">{(onSelectDirectory||purgeMode)&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||confirmPurge||(purgeMode ? !item.purgeable : !!edits?.[item.id]?.hidden)} checked={checkedSet.has(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={selectedId===item.id} onClick={()=>{setBodyId('');setSelectedId(selectedId===item.id?'':item.id);}}><ChevronDown className={'h-3 w-3 '+(selectedId===item.id?'rotate-180':'')}/>{kind!=='algorithm'&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span>{roundsView&&browseArchive?.scope==='screen'&&item.templateGroup&&<span>{item.templateGroup.title}</span>}<span className="text-muted-foreground">{item.summary}</span></button>
             {trashOwner&&!picker&&!edits?.[item.id]?.hidden&&<DirectoryDeleteButton item={{id:item.id,at:item.at,title:edits?.[item.id]?.name||item.label}} onChoose={setTrashSelection}/>}
             {item.settings&&<FishDirectorySettingsButton name={settingsEntry(item)[0].name} entries={settingsEntry(item)} disabled={!!busy}/>}
             {(onSetHidden||onRename||onDeleteRecords)&&<DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={'管理'+noun+' '+item.id} disabled={loading||!!loadError||!!busy} className="mr-2 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted group-hover/archive:opacity-100 group-focus-within/archive:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"><MoreHorizontal className="h-3.5 w-3.5"/></button></DropdownMenuTrigger><DropdownMenuContent align="end">{onRename&&<DropdownMenuItem onSelect={()=>{setEditingId(item.id);setDraftName(edits?.[item.id]?.name??'');setDeleteId('');setError('');}}><Pencil className="mr-2 h-3 w-3"/>编辑名称</DropdownMenuItem>}{onDeleteRecords&&<DropdownMenuItem className="text-destructive" onSelect={()=>onDeleteRecords(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录记录</DropdownMenuItem>}{onSetHidden&&(!trashOwner||edits?.[item.id]?.hidden)&&(edits?.[item.id]?.hidden?<DropdownMenuItem onSelect={()=>void hide(item.id,false)}><Undo2 className="mr-2 h-3 w-3"/>恢复目录</DropdownMenuItem>:<DropdownMenuItem className="text-destructive" onSelect={()=>setDeleteId(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
@@ -286,7 +306,10 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             <p className="w-full text-muted-foreground">留空保存可恢复默认名称；原保存时间和目录内容保留。</p>
           </form>}
           {deleteId===item.id&&<div role="alert" className="flex flex-wrap items-center gap-2 border-t px-3 py-2 text-[11px]"><span>删除这项目录？可在已删除目录中恢复。</span><button type="button" disabled={loading||!!loadError||!!busy} className={action+' text-destructive'} onClick={()=>void hide(item.id,true)}>确认删除目录</button><button type="button" className={action} onClick={()=>setDeleteId('')}>取消</button></div>}
-          {selectedId===item.id&&!snapshot&&<p role={archiveError?'alert':'status'} className={'border-t px-4 py-3 text-[10.5px] '+(archiveError?'text-destructive':'text-muted-foreground')}>{archiveError??'正在读取归档…'}{archiveError&&<button type="button" className="ml-2 underline" onClick={()=>setLoadAttempt(attempt=>attempt+1)}>重试读取归档</button>}</p>}
+          {selectedId===item.id&&confirmBodyLoad&&bodyId!==item.id&&<div className="border-t px-4 py-2">
+            <button type="button" className={action} onClick={()=>setBodyId(item.id)}>载入所选目录</button>
+          </div>}
+          {selectedId===item.id&&(!confirmBodyLoad||bodyId===item.id)&&!snapshot&&<p role={archiveError?'alert':'status'} className={'border-t px-4 py-3 text-[10.5px] '+(archiveError?'text-destructive':'text-muted-foreground')}>{archiveError??'正在读取归档…'}{archiveError&&<button type="button" className="ml-2 underline" onClick={()=>setLoadAttempt(attempt=>attempt+1)}>重试读取归档</button>}</p>}
           {selectedId===item.id&&snapshot&&<div className="border-t" data-testid={prefix+'-archive-content'}>
             {onSelectDirectory&&<div className="px-4 pt-3"><button type="button" className={action+' text-primary'} disabled={loading||!!loadError||!!busy} onClick={async()=>{setBusy(item.id);setError('');try{if(!await onSelectDirectory(item.id,snapshot))throw Error('目录未载入，当前组合表保留，请重试');changeOpen(false);}catch(e){setError(e instanceof Error?e.message:'目录选择失败');}finally{setBusy('');}}}>{busy===item.id?'正在载入…':'选择此目录'}</button></div>}
             {onCopyStudy&&<div className="flex items-center gap-1 px-4 pt-3"><button type="button" disabled={loading||!!loadError||!!busy} onClick={()=>void copy()} className={action+' text-primary'}><Copy className="h-3 w-3"/>{busy===item.id?'正在保存副本…':'复制至组合表'}</button><FishQualityInfo label="复制至组合表说明"><p>先将当前组合表完整归档，再载入这份记录的独立副本。原归档保留，不自动运行。</p></FishQualityInfo></div>}
@@ -295,15 +318,26 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             {typeof item.details==='function'?item.details(()=>changeOpen(false)):item.details}
           </div>}
         </div>;
+  const openFullDirectory=()=>{
+    if(!browseArchive?.owner)return;
+    setManagementOwner(browseArchive.owner);
+    if(!browseArchive.fullReady)browseArchive.loadFull?.();
+  };
+  const archiveManagement=browseArchive?.loadFull&&<button type="button" className={action} onClick={openFullDirectory}>
+    {browseArchive.scope==='screen'&&!loading&&!loadError?'查看当前筛选轮次':browseArchive.fullReady?'管理已载入档案':'载入完整库并管理'}
+  </button>;
   return <FishLibraryRowExportContext.Provider value={managedExports?registerExport:null}><Dialog open={open} onOpenChange={changeOpen}>
     <DialogTrigger asChild><button type="button" className={action} aria-label={picker?.triggerLabel ?? '打开'+name}><Database aria-hidden className="h-3 w-3"/>{picker?.triggerLabel ?? name}</button></DialogTrigger>
     <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-hidden p-4 sm:p-5">
+      {trashOwner&&!picker&&!directoryStatus&&<div ref={setTrashToolbar} className="absolute right-10 top-2.5"/>}
       {directoryStatus?<><DialogHeader><DialogTitle className="text-sm">{name}</DialogTitle><DialogDescription className="sr-only">核对目录显示状态</DialogDescription></DialogHeader>{directoryStatus}</>:<>
       <DialogHeader className="shrink-0 space-y-1 text-left">
-        <div className="group/library-header flex flex-wrap items-center gap-1.5 pr-6">
+        <div className={'group/library-header flex min-h-7 flex-wrap items-center gap-1.5 '+(trashOwner&&!picker?'pr-14':'pr-6')}>
           <DialogTitle className="text-sm">{name}</DialogTitle>{!directoryOnly&&dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo>
           {!directoryOnly&&browseArchive?.owner&&browseArchive.scope==='screen'&&!picker&&<button type="button" className={action} onClick={()=>{resetDirectorySelection();setManage(false);setPurgeMode(false);setShowDeleted(false);setDeleteId('');setEditingId('');setTemplateQuery('');setManagementOwner(undefined);setCatalogOwner(browseArchive.owner);}}>查看归档目录</button>}
-          {directoryOnly ? (browseArchive?.loadFull && <button type="button" className={action+' ml-auto'} onClick={()=>{setManagementOwner(browseArchive.owner);browseArchive.loadFull?.();}}>{browseArchive.scope==='screen'&&!loading&&!loadError?'查看当前筛选轮次':'载入完整库并管理'}</button>) : transferMenu || compactDirectory ? <div className="ml-auto">{transferMenu ? transferMenu(exportActions) : <FishLibraryTransferMenu name={name} actions={exportActions}/>}</div> :
+          {directoryOnly ? (archiveManagement&&(selectBeforeLoad&&!browseArchive?.fullReady
+            ? <details className="ml-auto text-xs"><summary className="cursor-pointer text-muted-foreground">旧归档与整库管理</summary>{archiveManagement}</details>
+            : <div className="ml-auto">{archiveManagement}</div>)) : transferMenu || compactDirectory ? <div className="ml-auto">{transferMenu ? transferMenu(exportActions) : <FishLibraryTransferMenu name={name} actions={exportActions}/>}</div> :
             <button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!canExport} onClick={handleExport}><Download aria-hidden className="h-3 w-3"/>{busy==='export'?'正在导出…':'导出数据'} <span className="font-mono tabular-nums">{recordCount}</span></button>}
         </div>
         {(managedExports&&(busy==='export'||selectedExport?.busy))&&<p role="status" className="text-xs text-muted-foreground">正在导出…</p>}
@@ -313,18 +347,21 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
               setBrowseByRound(label==='按轮次');setTemplateQuery('');resetDirectorySelection();
             }}>{label}</button>)}
         </div>}
-        {(directoryOnly||templateView||roundsView)&&<div className="relative mt-1 max-w-md">
-          <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"/>
-          <input type="search" value={templateQuery} onChange={event=>setTemplateQuery(event.target.value)} aria-label={'搜索'+name+(roundsView?'轮次':'模板')}
-            placeholder={roundsView?"搜索轮次名称或日期…":"搜索模板编号、原名或日期…"} className="h-8 w-full rounded-md border border-border/60 bg-background pl-8 pr-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"/>
-        </div>}
+        {!trashView&&(directorySearch??((directoryOnly||templateView||roundsView||searchAlgorithms)&&<FishDirectorySearch
+          value={templateQuery} onChange={setTemplateQuery} label={'搜索'+name+(searchAlgorithms?'目录':roundsView?'轮次':'模板')}
+          placeholder={searchAlgorithms?'搜索算法系列或日期…':roundsView?'搜索轮次名称或日期…':'搜索模板编号、原名或日期…'}/>))}
         <DialogDescription className={compactDirectory&&(!browseRounds||loading||loadError)?"sr-only":"text-[11px] text-muted-foreground"}>{directoryOnly ? '选择目录查看归档记录' : browseRounds&&(loading||loadError) ? `读取账号保存的${name.slice(0,-1)}轮次` : typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
       </DialogHeader>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-fish-scroll data-testid={prefix+'-directory-scroll'}>
-      {trashOwner&&open&&!picker&&!trash.waiting&&<DirectoryTrashPanel key={trashOwner+trashScope} owner={trashOwner} scope={trashScope} marks={trash.marks} reload={trash.reload} cleanup={cleanupDirectory} selection={trashSelection} clear={()=>setTrashSelection(undefined)} trashView={trashView} onTrashView={value=>{resetDirectorySelection();setTrashView(value);}}/>}
-      {trash.waiting&&<p role="status" className="text-xs">{trash.issue||'正在核对已删除目录…'} {trash.issue&&<button type="button" className="underline" onClick={trash.reload}>重试</button>}</p>}
-      {trashView ? null : directoryOnly && open && browseArchive?.owner ? <FishArchiveBrowse pendingVisibility={trash.waiting} marks={trash.marks} onDelete={trashOwner&&!picker?setTrashSelection:undefined} key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/> : trash.waiting ? null : <>
+      {trashOwner&&open&&!picker&&<DirectoryTrashPanel toolbar={trashToolbar} known={trash.known} key={trashOwner+trashScope} owner={trashOwner} scope={trashScope} marks={trash.marks} reload={trash.reload} cleanup={cleanupDirectory} selection={trashSelection} clear={()=>setTrashSelection(undefined)} trashView={trashView} onTrashView={value=>{resetDirectorySelection();setTrashView(value);}}/>}
+      {trashView&&trash.issue&&<p role="status" className="text-xs">{trash.issue} <button type="button" className="underline" onClick={trash.reload}>重试</button></p>}
+      {trashView ? null : directoryOnly && open && browseArchive?.owner ? <FishArchiveBrowse marks={trash.marks} selectBeforeLoad={selectBeforeLoad} legacySelection={selectBeforeLoad&&!browseArchive.fullReady} onSelectRecords={importSelection&&browseArchive.loadFull?selectArchiveRecords:undefined} onDelete={trashOwner&&!picker?setTrashSelection:undefined} key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/> : <>
       {notice}
+      {importSelection&&managementOwner&&selectedId&&!selected&&!loading&&!loadError&&<p role="alert" className="text-xs">
+        找不到该目录的完整归档，无法选取记录。 <button type="button" className="underline" onClick={()=>{
+          setSelectedId('');setManagementOwner(undefined);setCatalogOwner(browseArchive?.owner);
+        }}>返回归档目录</button>
+      </p>}
       <h3 className={compactDirectory?"sr-only":"shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium"}>{kind==='algorithm'?'算法目录':kind==='template'?'模板目录':'时间目录'}</h3>
       <div className="space-y-3" data-testid={prefix+'-archive-directory'}>
         {showDeleted&&compactDirectory&&<div className="flex items-center justify-between gap-2 text-xs"><span>已删除目录（{deleted}）</span><button type="button" className={action} disabled={!!busy} onClick={()=>{setShowDeleted(false);setPurgeMode(false);resetDirectorySelection();}}>返回模板汇总</button></div>}

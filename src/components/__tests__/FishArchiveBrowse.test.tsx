@@ -1,11 +1,77 @@
 import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
+import {FishFilterLibrary} from '../FishFilterLibrary';
+import {FishWorkspaceRows} from '../FishWorkspaceSource';
+import {newQualityStudy, type FishQualityStudy} from '@/lib/fish/quality';
 import {FishArchiveBrowse} from '../FishArchiveBrowse';
 import type {BrowseRow,BrowseScope} from '@/lib/fish/libraryBrowse';
 
+it('opens the selected cold filter round in the import picker without opening the other round',async()=>{
+  calls.directory.mockResolvedValue({groups:[
+    {id:'one',title:'BSS 95',at:1,count:536,pages:['a']},
+    {id:'two',title:'BSS 90',at:2,count:1251,pages:['b']},
+  ]});
+  calls.body.mockResolvedValue([['PIEVERSEUSDT',2,'不过滤','saved']]);
+  const configure=vi.fn();
+  const onImport=vi.fn(()=>true);
+  const snapshot=newQualityStudy(2);
+  const source={id:'signal',symbol:'PIEVERSEUSDT',timeMs:2,timeLabel:'',fallbackZone:''};
+  const complete:FishQualityStudy={...snapshot,filterLibrary:{
+    version:1,settings:[{id:'f',signature:'f',filters:[],plans:[]}],
+    records:[
+      {id:'saved',settingId:'f',source,enteredAt:9,basis:'capture',readings:[],status:{state:'none',detail:'不过滤'},firstSavedAt:2,updatedAt:2},
+      {id:'other',settingId:'f',source:{...source,id:'other-signal',symbol:'OTHERUSDT'},enteredAt:8,basis:'capture',readings:[],status:{state:'none',detail:'不过滤'},firstSavedAt:1,updatedAt:1},
+    ],rounds:[
+      {id:'one',startedAt:1,updatedAt:1,state:'complete',recordIds:['other']},
+      {id:'two',startedAt:2,updatedAt:2,state:'complete',recordIds:['saved']},
+    ],
+  }};
+  const panel=(ready:boolean)=><FishFilterLibrary account="alice" study={ready?complete:snapshot} ready={ready}
+    openRequest={{key:1,importSelection:true}} requestWorkspace={configure}
+    renderStudy={(selected,close)=><FishWorkspaceRows snapshot={selected} onImport={onImport} onDone={close}/>}/>;
+  const view=render(panel(false));
+  fireEvent.click(await screen.findByRole('button',{name:/BSS 90/}));
+  expect(calls.body).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'载入所选目录'}));
+  await screen.findByText('PIEVERSEUSDT');
+  expect(configure).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText('旧归档导入'));
+  fireEvent.click(screen.getByRole('button',{name:'载入旧版完整档案并选取记录'}));
+  expect(configure).toHaveBeenCalledOnce();
+  view.rerender(panel(true));
+  fireEvent.click(await screen.findByRole('checkbox',{name:/选取 PIEVERSEUSDT/}));
+  expect(screen.queryByRole('checkbox',{name:/选取 OTHERUSDT/})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'导入组合表'}));
+  expect(onImport).toHaveBeenCalledWith(expect.objectContaining({
+    samples:[expect.objectContaining({id:'saved',enteredAt:9,source:expect.objectContaining({symbol:'PIEVERSEUSDT'})})],
+  }),expect.any(Array));
+  expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['b']);
+});
+
+it.each<BrowseScope>(['mining','filter','screen'])('reads only an explicitly requested directory for %s',async scope=>{
+  calls.directory.mockResolvedValue({groups:[
+    {id:'a',title:'目录甲',at:1,count:43280,pages:['a0','a1']},
+    {id:'b',title:'目录乙',at:2,count:43,pages:['b0']},
+  ]});
+  let complete!: (value:BrowseRow[])=>void;
+  calls.body.mockImplementation(()=>new Promise(resolve=>{complete=resolve;}));
+  render(<FishArchiveBrowse owner="alice" scope={scope} query="" selectBeforeLoad/>);
+  fireEvent.click(await screen.findByRole('button',{name:/目录甲/}));
+  expect(calls.body).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:/目录乙/}));
+  expect(calls.body).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'载入所选目录'}));
+  expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['b0']);
+  fireEvent.click(screen.getByRole('button',{name:/目录甲/}));
+  expect(calls.body.mock.calls[0][2].aborted).toBe(true);
+  await act(async()=>complete([['LATE',2,'不应显示','id']]));
+  expect(screen.queryByText('LATE')).toBeNull();
+  expect(calls.body).toHaveBeenCalledOnce();
+});
+
 const calls=vi.hoisted(()=>({directory:vi.fn(),body:vi.fn(),local:vi.fn(),localBody:vi.fn(),rebuild:vi.fn()}));
-vi.mock('@/lib/fish/libraryBrowse',()=>({readBrowseCatalog:calls.directory,readBrowsePage:calls.body}));
-vi.mock('@/lib/fish/preEntryPersistence',()=>({readScreenCatalog:calls.local,readScreenPage:calls.localBody}));
+vi.mock('@/lib/fish/libraryBrowse',async original=>({...(await original<typeof import('@/lib/fish/libraryBrowse')>()),readBrowseCatalog:calls.directory,readBrowsePage:calls.body}));
+vi.mock('@/lib/fish/preEntryPersistence',async original=>({...(await original<typeof import('@/lib/fish/preEntryPersistence')>()),readScreenCatalog:calls.local,readScreenPage:calls.localBody}));
 vi.mock('@/lib/fish/historicalScreenBrowse',()=>({rebuildHistoricalScreenCatalog:calls.rebuild}));
 afterEach(()=>{cleanup();vi.resetAllMocks();vi.unstubAllGlobals();});
 

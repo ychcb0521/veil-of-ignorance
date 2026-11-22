@@ -749,14 +749,19 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     setDirectoryChoice(undefined);setOrigin(value);if(value === 'fish')setDetectorExpanded(false);resetScroll();
   };
   const openWorkspaceLibrary = (kind: QualitySourceDirectory['kind']|'monitor') =>
-    setDirectoryRequests(requests=>({...requests,[kind]:{key:(requests[kind]?.key??0)+1,importSelection:kind!=='mined'}}));
+    setDirectoryRequests(requests=>({...requests,[kind]:{key:(requests[kind]?.key??0)+1,importSelection:true}}));
   const importWorkspace = (snapshot: FishQualityStudy, ids: readonly string[]) => {
     if (!workspace?.importRows(snapshot,ids)) return false;
     setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();
     return true;
   };
+  const prepareSourceImport = ready ? undefined : state.error
+    ? { label: '重试载入组合表', onClick: state.retryStudyLoad }
+    : state.requestWorkspace
+      ? { label: '载入组合表', onClick: state.requestWorkspace }
+      : { label: '正在载入组合表…' };
   const renderArchive = (snapshot: FishQualityStudy, close?: () => void, directory?:MiningDirectoryEvidence) => workspace || directory ? <div className="space-y-2 px-4 py-3">
-    <FishWorkspaceRows snapshot={snapshot} onImport={workspace ? importWorkspace : undefined} onDone={close} mining={directory}/>
+    <FishWorkspaceRows snapshot={snapshot} onImport={workspace ? importWorkspace : undefined} onDone={close} mining={directory} prepareImport={prepareSourceImport}/>
     <FishDeferredDetails summary="查看归档组合表" className="text-[11px]">
       <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>
     </FishDeferredDetails>
@@ -1027,9 +1032,9 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
         </FishInstantTrading>}
       </div>}
       {workspace && <FishQualityModule title="来源" icon={Database} testId="quality-workspace-sources" defaultOpen={false}>
-        <FishWorkspaceSource name="信号库" loadSnapshot={workspace.sources?.library} onImport={importWorkspace}/>
-        <FishWorkspaceSource name="图灵杯" loadSnapshot={workspace.sources?.turing} onImport={importWorkspace}/>
-        <FishWorkspaceSource name="鱼舱" loadSnapshot={workspace.sources?.fish} onImport={importWorkspace}/>
+        <FishWorkspaceSource name="信号库" loadSnapshot={workspace.sources?.library} onImport={importWorkspace} prepareImport={prepareSourceImport}/>
+        <FishWorkspaceSource name="图灵杯" loadSnapshot={workspace.sources?.turing} onImport={importWorkspace} prepareImport={prepareSourceImport} {...state.workspaceTuringSource}/>
+        <FishWorkspaceSource name="鱼舱" loadSnapshot={workspace.sources?.fish} onImport={importWorkspace} prepareImport={prepareSourceImport}/>
         {mining ? <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('mined')}><Database aria-hidden className="h-3 w-3"/>捕捞库</button> :
           <FishWorkspaceSource name="捕捞库" loadSnapshot={workspace.sources?.mined} onImport={importWorkspace}/>}
         <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('filter')}><Database aria-hidden className="h-3 w-3"/>过滤库</button>

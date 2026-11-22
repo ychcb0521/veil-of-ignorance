@@ -1,5 +1,6 @@
 import {render,screen,fireEvent,within,cleanup,waitFor} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
+import {FishMonitorLibrary} from '../FishMonitorLibrary';
 import {FishQuality} from '../FishQuality';
 import {FishHitRateTest} from '../FishHitRateTest';
 import * as hitRateSettings from '@/lib/fish/hitRateSettings';
@@ -10,6 +11,28 @@ import type {FishQualityState} from '@/hooks/useFishQuality';
 import type {FishQualityStudy} from '@/lib/fish/quality';
 afterEach(cleanup);
 function state(study:FishQualityStudy){const noop=vi.fn(),run=vi.fn(async()=>{});return {study,ready:true,running:false,progress:null,filterRunning:false,filterProgress:null,filterError:'',warning:'',error:'',start:run,restart:run,cancel:noop,startFilter:run,cancelFilter:noop,setRule:noop,setCombo:noop,setObserveHours:noop,selectSell:noop,setSelectedRows:noop,setPriority:noop,setScope:noop,setFilters:noop,setHoldingVetoes:noop,setSellPlans:noop} satisfies FishQualityState;}
+it('does not fetch a monitoring body until loading the selected directory',async()=>{
+ const initial=archiveQualityMonitorStudy(monitorArchiveFixture(),T+4_000_000);
+ const {study:body,...entry}=initial.monitorLibrary!.archives![0];
+ const other={...entry,id:'other',createdAt:entry.createdAt+1};
+ const study={...initial,monitorLibrary:{...initial.monitorLibrary!,archives:[entry,other]}};
+ const loadArchive=vi.fn().mockResolvedValue(body);
+ render(<FishMonitorLibrary study={study} account="alice" loadArchive={loadArchive}
+   renderStudy={snapshot=><p>已读取 {snapshot.samples.length} 条</p>}/>);
+ fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
+ expect(loadArchive).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'打开监测归档 '+other.id}));
+ expect(loadArchive).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'打开监测归档 '+entry.id}));
+ expect(loadArchive).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'载入所选目录'}));
+ expect(await screen.findByText(/已读取/)).toBeVisible();
+ expect(loadArchive).toHaveBeenCalledExactlyOnceWith(entry,false);
+ fireEvent.click(screen.getByRole('button',{name:'打开监测归档 '+other.id}));
+ expect(screen.queryByText(/已读取/)).toBeNull();
+ expect(loadArchive).toHaveBeenCalledOnce();
+});
+
 it('opens one monitoring result table per template and keeps saved results from different rounds',async()=>{
  const original=monitorArchiveFixture();
  const saved=original.sellPlans!.map((plan,i)=>({id:'saved-'+i,name:plan.label,savedAt:T-1000+i,updatedAt:T-1000+i,plan}));
