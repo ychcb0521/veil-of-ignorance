@@ -5,7 +5,7 @@ import { FeatureView, type DeepDigNote, type DeepDigTab } from '@/components/jou
 import { DeepDigDirectory } from '@/pages/JournalDeepDigPage';
 import { deepDigRules, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
 import { DEFAULT_COMMANDS, runInference } from '@/lib/deepDig/commands';
-import { campaignSample, CBA2_DEF, featureWindowMs, DRIFT_SPEED_DEF, newFeatureTemplate, signalSample, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { BSS_DEF, campaignSample, CBA2_DEF, featureWindowMs, DRIFT_SPEED_DEF, newFeatureTemplate, signalSample, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { DeepDigSeries } from '@/lib/deepDig/series';
 import { driftEvents, makeData } from '@/lib/deepDig/__tests__/fixtures';
@@ -52,6 +52,27 @@ function Harness(p: {
 }
 
 describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
+  it('BSS 阅读和两种编辑入口均显示补全公式，保存自定义均值时只保存用户输入', () => {
+    const save = vi.fn();
+    render(<Harness initialDef={BSS_DEF} data={null} onSaveDef={save} />);
+    const formula = screen.getByTestId('deep-dig-def-formula');
+    expect(formula).toHaveTextContent('avg_BSS = avg(BSS, 24)');
+    expect(formula).toHaveTextContent('avg_BSS_2 = (4 *');
+    fireEvent.click(screen.getByTestId('deep-dig-def-formula-edit'));
+    const inline = screen.getByTestId('deep-dig-def-formula-form');
+    expect(inline).toHaveTextContent('avg_BSS = avg(BSS, 24)');
+    const custom = BSS_DEF.formula + '\navg_BSS = avg(BSS, 8)';
+    fireEvent.change(screen.getByTestId('deep-dig-def-formula-inline'), { target: { value: custom } });
+    expect(inline).not.toHaveTextContent('avg_BSS = avg(BSS, 24)');
+    expect(inline).toHaveTextContent('avg_BSS_2 = (4 *');
+    expect(save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('deep-dig-def-formula-save'));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ formula: custom }));
+    fireEvent.click(screen.getByTestId('deep-dig-def-edit'));
+    expect(screen.getByTestId('deep-dig-def-formula-input')).toHaveValue(custom);
+    expect(screen.getByTestId('deep-dig-def-form')).toHaveTextContent('avg_BSS_2 = (4 *');
+  });
+
   it('目录：保留特征值和模块入口，不显示统计摘要', () => {
     const onOpen = vi.fn();
     const onAdd = vi.fn();

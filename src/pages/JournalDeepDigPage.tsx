@@ -24,6 +24,7 @@ import { forgetDeepDigResult, loadDeepDigResults, useDeepDigRun } from '@/hooks/
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { DEEP_DIG_GROUPS, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
 import { defaultFeatureCommands } from '@/lib/deepDig/commands';
+import { withResearchAverages } from '@/lib/deepDig/researchAverages';
 import { campaignSample, signalSample, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
 import { readCachedCampaignPricePath } from '@/hooks/useCampaignPricePaths';
 import { loadSignals, type TradeSignal } from '@/lib/signalLibrary';
@@ -209,7 +210,8 @@ function FeaturePage({ def, userId, report, samples, signals, blockedReason, not
 }) {
   const nav = useNavigate();
   const location = useLocation();
-  const run = useDeepDigRun(userId, def);
+  const researchDef = useMemo(() => withResearchAverages(def), [def]);
+  const run = useDeepDigRun(userId, researchDef);
   const params = new URLSearchParams(location.search);
 
   // 从战役返回：滚回点进去之前的位置（按这条 history 记录记的，只用一次）
@@ -250,6 +252,7 @@ function FeaturePage({ def, userId, report, samples, signals, blockedReason, not
   return (
     <FeatureView
       def={def}
+      researchDefinition={researchDef}
       editing={params.get('edit') === '1'}
       onEditingChange={v => setParam('edit', v ? '1' : '0', '0')}
       onSaveDef={onSaveDef}

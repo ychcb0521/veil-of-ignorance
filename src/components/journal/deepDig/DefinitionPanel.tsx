@@ -19,6 +19,7 @@ import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Pencil, RotateCcw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { FUNCTIONS } from '@/lib/deepDig/formula';
+import { withResearchAverages } from '@/lib/deepDig/researchAverages';
 import {
   AVG_HOURS_PRESETS, avgHoursOf, barsPerAvg, barsPerHalfLife, BUILTIN_FEATURES, checkDefinition, compileGroups, DEFAULT_AVG_HOURS, DEFAULT_GROUPS, DEFAULT_HALF_LIFE_HOURS, DEFAULT_INTERVAL,
   definitionKey, FEATURE_INTERVALS, featureWindowMs, formulaParamUse, HALF_LIFE_PRESETS, halfLifeOf, INTERVAL_LABEL, intervalOf, MIN_AMOUNT_COVERAGE, PARAM_VARIABLES, previewGroups,
@@ -33,6 +34,7 @@ import { mbiNOf, mbiZ0Of } from '@/lib/mbi';
 const BTN = 'inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2.5 text-[12px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';
 const INPUT = 'rounded-md border border-border bg-background px-2 py-1 text-[12px] outline-none focus:border-foreground/40';
 const RED = 'text-[#F6465D]';
+const FORMULA_STYLE = 'overflow-x-auto whitespace-pre rounded-md bg-muted/60 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-foreground';
 const Code = ({ children }: { children: React.ReactNode }) => <code className="rounded bg-muted px-1 py-px font-mono text-[11px] text-foreground">{children}</code>;
 
 export interface DefinitionPanelProps {
@@ -67,6 +69,7 @@ function DefinitionImageParameters({def}:{def:DeepDigFeatureDef}) {
 }
 
 function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPanelProps) {
+  const researchDef = useMemo(() => withResearchAverages(def), [def]);
   return (
     <div className="space-y-2.5" data-testid="deep-dig-definition">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -82,9 +85,9 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
       {dbl5ProfileForFeature(featureTemplateId(def))&&<Dbl5GuardDefinition config={def.DBL5_config} timeframe={dbl5ProfileForFeature(featureTemplateId(def))?.timeframe}/>}
       <div className="grid max-w-[720px] grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[11.5px]">
         <span className="pt-1 text-muted-foreground">公式</span>
-        {dbl5ProfileForFeature(def.chartTemplate)?<details><summary className="cursor-pointer py-1 text-muted-foreground">输出字段与布尔事件变量</summary><FormulaEditor def={def} onSave={onSave}/></details>:<FormulaEditor def={def} onSave={onSave} />}
+        {dbl5ProfileForFeature(def.chartTemplate)?<details><summary className="cursor-pointer py-1 text-muted-foreground">输出字段与布尔事件变量</summary><FormulaEditor def={def} complete={researchDef.formula} onSave={onSave}/></details>:<FormulaEditor def={def} complete={researchDef.formula} onSave={onSave} />}
         <span className="pt-1 text-muted-foreground">参数</span>
-        {dbl5ProfileForFeature(def.chartTemplate)?<span className="py-1 text-muted-foreground">固定{dbl5ProfileForFeature(def.chartTemplate)?.timeframe} · n={def.DBL5_config?.n??3} · 几何证据 {def.DBL5_config?.window_minutes??dbl5Defaults(dbl5ProfileForFeature(def.chartTemplate)?.timeframe).window_minutes} 分钟</span>:def.chartTemplate==='sbs_5m'?<span className="py-1 text-muted-foreground">固定5m已收盘 · 有效期 {def.SBS5M_config?.active_box_max_age??6} 小时 · 编辑定义可调整完整结构参数</span>:<KlineSettings value={paramsOf(def)} onChange={v => onSave({ ...def, ...paramPatch(v) })} uses={formulaParamUse(def.formula)} testId="deep-dig-kline" />}
+        {dbl5ProfileForFeature(def.chartTemplate)?<span className="py-1 text-muted-foreground">固定{dbl5ProfileForFeature(def.chartTemplate)?.timeframe} · n={def.DBL5_config?.n??3} · 几何证据 {def.DBL5_config?.window_minutes??dbl5Defaults(dbl5ProfileForFeature(def.chartTemplate)?.timeframe).window_minutes} 分钟</span>:def.chartTemplate==='sbs_5m'?<span className="py-1 text-muted-foreground">固定5m已收盘 · 有效期 {def.SBS5M_config?.active_box_max_age??6} 小时 · 编辑定义可调整完整结构参数</span>:<KlineSettings value={paramsOf(researchDef)} onChange={v => onSave({ ...def, ...paramPatch(v) })} uses={formulaParamUse(def.formula)} testId="deep-dig-kline" />}
         <span data-settings-image-skip="" className="pt-px text-muted-foreground">分组</span>
         <div data-settings-image-skip=""><GroupCriteria def={def} samples={samples} onSave={onSave} testId="deep-dig-def-groups" /></div>
         <span className="text-muted-foreground">显示</span>
@@ -97,6 +100,7 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
 
 function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, samples }: DefinitionPanelProps) {
   const [draft, setDraft] = useState<DeepDigFeatureDef>(def);
+  const researchDraft = useMemo(() => withResearchAverages(draft), [draft]);
   const [prsText,setPrsText]=useState(()=>JSON.stringify(def.PRS6H_config??PRS6H_DEFAULTS,null,2)),[prsError,setPrsError]=useState('');
   const [dblText,setDblText]=useState(()=>JSON.stringify(def.DBL5_config??dbl5Defaults(dbl5ProfileForFeature(def.chartTemplate)?.timeframe),null,2)),[dblError,setDblError]=useState('');
   const [sbsText,setSbsText]=useState(()=>JSON.stringify(def.SBS5M_config??SBS5M_DEFAULTS,null,2)),[sbsError,setSbsError]=useState('');
@@ -149,6 +153,7 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
           />
           {check.formula ? <div className={RED} data-testid="deep-dig-def-formula-error">{check.formula}</div>
             : <div className="text-muted-foreground">在进场前的已收盘 K 线（上面选的周期）上逐根算，取最后一根的值作为这场的特征值。</div>}
+          <AverageFormulaPreview source={draft.formula} complete={researchDraft.formula} />
           <button type="button" onClick={() => setHelp(h => !h)} className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground" data-testid="deep-dig-def-help-toggle">
             {help ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}可用写法
           </button>
@@ -172,7 +177,7 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
         {dbl5ProfileForFeature(draft.chartTemplate)&&<details className="min-w-0 flex-1 text-xs" open><summary className="cursor-pointer">DBL-5 参数 · 研究初值</summary><textarea aria-label="DBL5 参数配置" value={dblText} rows={5} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setDblText(e.target.value);try{const p=JSON.parse(e.target.value);const config=dbl5Parameters(p);if(config.timeframe!==dbl5ProfileForFeature(draft.chartTemplate)?.timeframe)throw Error('周期须与所选 DBL-5 版本一致');set('DBL5_config',p);setDblError('');}catch(error){setDblError(error instanceof Error?error.message:'参数JSON无效');}}}/>{dblError&&<p role="alert" className={RED}>{dblError}</p>}<p className="mt-2 text-muted-foreground">周期固定为 {dbl5ProfileForFeature(draft.chartTemplate)?.periodLabel}。n 为回看及确认根数；window_minutes 为几何证据年龄，须为周期分钟数的整数倍，并满足 2n+1 小于窗口根数。默认窗口为 72 根。到期从origin_time计算，触底不续期。</p></details>}
         {draft.chartTemplate==='sbs_5m'&&<details className="min-w-0 flex-1 text-xs"><summary className="cursor-pointer">SBS-5M 参数（研究初值 · 固定5m）</summary><textarea aria-label="SBS5M 参数配置" value={sbsText} rows={12} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setSbsText(e.target.value);try{const next=JSON.parse(e.target.value);sbsParameters(next);set('SBS5M_config',next);setSbsError('');}catch(error){setSbsError(error instanceof Error?error.message:'参数JSON无效');}}}/>{sbsError&&<p role="alert" className={RED}>{sbsError}</p>}<p className="my-2 text-muted-foreground">volume_mode：quote（报价币成交额）或 base_times_close（基础币量×收盘价），不能逐根切换。有效期从 confirmed_at 计时。修改配置后需重新运行。</p><div className="max-h-56 overflow-auto rounded border border-border/50 p-2">{SBS5M_PARAMETER_SPECS.map(p=><p key={p.key} className="mb-2"><code>{p.key}</code> · {p.label} · {p.min}–{p.max} {p.unit}<br/><span className="text-muted-foreground">{p.description}</span></p>)}</div></details>}
         {draft.chartTemplate==='prs6h'&&<details className="mb-3 text-xs"><summary className="cursor-pointer">PRS-6H 参数（研究初值）</summary><textarea aria-label="PRS6H 参数配置" value={prsText} rows={12} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setPrsText(e.target.value);try{const next=JSON.parse(e.target.value);prsParameters(next);set('PRS6H_config',next);setPrsError('');}catch(error){setPrsError(error instanceof Error?error.message:'参数JSON无效');}}}/>{prsError&&<p role="alert" className={RED}>{prsError}</p>}<p className="text-muted-foreground">volumeMode 可选 quote / flow / base_close_proxy，默认 quote；模式、参数和状态检查点独立，改变参数后需重算。</p></details>}
-        {!dbl5ProfileForFeature(draft.chartTemplate)&&draft.chartTemplate!=='sbs_5m'&&<KlineSettings value={paramsOf(draft)} onChange={v => setDraft(d => ({ ...d, ...paramPatch(v) }))} uses={formulaParamUse(draft.formula)} testId="deep-dig-def-kline" />}
+        {!dbl5ProfileForFeature(draft.chartTemplate)&&draft.chartTemplate!=='sbs_5m'&&<KlineSettings value={paramsOf(researchDraft)} onChange={v => setDraft(d => ({ ...d, ...paramPatch(v) }))} uses={formulaParamUse(draft.formula)} testId="deep-dig-def-kline" />}
       </div>
       <div className="flex gap-2">
         <span className={label}>显示</span>
@@ -377,8 +382,17 @@ export function GroupCriteria({ def, samples, onSave, testId, resultDef }: {
  * 【用户要求】2026-10-16「公式也要做成能修改的」：写错时提示第几行、哪里不对，不能保存；内置项可填回默认。
  * Ctrl / ⌘ + Enter 保存，Esc 取消。
  */
-export function FormulaEditor({ def, onSave }: { def: DeepDigFeatureDef; onSave: (def: DeepDigFeatureDef) => void }) {
+function AverageFormulaPreview({ source, complete }: { source: string; complete: string }) {
+  if (complete === source) return null;
+  return <div className="space-y-1">
+    <span className="text-muted-foreground">自动补全的均值公式，可在上方定义同名变量来自定。</span>
+    <pre className={FORMULA_STYLE}>{complete.slice(source.length).trimStart()}</pre>
+  </div>;
+}
+
+export function FormulaEditor({ def, complete = def.formula, onSave }: { def: DeepDigFeatureDef; complete?: string; onSave: (def: DeepDigFeatureDef) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const draftComplete = useMemo(() => draft == null ? complete : withResearchAverages({ ...def, formula: draft }).formula, [def, draft, complete]);
   const [help, setHelp] = useState(false);
   const error = useMemo(() => (draft == null ? null : checkDefinition({ ...def, formula: draft }).formula), [draft, def]);
   const builtin = BUILTIN_FEATURES.find(b => b.id === def.id);
@@ -386,7 +400,7 @@ export function FormulaEditor({ def, onSave }: { def: DeepDigFeatureDef; onSave:
   if (draft == null) {
     return (
       <div className="min-w-0 space-y-1">
-        <pre className="overflow-x-auto whitespace-pre rounded-md bg-muted/60 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-foreground" data-testid="deep-dig-def-formula">{def.formula}</pre>
+        <pre className={FORMULA_STYLE} data-testid="deep-dig-def-formula">{complete}</pre>
         <button type="button" onClick={() => setDraft(def.formula)} data-testid="deep-dig-def-formula-edit"
           className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-foreground">
           <Pencil className="h-3 w-3" />改公式
@@ -419,6 +433,7 @@ export function FormulaEditor({ def, onSave }: { def: DeepDigFeatureDef; onSave:
       />
       {error ? <div className={RED} data-testid="deep-dig-def-formula-inline-error">{error}</div>
         : <div className="text-muted-foreground">在进场前的已收盘 K 线（上面选的周期）上逐根算，取最后一根的值作为这场的特征值。</div>}
+      <AverageFormulaPreview source={draft} complete={draftComplete} />
       <button type="button" onClick={() => setHelp(h => !h)} className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground">
         {help ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}可用写法
       </button>

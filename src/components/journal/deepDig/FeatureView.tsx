@@ -82,6 +82,8 @@ function Block({ title, aside, children, testId }: { title: string; aside?: Reac
 
 export interface FeatureViewProps {
   def: DeepDigFeatureDef;
+  /** Includes the named chart averages used for newly requested statistics. */
+  researchDefinition?: DeepDigFeatureDef;
   editing: boolean;
   onEditingChange: (editing: boolean) => void;
   onSaveDef: (def: DeepDigFeatureDef) => void;
@@ -156,7 +158,8 @@ function readSampleAt(id: string, finishedAt: number | undefined): number {
 }
 
 export function FeatureView(props: FeatureViewProps) {
-  const { def, data, inference, excluded, tab, onTabChange } = props;
+  const { data, inference, excluded, tab, onTabChange } = props;
+  const def = props.researchDefinition ?? props.def;
   const variables = useMemo(() => formulaVariables(def.formula), [def.formula]);
   const [tempVer, setTempVer] = useState(0);
   const temp = useMemo(() => readTemp(def.id, data?.finishedAt), [def.id, data?.finishedAt, tempVer]);
@@ -183,7 +186,7 @@ export function FeatureView(props: FeatureViewProps) {
   return (
     <div className="space-y-5 text-[12px]" data-testid="deep-dig-feature">
       <DefinitionPanel
-        def={def} editing={props.editing} onEditingChange={props.onEditingChange} onSave={props.onSaveDef}
+        def={props.def} editing={props.editing} onEditingChange={props.onEditingChange} onSave={props.onSaveDef}
         onReset={props.onResetDef} onDelete={props.onDeleteDef} samples={props.samples}
       />
       <div className="inline-flex items-center gap-0.5 rounded-md border border-border/70 bg-muted/40 p-0.5" role="tablist" aria-label="模块">

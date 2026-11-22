@@ -39,6 +39,8 @@ import {
 } from '@/lib/deepDig/features';
 
 /** 用户公式算出的值在事件特征里的键。 */
+import { withResearchAverages } from './researchAverages';
+
 export const DEEP_DIG_KEY = 'deep_dig_x';
 /** 公式里起了名的变量在事件特征里的键前缀（deep_dig_var:F）。 */
 const VAR_PREFIX = 'deep_dig_var:';
@@ -467,7 +469,9 @@ export function deepDigRules(data: DeepDigData, inference: DeepDigInference | nu
     return xs.length ? xs.filter(side).length / xs.length : null;
   };
   lines.push(`做法：进场前看 ${X}，${lower ? '≤' : '≥'} ${val(cut)}${def.unit ? ` ${def.unit}` : ''}（对照组中位数）时更像实验组——实验组 ${pct(share('positive'))} 满足，对照组 ${pct(share('control'))} 满足。`);
-  const pickedAfter = def.id === DRIFT_SPEED_DEF.id && def.formula.trim() === DRIFT_SPEED_DEF.formula.trim()
+  const pickedAfter = def.id === DRIFT_SPEED_DEF.id && (
+    def.formula.trim() === DRIFT_SPEED_DEF.formula.trim() || def.formula.trim() === withResearchAverages(DRIFT_SPEED_DEF).formula.trim()
+  )
     ? `；${X} 是看过三项结果后单独挑出来的，p 值偏乐观` : '';
   if (!inference) lines.push('推断统计还没运行（或数据、删减、命令改过后没重跑）：运行后这里会补上检验的结论。');
   lines.push(`局限：实验组只有 ${pos.n} 个、对照组 ${ctl.n} 个，结论来自同一批数据${pickedAfter}，要用之后新产生的战役确认。`);
