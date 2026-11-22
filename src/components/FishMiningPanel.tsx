@@ -1,4 +1,5 @@
 import { FishThresholdFields } from './FishThresholdFields';
+import { FISH_PANEL_DEFAULTS } from './fishPanelDefaults';
 import { captureLimit, captureLimitText } from '@/lib/fish/thresholdRange';
 import { FishMetricTimeFields } from './FishMetricTimeFields';
 import type {FishDirectoryRequest} from './FishLibraryTimeDirectory';
@@ -236,7 +237,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
     : caughtUp ? '已追上现在' : s.errorKind==='configuration' ? '配置需处理' : waiting ? (/限频/.test(waiting)?'限频等待':'等待中') : s.lastError ? '等待重试' : '排队中';
   const hasError = !s.stopped && !!s.lastError && !running && !reached && !caughtUp && !rangeComplete;
   const statusDetail = hasError || waiting ? status : undefined;
-  return <FishQualityModule title="批量捕捞" icon={Pickaxe} testId="fish-mining-panel" summary={<>
+  return <FishQualityModule title="批量捕捞" icon={Pickaxe} testId="fish-mining-panel" defaultOpen={FISH_PANEL_DEFAULTS.mining} summary={<>
         <FishQualityInfo label="批量捕捞说明与进度">
           <div className="space-y-2.5">
             <div className="space-y-1"><p className="font-medium">当前进度</p><p className="font-mono tabular-nums text-muted-foreground">已捕捞 {s.mined} / {s.target} 条 · 已扫 {s.anchorsDone} 档{s.lastAnchorMs != null ? ` · 扫到 ${short(s.lastAnchorMs)}` : ''}</p><p className={hasError ? 'text-destructive' : 'text-muted-foreground'}>{status}</p>{hasError&&s.retryCount?<p className="text-destructive">连续失败 {s.retryCount} 次{s.lastErrorAt?` · ${short(s.lastErrorAt)}`:''}</p>:null}{s.ruleRepairs?.length?<p className="text-muted-foreground" data-testid="mining-rule-repair">{s.ruleRepairs.at(-1)}</p>:null}</div>
