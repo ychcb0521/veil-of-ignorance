@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { FishPanel, type FishPanelProps } from '../FishPanel';
 import type { FishQualityState } from '@/hooks/useFishQuality';
+import { newQualityStudy } from '@/lib/fish/quality';
 import type { PreEntryLibrary, PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import type { TradeSignal } from '@/lib/signalLibrary';
 vi.mock('@/components/FishQuality', () => ({ FishQuality: () => null }));
@@ -19,8 +20,10 @@ it('moves an admitted fish out of new fish rows and count without hiding later s
   const props: FishPanelProps = { signals: [source, next], progress: null, inputs: { time: '', threshold: '' }, onInputsChange: vi.fn(),
     selection: { exchanges: ['binance'], includeDuplicates: false }, onSelectionChange: vi.fn(), onStart: vi.fn(), onCancel: vi.fn(), onJump: vi.fn(), onDelete: vi.fn(), onRate: vi.fn(),
     jumpingSignalId: null, tradedDayIndex: new Set(), campaignDayIndex: new Set() };
-  const quality = (lib: PreEntryLibrary) => ({ preEntry: { library: lib } } as FishQualityState);
+  const quality = (lib: PreEntryLibrary) => ({ study: newQualityStudy(), ready: true, preEntry: { library: lib } } as FishQualityState);
   const view = render(<FishPanel {...props} quality={quality(library)} />);
+  expect(screen.getByRole('region', { name: '即时交易区域' }).parentElement).toBe(screen.getByRole('region', { name: '捕捞进程' }).parentElement);
+  expect(within(screen.getByTestId('fish-screened')).getByRole('button', { name: /^筛选鱼\s*0$/ })).toHaveAttribute('aria-expanded', 'true');
   expect(within(screen.getByTestId('fish-new')).getByRole('button', { name: /^新鱼\s*2$/ })).toBeInTheDocument();
   view.rerender(<FishPanel {...props} quality={quality({ ...library, records: [{ ...record, status: 'matched', matchedAt: 120000 }] })} />);
   expect(within(screen.getByTestId('fish-new')).getByRole('button', { name: /^新鱼\s*1$/ })).toBeInTheDocument();
