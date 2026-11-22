@@ -5,6 +5,8 @@ import type {FishQualityState} from '@/hooks/useFishQuality';
 import {newQualityStudy} from '@/lib/fish/quality';
 import {emptyPreEntryLibrary} from '@/lib/fish/preEntryMonitor';
 import {TooltipProvider} from '../ui/tooltip';
+import {InstantPositionsContext} from '@/contexts/FishQualityContext';
+import type {ComponentProps} from 'react';
 
 afterEach(cleanup);
 const setup = (overrides: Partial<FishQualityState>) => ({
@@ -56,4 +58,18 @@ it('exposes a retry without an editable default when instant settings could not 
   expect(screen.queryByRole('button',{name:'保存设置'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'重试读取'}));
   expect(retry).toHaveBeenCalledOnce();
+});
+
+it('shows the settled balance without issuing a new account request when opening position settings', () => {
+  const readDeskQuote=vi.fn(),save=vi.fn().mockResolvedValue(undefined);
+  const live={positions:[],monitorResults:new Map(),mirrorFills:new Map(),manualPositions:new Map(),
+    usdtFollow:{connected:true,owner:'cached',orderDesk:1,readDeskQuote},
+    balanceCalibration:{ready:true,refreshing:false,availableUsdt:1200,balanceObservedAt:Date.UTC(2026,10,22,10),campaigns:vi.fn(),refresh:vi.fn()}} as unknown as NonNullable<ComponentProps<typeof InstantPositionsContext.Provider>['value']>;
+  render(<InstantPositionsContext.Provider value={live}>{view(setup({instantPreferenceStatus:'ready',instantPosition:{settings:{version:1,availableUsdt:800,marginPct:5,leverage:8},save}}))}</InstantPositionsContext.Provider>);
+  openAfter();fireEvent.click(screen.getByRole('checkbox',{name:'仓位设置'}));
+  expect(screen.getByText(/币安已校准可用资金\s+1200 USDT/)).toBeVisible();
+  expect(screen.getByText('预计首仓保证金 60 USDT · 首仓名义仓位 480 USDT')).toBeVisible();
+  expect(screen.getByLabelText('模拟可用资金（USDT）')).toHaveValue(800);
+  expect(readDeskQuote).not.toHaveBeenCalled();
+  expect(save).not.toHaveBeenCalled();
 });

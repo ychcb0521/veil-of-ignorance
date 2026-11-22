@@ -7,8 +7,10 @@ export interface InstantPositionSettings {
   availableUsdt: number;
   marginPct: number;
   leverage: number;
-  /** Present only on an admission sized with a fresh read of the linked Binance account. */
+  /** The linked account balance snapshot frozen for this admission. */
   balanceObservedAt?: number;
+  /** New budgets use the completed post-campaign calibration; old snapshots retain their policy. */
+  balancePolicy?: 'instant-settled-balance-v1';
   liveBalanceIssue?: string;
 }
 

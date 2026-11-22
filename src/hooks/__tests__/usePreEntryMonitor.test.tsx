@@ -1,4 +1,4 @@
-import { registerInstantBalanceReader } from '@/lib/fish/instantPositionSettings';
+import { createInstantBalanceCalibration } from '@/lib/fish/instantBalanceCalibration';
 import * as campaigns from '@/lib/fish/instantCampaignStore';
 import * as checkpoints from '@/lib/fish/preEntryPersistence';
 import * as admissions from '@/lib/fish/instantAdmission';
@@ -45,7 +45,9 @@ it.each(['recovered', 'failed'] as const)('keeps instant screening independent o
   vi.spyOn(checkpoints, 'readAutomaticPreEntryCheckpoint').mockResolvedValue(undefined);
   const reserve = vi.spyOn(admissions, 'reserveInstantAdmission').mockResolvedValue(false);
   const readBalance = vi.fn().mockResolvedValue('1234.56');
-  const unregister = registerInstantBalanceReader('priority', readBalance);
+  const calibration = createInstantBalanceCalibration('priority', 'fixture', readBalance, () => {}, async () => {});
+  await calibration.refresh();
+  readBalance.mockImplementation(() => new Promise(() => {}));
   const matched = vi.fn();
   const input = study(), filter = input.buyFilters[0];
   const plan = freezeQualityPlan({ id: 'p', label: '买前', metric: filter.metric, snapshot: filter.snapshot,
@@ -101,7 +103,7 @@ it.each(['recovered', 'failed'] as const)('keeps instant screening independent o
     expect(view.result.current.automaticLibrary.records[0].status).toBe('unmatched');
     expect(settings).toEqual(frozen);
     expect(storage.save.mock.calls.every(([,value,immediate]) => immediate && !value.settings && value.rounds.every(r => r.id === 'fresh'))).toBe(true);
-  } finally { unregister(); view.unmount(); vi.restoreAllMocks(); vi.unstubAllGlobals(); }
+  } finally { calibration.dispose(); view.unmount(); vi.restoreAllMocks(); vi.unstubAllGlobals(); }
 });
 
 describe('买前监测独立任务', () => {

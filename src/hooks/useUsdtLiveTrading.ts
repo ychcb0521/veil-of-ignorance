@@ -63,7 +63,8 @@ function usePositionHistories(snapshot: UsdtMirrorSnapshot | undefined, read: Fo
   return hasPositions ? histories : EMPTY_HISTORIES;
 }
 
-export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follow, 'connected' | 'positionMirror' | 'campaignMirror' | 'readPositions' | 'readCampaigns' | 'readPositionHistory'>) {
+export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follow, 'connected' | 'positionMirror' | 'campaignMirror' | 'readPositions' | 'readCampaigns' | 'readPositionHistory'>,
+  onCampaigns?: (rows: readonly UsdtLiveCampaign[]) => void) {
   const { connected, positionMirror, campaignMirror, readPositions, readCampaigns, readPositionHistory } = follow;
   const [positionView, setPositionView] = useState<{
     owner: string; snapshot?: UsdtMirrorSnapshot; receivedAt?: number; issue?: string;
@@ -72,6 +73,8 @@ export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follo
   const [openCampaigns, setOpenCampaigns] = useState<{ owner: string; rows: UsdtLiveCampaign[] }>();
   const wakePositions = useRef<() => void>();
   const wakeCampaigns = useRef<() => void>();
+  const campaignObserver = useRef(onCampaigns);
+  campaignObserver.current = onCampaigns;
   const current = connected && positionView?.owner === owner ? positionView : undefined;
   const snapshotClock = useRef(current);
   snapshotClock.current = current;
@@ -134,6 +137,8 @@ export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follo
       const since = Math.max(1, ((resetCursor ? undefined : previous) ?? (exchangeTime ?? Date.now()) - recentHistory) - retryOverlap);
       const batch = await readCampaigns(since, open, signal);
       if (signal.aborted) return;
+      // Start settlement calibration before archive storage and cloud sync.
+      campaignObserver.current?.(batch.campaigns);
       await saveUsdtCampaignBatch(owner, batch.campaigns, batch.observedAt);
       if (signal.aborted) return;
       setOpenCampaigns({ owner, rows: batch.campaigns.filter(row => !row.closedAt) });

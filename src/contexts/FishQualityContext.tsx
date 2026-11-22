@@ -14,7 +14,7 @@ import { useUsdtLiveTrading } from '@/hooks/useUsdtLiveTrading';
 import { useBinanceManualMonitor } from '@/hooks/useBinanceManualMonitor';
 import { useFishScreeningAutomation } from '@/hooks/useFishScreeningAutomation';
 
-import { registerInstantBalanceReader } from '@/lib/fish/instantPositionSettings';
+import { useInstantBalanceCalibration } from '@/hooks/useInstantBalanceCalibration';
 import {prioritizeInstantScreening} from '@/lib/fish/libraryLoadQueue';
 import {loadFishAccountPreferences} from '@/hooks/useFishAccountSettings';
 import { useInstantPositionSettings } from '@/hooks/useInstantPositionSettings';
@@ -24,6 +24,7 @@ const EMPTY: readonly TradeSignal[] = [];
 type InstantPositionsView = Pick<ReturnType<typeof useFishCdaTracking>, 'monitorResults' | 'mirrorFills' | 'manualPositions'> & {
   positions: ReturnType<typeof useInstantCampaigns>['positions'];
   usdtFollow?: ReturnType<typeof useUsdtFollow>;
+  balanceCalibration?: ReturnType<typeof useInstantBalanceCalibration>;
   usdtLive?: ReturnType<typeof useUsdtLiveTrading> & { management?: ReturnType<typeof useBinanceManualMonitor> };
   manage?: ReturnType<typeof useFishCdaTracking>['managePosition'];
 };
@@ -57,22 +58,23 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const executionMonitor = { ...preEntry,...preEntry.automaticState,ready:automaticReady, library: preEntry.automaticLibrary };
   const cdaTracking = useFishCdaTracking(owner, executionMonitor.library, automaticReady || preEntry.instantReady && preferenceStatus === 'ready', notify, true);
   const usdtFollow = useUsdtFollow(owner, cdaTracking);
-  const usdtLive = useUsdtLiveTrading(owner, usdtFollow);
-  useEffect(() => {
-    if (!owner || !usdtFollow.connected || !usdtFollow.orderDesk) return;
-    return registerInstantBalanceReader(owner, async signal => (await usdtFollow.readDeskQuote('BTCUSDT', signal)).available);
-  }, [owner, usdtFollow.connected, usdtFollow.orderDesk, usdtFollow.readDeskQuote]);
+  const balanceCalibration = useInstantBalanceCalibration(owner, usdtFollow);
+  const usdtLive = useUsdtLiveTrading(owner, usdtFollow, balanceCalibration.campaigns);
   const management = useBinanceManualMonitor(usdtFollow, usdtLive, instantMonitor.settings);
   const { issue: campaignIssue, positions } = useInstantCampaigns(owner, cdaTracking, true);
   const holdingsReady = usdtFollow.pairingReady && (!usdtFollow.paired || usdtFollow.connected && !!usdtLive.snapshot && !usdtLive.issue);
   const fastReady = preferenceStatus === 'ready' && instantMonitor.restoreStatus === 'ready' && preEntry.instantReady && holdingsReady;
-  const automatic = useFishScreeningAutomation(owner, automaticReady || fastReady, executionMonitor, notify, preferenceStatus === 'ready' && !!instantPosition.settings);
+  const automatic = useFishScreeningAutomation(owner, automaticReady || fastReady, executionMonitor, notify,
+    preferenceStatus === 'ready' && !!instantPosition.settings && (!usdtFollow.paired || balanceCalibration.ready));
   let waitingReason = automatic.waitingReason;
   if (!automaticReady && automatic.pending && !automatic.paused) {
     if (preferenceStatus !== 'ready') waitingReason = preferenceStatus === 'error' ? '账号设置读取失败' : '正在读取即时交易设置';
     else if (instantMonitor.restoreStatus !== 'ready') waitingReason = instantMonitor.restoreStatus === 'error' ? '买后设置读取失败，正在重试' : '正在核对买后设置';
     else if (!preEntry.instantReady) waitingReason = preEntry.instantLoadError || '正在核对即时持仓记录';
     else if (!holdingsReady) waitingReason = '正在核对实盘连接与持仓';
+  }
+  if (automatic.pending && !automatic.paused && usdtFollow.paired && !balanceCalibration.ready) {
+    waitingReason = balanceCalibration.issue ?? (usdtFollow.connected ? '正在后台校准实盘金额' : '正在核对实盘连接与持仓');
   }
   const automaticScreening = { ...automatic, waitingReason };
   useEffect(() => owner ? registerInstantHoldingCheck(owner, symbol => {
@@ -98,7 +100,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const templates=state.study.planTemplates??state.templateCatalog;
   const names=useMemo(()=>({owner,resolver:qualityTemplateNames({planTemplates:templates})}),[owner,templates]);
   return <FishQualityContext.Provider value={{ state: { ...state, requestStudyArchive: () => {activate();state.requestStudyArchive();}, requestScreeningArchive: screeningRequested?undefined:() => setScreeningRequested(true), instantPreferenceStatus:preferenceStatus, retryInstantPreferences:()=>setPreferenceAttempt(n=>n+1), automaticScreening, instantMonitor, instantPosition, cdaTracking: { ...cdaTracking, campaignIssue } }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
-    <QualityTemplateNamesContext.Provider value={names}><InstantPositionsContext.Provider value={{ positions, monitorResults: cdaTracking.monitorResults, mirrorFills: cdaTracking.mirrorFills, manualPositions: cdaTracking.manualPositions, usdtFollow, usdtLive: { ...usdtLive, management }, manage: cdaTracking.managePosition }}>{children}</InstantPositionsContext.Provider></QualityTemplateNamesContext.Provider>
+    <QualityTemplateNamesContext.Provider value={names}><InstantPositionsContext.Provider value={{ positions, monitorResults: cdaTracking.monitorResults, mirrorFills: cdaTracking.mirrorFills, manualPositions: cdaTracking.manualPositions, usdtFollow, balanceCalibration, usdtLive: { ...usdtLive, management }, manage: cdaTracking.managePosition }}>{children}</InstantPositionsContext.Provider></QualityTemplateNamesContext.Provider>
     {(state.running || state.filterRunning || state.postExit?.running || state.preEntry?.running) && location.pathname !== '/' && <div role="status" className="fixed bottom-4 right-4 z-50 space-y-1 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
       {state.preEntry?.running && <div>买前筛选后台运行中 · {state.preEntry.progress?.done ?? 0}/{state.preEntry.progress?.total ?? 0}</div>}
       {state.filterRunning && <div>过滤后台运行中 · {state.filterProgress?.done ?? 0}/{state.filterProgress?.total ?? 0}</div>}

@@ -1,36 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import type { useInstantPositionSettings } from '@/hooks/useInstantPositionSettings';
 import { DEFAULT_INSTANT_POSITION, sizeInstantEntry, type InstantPositionSettings } from '@/lib/fish/instantPositionSettings';
+import { formatUTC8 } from '@/lib/timeFormat';
 
 type PositionControl = ReturnType<typeof useInstantPositionSettings>;
 const inputStyle = 'block w-full rounded-md border bg-background px-3 py-2 font-mono text-sm tabular-nums';
 
 function PositionEditor({ control, onApply }: { control: PositionControl; onApply?: (position: InstantPositionSettings) => void }) {
-  const follow = useScreenedInstantPositions()?.usdtFollow;
-  const quote = follow?.connected && follow.orderDesk ? follow.readDeskQuote : undefined;
-  const [balance, setBalance] = useState<number>();
-  const [balanceError, setBalanceError] = useState('');
-  useEffect(() => {
-    const abort = new AbortController();
-    let busy = false;
-    setBalance(undefined); setBalanceError('');
-    const refresh = async () => {
-      if (!quote || busy || abort.signal.aborted || document.hidden) return;
-      busy = true;
-      try {
-        const available = Number((await quote('BTCUSDT', abort.signal)).available);
-        if (!Number.isFinite(available) || available < 0) throw Error('余额无效');
-        if (!abort.signal.aborted) { setBalance(available); setBalanceError(''); }
-      } catch { if (!abort.signal.aborted) { setBalance(undefined); setBalanceError('余额读取失败，正在重试'); } }
-      finally { busy = false; }
-    };
-    if (!quote) return;
-    void refresh();
-    const timer = window.setInterval(refresh, 15_000);
-    document.addEventListener('visibilitychange', refresh);
-    return () => { abort.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
-  }, [quote, follow?.owner]);
+  const instant = useScreenedInstantPositions();
+  const calibration = instant?.balanceCalibration;
+  const balance = calibration?.ready ? calibration.availableUsdt : undefined;
   const initial = control.settings ?? DEFAULT_INSTANT_POSITION;
   const [funds, setFunds] = useState(String(initial.availableUsdt));
   const [pct, setPct] = useState(String(initial.marginPct));
@@ -54,15 +34,18 @@ function PositionEditor({ control, onApply }: { control: PositionControl; onAppl
     finally { setSaving(false); }
   };
   return <fieldset disabled={saving} className="mt-3 space-y-3">
-    <p className="text-muted-foreground">币安跟随每笔开仓前读取 U 本位账户的可用 USDT。模拟资金可单独设定。</p>
+    <p className="text-muted-foreground">首次连接时初始化实盘金额，此后在实盘战役全部平仓后更新。新开仓直接使用已校准金额；模拟资金可单独设定。</p>
     <div className="grid gap-3 sm:grid-cols-3">
       <label>模拟可用资金（USDT）<input className={inputStyle} type="number" min="0" step="any" value={funds} onChange={e => { setFunds(e.target.value); setNotice(''); }}/></label>
       <label>首仓保证金比例（%）<input className={inputStyle} type="number" min="0" max="100" step="any" value={pct} onChange={e => { setPct(e.target.value); setNotice(''); }}/></label>
       <label>持仓杠杆（倍）<input className={inputStyle} type="number" min="1" max="125" step="1" value={leverage} onChange={e => { setLeverage(e.target.value); setNotice(''); }}/></label>
     </div>
     <div className="rounded-md bg-muted/50 p-3 tabular-nums">
-      <p>币安实时可用资金　{balance != null ? balance + ' USDT' : quote ? balanceError || '正在读取…' : '未连接'}</p>
+      <p>币安已校准可用资金　{balance != null ? balance + ' USDT' : calibration?.issue || (instant?.usdtFollow?.connected ? '正在校准…' : '未连接')}</p>
+      {calibration?.balanceObservedAt && <p className="text-xs text-muted-foreground">校准时间 {formatUTC8(calibration.balanceObservedAt)}（UTC+8）</p>}
       {balance != null && size && <p>预计首仓保证金 {balance * (draft.marginPct / 100)} USDT · 首仓名义仓位 {balance * (draft.marginPct / 100) * draft.leverage} USDT</p>}
+      {instant?.usdtFollow?.connected && calibration && <button type="button" className="mt-1 rounded border px-2 py-1 text-xs disabled:opacity-40" disabled={calibration.refreshing}
+        onClick={() => void calibration.refresh()}>{calibration.refreshing ? '正在校准…' : '重新校准实盘金额'}</button>}
     </div>
     <p className="tabular-nums">模拟首仓保证金 {size?.marginUsdt ?? '—'} USDT · 首仓名义仓位 {size?.notional ?? '—'} USDT</p>
     {onApply && <label className="flex items-center gap-2"><input type="checkbox" checked={applyToSimulation} onChange={e => setApplyToSimulation(e.target.checked)}/>同时填入当前模拟方案</label>}

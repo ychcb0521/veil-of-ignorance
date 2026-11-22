@@ -1,7 +1,8 @@
 import { signalDedupKey } from '@/lib/signalLibrary';
 import {readFishLibrary} from '@/lib/fish/libraryLoadQueue';
 import { reserveInstantAdmission } from '@/lib/fish/instantAdmission';
-import { freezeLivePositionBudget, readInstantPositionSettings } from '@/lib/fish/instantPositionSettings';
+import { readInstantPositionSettings } from '@/lib/fish/instantPositionSettings';
+import { freezeCalibratedLivePositionBudget } from '@/lib/fish/instantBalanceCalibration';
 import { readInstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
 import { createPreEntryCheckpoint } from '@/lib/fish/preEntryCheckpoint';
 import {newPreEntryHours, selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
@@ -210,7 +211,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const checkpointMatch = (record: PreEntryRecord, completed: PreEntryRound): Promise<boolean> => (async () => {
       completed = unconfirmedAdmissions.current.get(completed.id) ?? completed;
       if (completed.instantPosition && completed.liveCapturedAt && owner) {
-        const instantPosition = await freezeLivePositionBudget(owner, completed.instantPosition, aborter.signal);
+        const instantPosition = freezeCalibratedLivePositionBudget(owner, completed.instantPosition);
         if (!live() || aborter.signal.aborted) return false;
         completed = { ...completed, instantPosition };
         admittedRound = completed;
@@ -364,7 +365,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
               const position = completed.instantPosition ?? readInstantPositionSettings(owner);
               if (!position) throw Error('仓位设置不可用，等待恢复后核对入选');
               const instantPosition = completed.liveCapturedAt
-                ? await freezeLivePositionBudget(owner, position, new AbortController().signal) : position;
+                ? freezeCalibratedLivePositionBudget(owner, position) : position;
               if (generation !== epoch.current) return;
               completed = { ...completed, instantPosition };
               unconfirmedAdmissions.current.set(existing.id, completed);
