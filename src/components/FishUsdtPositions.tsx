@@ -1,4 +1,5 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
+import { FISH_PANEL_DEFAULTS } from './fishPanelDefaults';
 import {useQualityTemplateNames} from '@/contexts/QualityTemplateNamesContext';
 import { ChevronDown, ChevronRight, RefreshCw, Wallet } from 'lucide-react';
 import type { useUsdtFollow } from '@/hooks/useUsdtFollow';
@@ -127,8 +128,8 @@ function PositionFills({evidence,asset,unit}:{evidence?:UsdtMirrorHistory;asset:
 export function FishUsdtPositions({follow,live,monitorTemplates}:{follow:Follow;live?:Live;monitorTemplates?:readonly InstantMonitorPlanChoice[]}) {
   const count=follow.connected?live?.snapshot?.positions.length??0:0;
   const hasPosition=count>0;
-  const [open,setOpen]=useState(hasPosition);
-  useEffect(()=>{if(hasPosition)setOpen(true);},[hasPosition]);
+  const [open,setOpen]=useState(FISH_PANEL_DEFAULTS.secondary && hasPosition);
+  useEffect(()=>{if(FISH_PANEL_DEFAULTS.secondary && hasPosition)setOpen(true);},[hasPosition]);
   const id = useId();
   return <section aria-label="币安实盘持仓">
     <h5><button type="button" aria-controls={id} aria-expanded={open} onClick={()=>setOpen(value=>!value)} className={fishSubHeading}>

@@ -2,7 +2,7 @@ import "@testing-library/jest-dom";
 import { FISH_PANEL_DEFAULTS } from "@/components/fishPanelDefaults";
 
 // 常规交互测试直接访问折叠区里的控件。
-Object.assign(FISH_PANEL_DEFAULTS, { catching: true, cabin: true });
+Object.assign(FISH_PANEL_DEFAULTS, { catching: true, cabin: true, quality: true, secondary: true });
 
 if (typeof window !== "undefined") Object.defineProperty(window, "matchMedia", {
   writable: true,

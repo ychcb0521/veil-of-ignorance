@@ -1,3 +1,4 @@
+import { FISH_PANEL_DEFAULTS } from './fishPanelDefaults';
 import {percentilePosition} from '@/lib/fish/filterDetectorReadings';
 import {FishStudyRecoveryStatus} from './FishStudyRecoveryStatus';
 import { captureLimitText } from '@/lib/fish/thresholdRange';
@@ -418,7 +419,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const uid=useId(),titleId=archiveView?uid+'-title':'fish-quality-title',contentId=archiveView?uid+'-content':'fish-quality-content';
   const [back] = useState(() => { const saved=archiveView?undefined:pendingQualityReturn(); if(saved?.owner&&state.account&&saved.owner!==state.account){finishQualityReturn();return undefined;}return saved; }), ui = back?.ui;
   const [manualOpen, setManualOpen] = useState(false);
-  const [open, setOpen] = useState(ui?.open ?? true), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithmChoice, setAlgorithmsState] = useState<string[]>(() => ui?.algorithms ?? (ui?.algorithm ? [ui.algorithm] : [])), [origin, setOrigin] = useState<QualityReturnUi['origin']>(workspace ? '' : ui?.origin ?? '');
+  const [open, setOpen] = useState(ui?.open ?? (archiveView || FISH_PANEL_DEFAULTS.quality)), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithmChoice, setAlgorithmsState] = useState<string[]>(() => ui?.algorithms ?? (ui?.algorithm ? [ui.algorithm] : [])), [origin, setOrigin] = useState<QualityReturnUi['origin']>(workspace ? '' : ui?.origin ?? '');
   const [directoryChoice,setDirectoryChoice]=useState<QualitySourceDirectory|undefined>(workspace ? undefined : ui?.directory);
   const [screeningRunId,setScreeningRunId]=useState<string|undefined>(ui?.screeningRunId ?? lockedBatch?.workingRoundId);
   const [directoryRequests,setDirectoryRequests]=useState<Partial<Record<QualitySourceDirectory['kind']|'monitor',FishDirectoryRequest>>>({});
@@ -937,13 +938,19 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     return()=>window.clearTimeout(timer);
   },[tableExport,exportOwner]);
 
+  const instantTrading = !archiveView && state.preEntry && <section className="min-w-0 border-t border-border/50 px-4 py-3" aria-label="即时交易区域">
+    <FishInstantTrading key={state.account} state={state} capturing={capturing}>
+          <FishScreened state={state} library={state.preEntry.library} ratings={study.sourceRatings} onJump={onJump} canJump={canJump} onRate={onRate}
+            jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}/>
+        </FishInstantTrading></section>;
+
   const body=<section ref={rootRef} className="min-w-0 border-t border-border/50 px-4 py-3" aria-labelledby={titleId} data-testid={archiveView?"quality-archive-board":"fish-quality"}>
     {!archiveKind&&<><div className="flex items-center justify-between gap-2">
       <div className="flex items-center gap-0.5"><h3><button id={titleId} type="button" className={fishSectionHeading} aria-expanded={open} aria-controls={contentId} onClick={() => setOpen(!open)}><Gauge aria-hidden className="h-3 w-3 text-muted-foreground"/><span>{archiveView?'归档运行结果':'鱼质量'}</span>{archiveView&&<FishCount n={countSignals(allRows)}/>}<ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`}/></button></h3>
         <button type="button" aria-label="鱼质量说明" title="鱼质量说明" className={fishInfoTrigger} onClick={() => setManualOpen(true)}><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button>
       </div>
     </div>
-    {!ready && state.requestWorkspace && <button type="button" className={button} onClick={state.requestWorkspace}>载入研究工作区</button>}
+    {open && !ready && state.requestWorkspace && <button type="button" className={button} onClick={state.requestWorkspace}>载入研究工作区</button>}
     <FishQualityManual open={manualOpen} onOpenChange={setManualOpen}><>
       <p>批量捕捞、买前过滤、持仓监测独立运行和暂停。买前过滤分为静态过滤、动态筛选。开始过滤、筛选和监测，只处理当前来源、月份、探测算法和标的范围内已勾选的记录；本轮清单和条件在开始时冻结。</p>
       <p>勾选标的后点击「锁定所选」，可单独查看和处理本批。解除锁定可返回原筛选范围。</p>
@@ -1043,10 +1050,6 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
             label={progress?.waitingUntil ? '等待续跑' : '监测进行中'} done={progress?.done ?? 0} total={progress?.total ?? 0}
             waitingUntil={progress?.waitingUntil} detail={study.monitorTimeBasis && `监测起点：${qualityMonitorTimeLabels[study.monitorTimeBasis]}`}/>}
         </FishQualityModule>
-        {state.preEntry && <FishInstantTrading key={state.account} state={state} capturing={capturing}>
-          <FishScreened state={state} library={state.preEntry.library} ratings={study.sourceRatings} onJump={onJump} canJump={canJump} onRate={onRate}
-            jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}/>
-        </FishInstantTrading>}
       </div>}
       <div style={{height:compactTableHeight}}>
       <div ref={tableRegionRef}
@@ -1191,7 +1194,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     {tableExport&&<div hidden aria-hidden="true" data-testid="quality-export-batch"><table ref={exportTableRef}><tbody>{tableExport.entries.slice(tableExport.offset,tableExport.offset+EXPORT_BATCH).map(({row,index})=>tableExport.render(row,index))}</tbody></table></div>}
     <RowDetail row={allRows.find(r => r.id === detailId)} state={state} templateTable={templateTable} close={() => setDetailId('')}/>
   </section>;
-  return <QualityArchiveContext.Provider value={archiveView}><DirectoryImportContext.Provider value={workspace ? {onImport:importWorkspace,onImportInformation:workspace.importInformation?importWorkspaceInformation:undefined,prepareImport:prepareSourceImport} : undefined}><ArchiveRowsRenderer.Provider value={renderDirectoryBoard}>{body}</ArchiveRowsRenderer.Provider></DirectoryImportContext.Provider></QualityArchiveContext.Provider>;
+  return <QualityArchiveContext.Provider value={archiveView}><DirectoryImportContext.Provider value={workspace ? {onImport:importWorkspace,onImportInformation:workspace.importInformation?importWorkspaceInformation:undefined,prepareImport:prepareSourceImport} : undefined}><ArchiveRowsRenderer.Provider value={renderDirectoryBoard}>{body}{instantTrading}</ArchiveRowsRenderer.Provider></DirectoryImportContext.Provider></QualityArchiveContext.Provider>;
 }
 
 /** Reuse the live table's renderer; only selection/filter/expansion state is local to the viewer. */

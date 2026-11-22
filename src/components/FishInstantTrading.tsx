@@ -142,7 +142,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
     ? follow.paused ? '已暂停开仓和加仓' : verifiedExecutor ? '本机实盘跟随中' : '本机执行端待更新'
     : follow?.issue ? '实盘跟随未连通' : '实盘跟随连接中';
   const screeningIssue = state.preEntry?.automaticError || automatic?.attemptIssue;
-  return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={<div className={fishRail + ' mt-2 space-y-1'}>
+  return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" defaultOpen subsection={<div className={fishRail + ' mt-2 space-y-1'}>
     {children}{follow && <FishUsdtPositions key={follow.owner} follow={follow} live={live}
       monitorTemplates={activeQualityPlanTemplates({ planTemplates: state.study.planTemplates ?? state.templateCatalog })}/>}
   </div>}
