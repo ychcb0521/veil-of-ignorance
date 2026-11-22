@@ -61,11 +61,16 @@ it('opens only the filter detector page and sorts by the original percentile',as
   const row=(id:string,percentile:number)=>filterBrowseRow({id,source:{id,symbol:id,timeMs:1,timeLabel:'',fallbackZone:''},
     status:{state:'none',detail:'冻结记录'},sourceSelection:{hits:[
       {family:'CBA',readings:[{metric:'avg_CBA_2',reading:0,percentile:79.5}]},
-      {family:'BSS',readings:[{metric:'avg_BSS_2',reading:0.14,percentile}]}]}});
+      {family:'BSS',readings:[{metric:'avg_BSS_2',reading:0.13146699636353357,percentile}]}]}});
   calls.body.mockResolvedValue([row('SECOND',98.1),row('FIRST',91.2)]);
   render(<FishArchiveBrowse owner="alice" scope="filter" query=""/>);
   fireEvent.click(await screen.findByRole('button',{name:/并集目录/}));
   await screen.findByText('98.1%');
+  expect(screen.getAllByRole('columnheader')).toHaveLength(5);
+  expect(screen.queryByRole('button',{name:'按归档记录排序'})).toBeNull();
+  expect(screen.getAllByText('0.13146699636353357')).toHaveLength(2);
+  expect(screen.getAllByText('0')).toHaveLength(2);
+  expect(screen.getAllByText('BSS · avg_BSS_2')).toHaveLength(2);
   fireEvent.click(screen.getByRole('button',{name:'按百分位位置排序'}));
   expect(screen.getAllByRole('row')[1]).toHaveTextContent('FIRST');
   expect(screen.getAllByRole('row')[1]).toHaveTextContent('79.5%');
@@ -183,8 +188,8 @@ it.each<BrowseScope>(['filter','mining','screen'])('streams only the expanded ro
   expect(screen.queryByRole('button',{name:'下一页'})).toBeNull();
   expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['a','b']);
   scrollNearEnd(); scrollNearEnd();
-  await screen.findByText('c');
-  expect(screen.getByText('b')).toBeInTheDocument();
+  await waitFor(()=>expect(screen.getByRole('table')).toHaveAttribute('aria-rowcount','3'));
+  if(scope!=='filter'){expect(screen.getByText('c')).toBeInTheDocument();expect(screen.getByText('b')).toBeInTheDocument();}
   fireEvent.click(latest);
   expect(screen.queryByText('NEW')).toBeNull();
   expect(calls.body.mock.calls.map(([,key])=>key)).toEqual(['a','b','c']);

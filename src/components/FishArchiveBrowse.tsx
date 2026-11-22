@@ -102,12 +102,12 @@ function ArchiveRecords({owner, directory, pages, reload, pick, filter}: {
         导入所选到组合表
       </button>
     </div>}
-    <FishContinuousTable items={sorted} getKey={archiveRowKey} columns={(pick?4:3)+(filter?3:0)} resetKey={JSON.stringify([owner,sort])}
+    <FishContinuousTable items={sorted} getKey={archiveRowKey} columns={(pick?1:0)+(filter?5:3)} resetKey={JSON.stringify([owner,sort])}
       label="归档记录连续滚动列表" testId="archive-record-scroll" estimate={24} className="max-h-72"
-      tableClassName="text-left" header={<tr>{pick&&<th scope="col">选取</th>}{sortHeader(0,'标的')}{sortHeader(1,'信号时间（北京时间）')}{filter&&<>{sortHeader('metric','探测算法')}{sortHeader('reading','探测值')}{sortHeader('percentile','百分位位置')}</>}{sortHeader(2,'归档记录')}</tr>}
+      tableClassName="text-left" header={<tr>{pick&&<th scope="col">选取</th>}{sortHeader(0,'标的')}{sortHeader(1,'信号时间（北京时间）')}{filter?<>{sortHeader('metric','探测算法')}{sortHeader('reading','探测值')}{sortHeader('percentile','百分位位置')}</>:sortHeader(2,'归档记录')}</tr>}
       row={row => <tr className="[&>td]:border-t">{pick&&<td><input type="checkbox" aria-label={'勾选 '+row[0]+' '+formatUTC8(row[1])} checked={checked(row[3])}
         onChange={()=>setExceptions(prior=>{const ids=new Set(prior);if(ids.has(row[3]))ids.delete(row[3]);else ids.add(row[3]);return ids;})}/></td>}
-        <td className="pr-2 font-mono">{row[0]}</td><td className="whitespace-nowrap pr-2">{formatUTC8(row[1])}</td>{filter&&(['metric','reading','percentile'] as const).map(field=><td key={field}>{row[4]?.length?row[4].map((r,i)=><div key={i}>{field==='percentile'?percentilePosition(r):field==='metric'?r.metric:r.reading??(r.rawReading!==undefined?'原值 '+r.rawReading:'未记录')}</div>):'—'}</td>)}<td>{row[2]}</td></tr>}
+        <td className="pr-2 font-mono">{row[0]}</td><td className="whitespace-nowrap pr-2">{formatUTC8(row[1])}</td>{filter?(['metric','reading','percentile'] as const).map(field=><td key={field} className="whitespace-nowrap pr-2 tabular-nums">{row[4]?.length?row[4].map((r,i)=><div key={i}>{field==='percentile'?percentilePosition(r):field==='metric'?r.metric:r.reading??(r.rawReading!==undefined?'原值 '+r.rawReading:'未记录')}</div>):'未记录'}</td>):<td>{row[2]}</td>}</tr>}
       footer={!loading && !error && next < pages.length ? <FishScrollBoundary key={next} onReach={loadNext}/> : null}/>
     {loading && <p role="status">{rows.length ? '正在读取后续记录…' : '正在读取归档记录…'}</p>}
     {error && <p role="alert">{error} <button type="button" className="underline" onClick={loadNext}>重试读取</button>
