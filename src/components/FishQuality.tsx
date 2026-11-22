@@ -1031,50 +1031,10 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
             jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}/>
         </FishInstantTrading>}
       </div>}
-      {workspace && <FishQualityModule title="来源" icon={Database} testId="quality-workspace-sources" defaultOpen={false}>
-        <FishWorkspaceSource name="信号库" loadSnapshot={workspace.sources?.library} onImport={importWorkspace} prepareImport={prepareSourceImport}/>
-        <FishWorkspaceSource name="图灵杯" loadSnapshot={workspace.sources?.turing} onImport={importWorkspace} prepareImport={prepareSourceImport} {...state.workspaceTuringSource}/>
-        <FishWorkspaceSource name="鱼舱" loadSnapshot={workspace.sources?.fish} onImport={importWorkspace} prepareImport={prepareSourceImport}/>
-        {mining ? <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('mined')}><Database aria-hidden className="h-3 w-3"/>捕捞库</button> :
-          <FishWorkspaceSource name="捕捞库" loadSnapshot={workspace.sources?.mined} onImport={importWorkspace}/>}
-        <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('filter')}><Database aria-hidden className="h-3 w-3"/>过滤库</button>
-        <button type="button" className={fishSourceButton} disabled={!state.preEntry} onClick={()=>openWorkspaceLibrary('pre-entry')}><Database aria-hidden className="h-3 w-3"/>筛选库</button>
-        <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('monitor')}><Database aria-hidden className="h-3 w-3"/>监测库</button>
-      </FishQualityModule>}
       <div style={{height:compactTableHeight}}>
       <div ref={tableRegionRef}
         className={tableMaximized ? 'fixed inset-x-0 top-0 z-40 flex h-[100dvh] min-h-0 flex-col space-y-2 overflow-hidden bg-background p-3' : 'space-y-2'}
         role={tableMaximized ? 'region' : undefined} aria-label={tableMaximized ? '纵向最大化的组合表' : undefined}>
-      {!lockedBatch && <div className="flex flex-wrap items-center gap-1.5">
-        {!workspace && <FishQualitySourcePicker value={origin} onSelect={selectSource} options={[
-          {value:'',label:'全部来源',count:countSignals(batch)},
-          {value:'library',label:'信号库',count:countSignals(batch.filter(r=>hasSource(r,'library')))},
-          {value:'turing',label:'图灵杯',count:countSignals(batch.filter(r=>hasSource(r,'turing')))},
-          ...(!archiveView?[{value:'filter' as const,label:'过滤库',count:new Set(study.filterLibrary?.records.map(r=>qualityEntryIdentity(r.source,r.enteredAt))).size}]:[]),
-          {value:'pre-entry',label:'筛选库',count:state.preEntry?new Set(state.preEntry.library.records.filter(r=>r.status==='matched').map(r=>[r.sample.source.symbol,r.matchedAt].join('|'))).size:countSignals(batch.filter(r=>hasSource(r,'pre-entry')))},
-          {value:'mined',label:'捕捞库',count:countSignals(batch.filter(r=>hasSource(r,'mined')))},
-          {value:'fish',label:'鱼舱',count:countSignals(batch.filter(r=>hasSource(r,'fish')))},
-        ]}/>}
-        {!workspace&&directoryChoice&&<span className="text-[10px] text-muted-foreground" data-testid="quality-active-directory">已选目录{directoryIds.length>1?`（${directoryIds.length}）`:''}：{directoryIds.map(id=>directoryEdits?.[id]?.name||(id==='filter-legacy'?'历史记录':directoryChoice.kind==='mined'?id.replace('mining-family-','')+' 系列':formatUTC8(directoryChoice.kind==='filter'?study.filterLibrary?.rounds.find(r=>r.id===id)?.startedAt??0:state.preEntry?.library.rounds.find(r=>r.id===id)?.startedAt??0))).join('、')}</span>}
-        <span className="relative shrink-0"><select aria-label="鱼质量的月份" title="按信号发生月份筛选。可在捕捞库按实际捕捞日期搜索，再带到组合表。" className={`${field} appearance-none pr-6 font-mono`} value={month} onChange={e => { setMonth(e.target.value); resetScroll(); }}><option value="">全部月份（{countSignals(narrowed)}）</option>{months.map(m => <option key={m} value={m}>{m}（{monthCounts.get(m) ?? 0}）</option>)}</select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
-        {showCabinAlgorithms&&catchTypes.labels.length>0&&<label className="relative shrink-0">
-          <select aria-label="筛选算法类型" className={`${field} appearance-none pr-6`} value={catchKind} onChange={e=>{setCatchKind(e.target.value);resetScroll();}}>
-            <option value="">全部算法类型</option>{catchTypes.labels.map(type=><option key={type}>{type}</option>)}
-          </select><ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/>
-        </label>}
-        <input aria-label="筛选鱼质量信号" placeholder="筛选标的…" value={query} onChange={e => { setQuery(e.target.value); resetScroll(); }} className={`${field} min-w-32 flex-1 placeholder:text-muted-foreground/50`}/>
-        {workspace && groups.length > 0 && <DetectorPicker choices={detectorChoices} signalsOf={signalsOf} selected={activeAlgorithms} onChange={setAlgorithms}>
-          <button type="button" aria-label="按探测算法筛选" title={chosenChoices.length ? chosenChoices.map(choiceText).join('、') : '按探测算法筛选'}
-            className={button + (activeAlgorithms.length ? ' bg-primary/15 text-primary' : '')}><Filter aria-hidden className="h-3.5 w-3.5"/>{chosenChoices.length > 0 && <span className="font-mono tabular-nums">{chosenChoices.length}</span>}</button>
-        </DetectorPicker>}
-        {!archiveKind&&<div className="ml-auto flex shrink-0 items-center gap-0.5 pl-1 text-[10.5px] text-muted-foreground" data-testid="quality-selection-scope"><span className="tabular-nums" data-testid="quality-run-scope">{selectedCount === selectedTotal ? `本轮处理已勾选 ${selectedCount} 条` : <>本轮处理 <span className="text-foreground">{selectedCount}</span> 条 · </>}</span>{outsideHint}<FishQualityInfo label="处理范围说明"><p>开始筛选、开始监测只处理当前表内经月份、探测算法和标的筛选后已勾选的信号，筛选外勾着的这一轮不处理。</p><p className="text-muted-foreground">已勾选 {selectedEntryCount} 次入场。开始时冻结勾选清单，之后调整勾选用于下一轮。</p></FishQualityInfo></div>}
-      </div>}
-      {state.archiving&&<p role="status" className="text-[11px] text-primary" data-testid="quality-archive-saving">{workspace?'正在保存结果…':'正在归档全部运行结果到监测库…保存完成后开始重算。'}</p>}
-      {state.entry&&(state.entry.running||state.entry.error)&&<div className="flex items-center gap-3 text-[10px] text-muted-foreground" data-testid="quality-entry-progress"><span>入场读数 {state.entry.progress?.done??0}/{state.entry.progress?.total??0}</span>{state.entry.running?<button type="button" className="text-primary hover:underline" onClick={state.entry.cancel}>暂停入场补算</button>:<button type="button" className="text-primary hover:underline" onClick={()=>state.entry?.request(plans.map(p=>p.id),visible.flatMap(qualityTableMembers).map(r=>r.signalId??r.id),true)}>重试入场读数</button>}{state.entry.error&&<span className="text-destructive">{state.entry.error}</span>}</div>}
-      {!archiveView&&postExitPlanIds.length>0&&<div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground" data-testid="quality-post-exit-progress"><span>卖后反事实 · 以实际最终卖出价为基准 · 0.5 / 1 / 2 / 4 / 6h</span>{state.postExit?.running?<><span role="status">补算 {state.postExit.progress?.done??0}/{state.postExit.progress?.total??0}</span><button type="button" className="text-primary hover:underline" onClick={state.postExit.cancel}>暂停反事实</button></>:<button type="button" className="text-primary hover:underline" onClick={()=>requestObservations(true)}>补算 / 重试反事实</button>}{state.postExit?.error&&<span className="text-destructive">{state.postExit.error}</span>}</div>}
-      {!ready && !state.requestWorkspace && <FishStudyRecoveryStatus owner={state.account} error={state.error} retry={state.retryStudyLoad}/>}
-      {(error || state.warning || state.error) && <p role="alert" className="text-[11px] text-destructive">{error || state.error || state.warning}</p>}
-      {/* 表格到达上下边界后，滚轮自然交给「渔」面板，避免只能移到表格外才能继续滚动。 */}
       <div className="flex flex-wrap items-center justify-between gap-2" data-testid="quality-combination-toolbar"><div className="inline-flex items-center gap-0.5"><h4 id={archiveKind?titleId:undefined} className="text-xs font-medium text-foreground" data-testid="quality-combination-title">组合表</h4>{!archiveKind&&<FishCombinationHelp workspace={!!workspace}/>}
           {lockedBatch && <span className="ml-1.5 text-[11px] tabular-nums text-muted-foreground" data-testid="quality-locked-batch">
             已锁定 {selectedCount} 条信号{batch.length < lockedBatch.rowIds.length ? ` · ${lockedBatch.rowIds.length - batch.length} 行已不可用` : ''}
@@ -1116,6 +1076,46 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           </button>}
         </div>
       </div>
+      {workspace && <FishQualityModule title="来源" icon={Database} testId="quality-workspace-sources" defaultOpen={false}>
+        <FishWorkspaceSource name="信号库" loadSnapshot={workspace.sources?.library} onImport={importWorkspace} prepareImport={prepareSourceImport}/>
+        <FishWorkspaceSource name="图灵杯" loadSnapshot={workspace.sources?.turing} onImport={importWorkspace} prepareImport={prepareSourceImport} {...state.workspaceTuringSource}/>
+        <FishWorkspaceSource name="鱼舱" loadSnapshot={workspace.sources?.fish} onImport={importWorkspace} prepareImport={prepareSourceImport}/>
+        {mining ? <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('mined')}><Database aria-hidden className="h-3 w-3"/>捕捞库</button> :
+          <FishWorkspaceSource name="捕捞库" loadSnapshot={workspace.sources?.mined} onImport={importWorkspace}/>}
+        <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('filter')}><Database aria-hidden className="h-3 w-3"/>过滤库</button>
+        <button type="button" className={fishSourceButton} disabled={!state.preEntry} onClick={()=>openWorkspaceLibrary('pre-entry')}><Database aria-hidden className="h-3 w-3"/>筛选库</button>
+        <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('monitor')}><Database aria-hidden className="h-3 w-3"/>监测库</button>
+      </FishQualityModule>}
+      {!lockedBatch && <div className="flex flex-wrap items-center gap-1.5">
+        {!workspace && <FishQualitySourcePicker value={origin} onSelect={selectSource} options={[
+          {value:'',label:'全部来源',count:countSignals(batch)},
+          {value:'library',label:'信号库',count:countSignals(batch.filter(r=>hasSource(r,'library')))},
+          {value:'turing',label:'图灵杯',count:countSignals(batch.filter(r=>hasSource(r,'turing')))},
+          ...(!archiveView?[{value:'filter' as const,label:'过滤库',count:new Set(study.filterLibrary?.records.map(r=>qualityEntryIdentity(r.source,r.enteredAt))).size}]:[]),
+          {value:'pre-entry',label:'筛选库',count:state.preEntry?new Set(state.preEntry.library.records.filter(r=>r.status==='matched').map(r=>[r.sample.source.symbol,r.matchedAt].join('|'))).size:countSignals(batch.filter(r=>hasSource(r,'pre-entry')))},
+          {value:'mined',label:'捕捞库',count:countSignals(batch.filter(r=>hasSource(r,'mined')))},
+          {value:'fish',label:'鱼舱',count:countSignals(batch.filter(r=>hasSource(r,'fish')))},
+        ]}/>}
+        {!workspace&&directoryChoice&&<span className="text-[10px] text-muted-foreground" data-testid="quality-active-directory">已选目录{directoryIds.length>1?`（${directoryIds.length}）`:''}：{directoryIds.map(id=>directoryEdits?.[id]?.name||(id==='filter-legacy'?'历史记录':directoryChoice.kind==='mined'?id.replace('mining-family-','')+' 系列':formatUTC8(directoryChoice.kind==='filter'?study.filterLibrary?.rounds.find(r=>r.id===id)?.startedAt??0:state.preEntry?.library.rounds.find(r=>r.id===id)?.startedAt??0))).join('、')}</span>}
+        <span className="relative shrink-0"><select aria-label="鱼质量的月份" title="按信号发生月份筛选。可在捕捞库按实际捕捞日期搜索，再带到组合表。" className={`${field} appearance-none pr-6 font-mono`} value={month} onChange={e => { setMonth(e.target.value); resetScroll(); }}><option value="">全部月份（{countSignals(narrowed)}）</option>{months.map(m => <option key={m} value={m}>{m}（{monthCounts.get(m) ?? 0}）</option>)}</select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
+        {showCabinAlgorithms&&catchTypes.labels.length>0&&<label className="relative shrink-0">
+          <select aria-label="筛选算法类型" className={`${field} appearance-none pr-6`} value={catchKind} onChange={e=>{setCatchKind(e.target.value);resetScroll();}}>
+            <option value="">全部算法类型</option>{catchTypes.labels.map(type=><option key={type}>{type}</option>)}
+          </select><ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/>
+        </label>}
+        <input aria-label="筛选鱼质量信号" placeholder="筛选标的…" value={query} onChange={e => { setQuery(e.target.value); resetScroll(); }} className={`${field} min-w-32 flex-1 placeholder:text-muted-foreground/50`}/>
+        {workspace && groups.length > 0 && <DetectorPicker choices={detectorChoices} signalsOf={signalsOf} selected={activeAlgorithms} onChange={setAlgorithms}>
+          <button type="button" aria-label="按探测算法筛选" title={chosenChoices.length ? chosenChoices.map(choiceText).join('、') : '按探测算法筛选'}
+            className={button + (activeAlgorithms.length ? ' bg-primary/15 text-primary' : '')}><Filter aria-hidden className="h-3.5 w-3.5"/>{chosenChoices.length > 0 && <span className="font-mono tabular-nums">{chosenChoices.length}</span>}</button>
+        </DetectorPicker>}
+        {!archiveKind&&<div className="ml-auto flex shrink-0 items-center gap-0.5 pl-1 text-[10.5px] text-muted-foreground" data-testid="quality-selection-scope"><span className="tabular-nums" data-testid="quality-run-scope">{selectedCount === selectedTotal ? `本轮处理已勾选 ${selectedCount} 条` : <>本轮处理 <span className="text-foreground">{selectedCount}</span> 条 · </>}</span>{outsideHint}<FishQualityInfo label="处理范围说明"><p>开始筛选、开始监测只处理当前表内经月份、探测算法和标的筛选后已勾选的信号，筛选外勾着的这一轮不处理。</p><p className="text-muted-foreground">已勾选 {selectedEntryCount} 次入场。开始时冻结勾选清单，之后调整勾选用于下一轮。</p></FishQualityInfo></div>}
+      </div>}
+      {state.archiving&&<p role="status" className="text-[11px] text-primary" data-testid="quality-archive-saving">{workspace?'正在保存结果…':'正在归档全部运行结果到监测库…保存完成后开始重算。'}</p>}
+      {state.entry&&(state.entry.running||state.entry.error)&&<div className="flex items-center gap-3 text-[10px] text-muted-foreground" data-testid="quality-entry-progress"><span>入场读数 {state.entry.progress?.done??0}/{state.entry.progress?.total??0}</span>{state.entry.running?<button type="button" className="text-primary hover:underline" onClick={state.entry.cancel}>暂停入场补算</button>:<button type="button" className="text-primary hover:underline" onClick={()=>state.entry?.request(plans.map(p=>p.id),visible.flatMap(qualityTableMembers).map(r=>r.signalId??r.id),true)}>重试入场读数</button>}{state.entry.error&&<span className="text-destructive">{state.entry.error}</span>}</div>}
+      {!archiveView&&postExitPlanIds.length>0&&<div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground" data-testid="quality-post-exit-progress"><span>卖后反事实 · 以实际最终卖出价为基准 · 0.5 / 1 / 2 / 4 / 6h</span>{state.postExit?.running?<><span role="status">补算 {state.postExit.progress?.done??0}/{state.postExit.progress?.total??0}</span><button type="button" className="text-primary hover:underline" onClick={state.postExit.cancel}>暂停反事实</button></>:<button type="button" className="text-primary hover:underline" onClick={()=>requestObservations(true)}>补算 / 重试反事实</button>}{state.postExit?.error&&<span className="text-destructive">{state.postExit.error}</span>}</div>}
+      {!ready && !state.requestWorkspace && <FishStudyRecoveryStatus owner={state.account} error={state.error} retry={state.retryStudyLoad}/>}
+      {(error || state.warning || state.error) && <p role="alert" className="text-[11px] text-destructive">{error || state.error || state.warning}</p>}
+      {/* 表格到达上下边界后，滚轮自然交给「渔」面板，避免只能移到表格外才能继续滚动。 */}
       {rows.length ? <div ref={tableRef} onScroll={e => {const next=e.currentTarget.scrollTop;setScrollTop(current=>current===next?current:next);}} className={`${archiveView ? 'w-full [container-type:inline-size]' : 'w-fit'} max-w-full overflow-auto overscroll-x-contain rounded-lg border border-border/60 [overflow-anchor:none] ${tableMaximized ? 'min-h-0 flex-1 overscroll-y-contain' : archiveView ? 'max-h-[28rem]' : 'max-h-[max(16rem,calc(100dvh_-_20rem))]'}`} aria-label="组合表" data-testid="quality-fish-table">
         <table className="table-fixed border-separate border-spacing-0 whitespace-nowrap text-left text-[10px]"
           style={archiveView ? {width:'100%', minWidth:tableMinWidth} : {width:tableMinWidth}}>
