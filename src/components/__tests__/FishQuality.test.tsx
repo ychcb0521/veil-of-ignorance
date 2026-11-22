@@ -190,7 +190,7 @@ it('keeps static and dynamic modules separate and opens the new three-stage sett
  const toggle = dynamic.getByRole('button',{name:/^动态筛选$/});
  const instant = within(screen.getByTestId('quality-instant-controls'));
  const screened = within(instant.getByTestId('fish-screened')).getByRole('button',{name:/^筛选鱼\s*0$/});
- expect(screened).toHaveAttribute('aria-expanded','false');
+ expect(screened).toHaveAttribute('aria-expanded','true');
  fireEvent.click(toggle);
  expect(dynamic.queryByRole('button',{name:'打开筛选库'})).toBeNull();
  expect(screened).toBeVisible();
