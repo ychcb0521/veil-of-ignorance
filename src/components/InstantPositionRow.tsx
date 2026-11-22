@@ -118,7 +118,7 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
     ratio: <PositionNumber value={ratio==null?'—':ratio.toFixed(2)+'%'} title={riskTitle}/>,
     margin: <div><PositionNumber value={formatUSDT(held.margin)+' USDT'}/><div className="text-muted-foreground">（逐仓）</div></div>,
     pnl: <PositionPnl pnl={held.pnl} roe={held.roe}/>,
-    close: <PositionMarketClose disabled={closeDisabled} mark={quote?formatPrice(mark,symbol):undefined}
+    close: <PositionMarketClose marketOnly disabled={closeDisabled} mark={quote?formatPrice(mark,symbol):undefined}
       quantity={formatAmount(held.remainingQuantity)} onClick={openClose}/>,
     protection: <PositionProtectionPrices tp={tp==null?undefined:formatPrice(tp,symbol)} sl={orders?.sl==null?undefined:formatPrice(orders.sl,symbol)}>
       <PositionEditButton label="编辑仓位止盈止损" disabled={busy||!manage} onClick={modify}/>

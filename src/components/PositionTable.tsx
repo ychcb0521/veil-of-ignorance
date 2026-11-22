@@ -94,13 +94,13 @@ export function PositionEditButton({label,onClick,disabled,title,testId}:{
   </button>;
 }
 
-export function PositionMarketClose({onClick,disabled,mark,quantity}:{
-  onClick?:()=>void;disabled?:boolean;mark?:string;quantity?:string;
+export function PositionMarketClose({onClick,disabled,mark,quantity,marketOnly=false}:{
+  onClick?:()=>void;disabled?:boolean;mark?:string;quantity?:string;marketOnly?:boolean;
 }) {
   return <div className="flex items-center gap-3">
     <button type="button" aria-label="平仓" disabled={disabled||!onClick} onClick={onClick}
       className="text-[#B38518] hover:text-foreground disabled:opacity-40">市价</button>
-    <button type="button" disabled className="border-l border-border pl-3 text-muted-foreground">限价</button>
+    {!marketOnly&&<button type="button" disabled className="border-l border-border pl-3 text-muted-foreground">限价</button>}
     <span className="min-w-[5rem] rounded border border-border px-2 py-1 font-mono text-muted-foreground">{mark??'价格'}</span>
     <span className="min-w-[4rem] rounded border border-border px-2 py-1 font-mono text-muted-foreground">{quantity??'数量'}</span>
   </div>;

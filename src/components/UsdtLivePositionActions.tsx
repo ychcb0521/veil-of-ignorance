@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { useUsdtFollow } from '@/hooks/useUsdtFollow';
 import { formatPrice, getPriceDecimals } from '@/lib/formatters';
-import type { UsdtPositionAction, UsdtPositionControlRequest, UsdtPositionTarget, UsdtProtectionOrder } from '@/lib/fish/usdtPositionControls';
+import { USDT_MARKET_EXIT_ORDER, type UsdtPositionAction, type UsdtPositionControlRequest, type UsdtPositionTarget, type UsdtProtectionOrder } from '@/lib/fish/usdtPositionControls';
 import { usdtPositionDecimal, usdtPositionQuantityUnit, type UsdtMirrorPosition } from '@/lib/fish/usdtPositionMirror';
 import type { Position } from '@/types/trading';
 import { ClosePositionModal } from './ClosePositionModal';
@@ -110,7 +110,7 @@ export function UsdtLivePositionActions({position,target,targetIssue,control,ref
     {modal === 'close' && <ClosePositionModal open onClose={dismiss} symbol={symbol} position={shown}
       currentPrice={mark} pricePrecision={getPriceDecimals(mark)} quantityPrecision={Math.min(12, Math.max(4, position.quantity.split('.')[1]?.length ?? 0))}
       confirmLabel="确认实盘平仓" busy={modalBusy} notice={modalIssue || '将按选定数量提交币安实盘市价平仓。余仓以币安成交回报为准。'}
-      onConfirm={fraction => submit({ kind: 'close', fraction })} />}
+      onConfirm={fraction => submit({ kind: 'close', fraction, order: USDT_MARKET_EXIT_ORDER })} />}
     {modal === 'protect' && <TpSlModal pos={shown} symbol={symbol} markPrice={mark}
       liqPrice={Number(position.liquidationPrice) || Number.NaN} onClose={dismiss} busy={modalBusy}
       confirmLabel="确认提交实盘止盈止损"
@@ -134,7 +134,7 @@ export function UsdtLivePositionActions({position,target,targetIssue,control,ref
     </Dialog>}
   </>;
   return children({
-    market:<PositionMarketClose disabled={disabled} mark={usdtPositionDecimal(position.markPrice)}
+    market:<PositionMarketClose marketOnly disabled={disabled} mark={usdtPositionDecimal(position.markPrice)}
       quantity={usdtPositionDecimal(position.quantity)} onClick={()=>open('close')}/>,
     margin:position.marginMode==='isolated'&&<PositionEditButton label="调整保证金" disabled={disabled} onClick={()=>open('margin')}/>,
     addProtection:<PositionProtectionButton disabled={disabled||!protectionReady} onClick={()=>open('protect')}/>,

@@ -3,7 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { usdtAmountText, usdtPositionDecimal, usdtPositionQuantityUnit, type UsdtMirrorPosition } from '@/lib/fish/usdtPositionMirror';
-import type { UsdtPositionControlRequest, UsdtPositionTarget } from '@/lib/fish/usdtPositionControls';
+import { USDT_MARKET_EXIT_ORDER, type UsdtPositionControlRequest, type UsdtPositionTarget } from '@/lib/fish/usdtPositionControls';
 import type { UsdtDeskOpenRequest, UsdtDeskOrderSpec, UsdtDeskOrderType, UsdtDeskQuote, UsdtDeskTimeInForce } from '@/lib/fish/usdtOrderDesk';
 import type { useUsdtFollow } from '@/hooks/useUsdtFollow';
 
@@ -26,7 +26,8 @@ export function UsdtLiveOrderTicket({ symbol, follow, legs, refresh, issue }: {
   symbol: string; follow: Follow; legs: Leg[]; refresh: () => void; issue?: string;
 }) {
   const [mode,setMode] = useState<'open'|'close'>(legs.length ? 'close' : 'open');
-  const [kind,setKind] = useState<UsdtDeskOrderType>(legs.length ? 'market' : 'limit');
+  const [entryKind,setKind] = useState<UsdtDeskOrderType>(legs.length ? 'market' : 'limit');
+  const kind = mode === 'close' ? 'market' : entryKind;
   const [quote,setQuote] = useState<UsdtDeskQuote>();
   const [quoteIssue,setQuoteIssue] = useState('');
   const [limit,setLimit] = useState('');
@@ -78,11 +79,12 @@ export function UsdtLiveOrderTicket({ symbol, follow, legs, refresh, issue }: {
   const size = (direction:Direction) => percentage === undefined ? amount : quantityAt(cap(direction) * percentage / 100,step);
   const typed = Number(amount);
   const percent = percentage ?? (Math.min(100, Math.max(0, Math.round(typed / Math.max(...directions.map(cap), 1e-15) * 100))) || 0);
-  const marketOrder: UsdtDeskOrderSpec = {type:'market',...(bounded ? {slippage:Number(slippage)} : {})};
+  const boundedEntry = mode === 'open' && bounded;
+  const marketOrder: UsdtDeskOrderSpec = mode === 'close' ? USDT_MARKET_EXIT_ORDER : {type:'market',...(boundedEntry ? {slippage:Number(slippage)} : {})};
   const defaultPrice = quote ? quantityAt(Number(quote.mark),quote.priceTick) : '';
   const order: UsdtDeskOrderSpec = kind === 'limit' ? {type:kind,price:limit || defaultPrice,timeInForce:tif}
     : kind === 'conditional' ? {type:kind,triggerPrice:trigger} : marketOrder;
-  const validTerms = kind === 'market' ? !bounded || Number(slippage)>=.01 && Number(slippage)<=10
+  const validTerms = kind === 'market' ? !boundedEntry || Number(slippage)>=.01 && Number(slippage)<=10
     : Number(order.type === 'limit' ? order.price : order.type === 'conditional' ? order.triggerPrice : 0)>0;
   const ready = (direction:Direction) => {
     const n = Number(size(direction));
@@ -142,7 +144,7 @@ export function UsdtLiveOrderTicket({ symbol, follow, legs, refresh, issue }: {
       </div>
     </div>
     <div role="group" aria-label="委托类型" className="flex items-center gap-4 border-b border-border font-medium">
-      {options.map(([value,label])=><button type="button" key={value} aria-pressed={kind===value} onClick={()=>switchType(value)}
+      {options.filter(([value])=>mode==='open'||value==='market').map(([value,label])=><button type="button" key={value} aria-pressed={kind===value} onClick={()=>switchType(value)}
         className={'inline-flex items-center gap-1 border-b-2 py-2 ' + (kind===value?'border-primary text-foreground':'border-transparent text-muted-foreground')}>
         {label}{value==='conditional'&&<ChevronDown className="size-3" aria-hidden/>}</button>)}
     </div>
@@ -182,7 +184,7 @@ export function UsdtLiveOrderTicket({ symbol, follow, legs, refresh, issue }: {
     {percentage!==undefined&&<div className="flex justify-between text-muted-foreground">
       <span>买入 {size(mode==='open'?'long':'short')} {unit}</span><span>卖出 {size(mode==='open'?'short':'long')} {unit}</span>
     </div>}
-    <div className="flex min-h-5 items-center justify-between gap-2 border-t border-border pt-2 text-muted-foreground">
+    {mode==='open'&&<div className="flex min-h-5 items-center justify-between gap-2 border-t border-border pt-2 text-muted-foreground">
       {kind==='market'&&<label className="inline-flex items-center gap-2"><input type="checkbox" checked={bounded}
         onChange={event=>{setBounded(event.target.checked);if(!slippage)setSlippage('0.5');}}/>滑点容差</label>}
       {kind==='market'&&bounded&&<label className={field+' w-24'}><input className={entry} inputMode="decimal" aria-label="滑点容差百分比"
@@ -190,7 +192,7 @@ export function UsdtLiveOrderTicket({ symbol, follow, legs, refresh, issue }: {
       {kind==='limit'&&<label className="flex items-center gap-2">生效时间<select value={tif} className="bg-background text-foreground"
         onChange={event=>setTif(event.target.value as UsdtDeskTimeInForce)}><option>GTC</option><option>IOC</option><option>FOK</option><option>GTX</option></select></label>}
       {kind==='conditional'&&<span>标记价格触发 · 市价执行</span>}
-    </div>
+    </div>}
     <div className="grid grid-cols-2 gap-2">
       {directions.map(direction=>{
         const long = direction==='long', label = (mode==='open'?'开':'平')+(long?'多':'空');

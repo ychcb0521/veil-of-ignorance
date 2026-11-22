@@ -1,6 +1,9 @@
 import type { UsdtMirrorPosition } from './usdtPositionMirror';
 import type { UsdtDeskOrderSpec } from './usdtOrderDesk';
 
+/** Immediate exits use an actual market order, without an IOC slippage limit. */
+export const USDT_MARKET_EXIT_ORDER = { type: 'market' } as const;
+
 export interface UsdtPositionTarget extends Pick<UsdtMirrorPosition, 'symbol' | 'positionSide' | 'direction'> {
   revision: string;
   campaignId: string;

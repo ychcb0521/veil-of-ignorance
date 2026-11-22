@@ -5,9 +5,17 @@ import {createUsdtOrderDesk,deskOrderParameters} from '../../../../scripts/usdt-
 import {createUsdtExchange,UsdtApiError} from '../../../../scripts/usdt-exchange';
 import {openUsdtFollowStore} from '../../../../scripts/usdt-follow-store';
 import type {UsdtDeskOpenRequest} from '../usdtOrderDesk';
+import {USDT_MARKET_EXIT_ORDER} from '../usdtPositionControls';
 
 const symbol='BEATUSDT';
 const market={symbol,step:'1',marketStep:'1',min:1,max:100_000,minNotional:5,priceTick:'0.00001'};
+
+it.each(['BUY','SELL'] as const)('sends the shared %s exit order as MARKET without an IOC price cap',async side=>{
+  const book=vi.fn(async()=> '0.08123');
+  const wire=await deskOrderParameters(USDT_MARKET_EXIT_ORDER,market,side,'exit',.08123,book);
+  expect(wire).toEqual({path:'/fapi/v1/order',params:{newClientOrderId:'exit',newOrderRespType:'RESULT',type:'MARKET'}});
+  expect(book).not.toHaveBeenCalled();
+});
 
 it('uses IOC to cap slippage on both sides and chooses the matching conditional direction',async()=>{
   const book=async()=> '0.08123';

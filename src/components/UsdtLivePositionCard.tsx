@@ -122,7 +122,7 @@ export function UsdtLivePositionCard({ position, live, follow, onOpenChart, side
     </div>,
     pnl:<PositionPnl pnl={pnl} roe={initialMargin>0?pnl/initialMargin*100:null} asset={asset}
       pnlText={pnl===0?'0':(pnl>0?'+':'')+usdtPositionDecimal(position.unrealizedPnl)}/>,
-    close:actions?.market??<PositionMarketClose mark={usdtPositionDecimal(position.markPrice)} quantity={quantity}/>,
+    close:actions?.market??<PositionMarketClose marketOnly mark={usdtPositionDecimal(position.markPrice)} quantity={quantity}/>,
     protection:<PositionProtectionPrices tp={protection('tp')} sl={protection('sl')}>{actions?.editProtection}</PositionProtectionPrices>,
     addProtection:actions?.addProtection??<PositionProtectionButton/>,
     details:<div title={`名义仓位 ${notional} ${asset}`}>
