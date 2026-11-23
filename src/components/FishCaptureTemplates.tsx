@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Bookmark, BookmarkPlus, Trash2 } from 'lucide-react';
+import { Bookmark, BookmarkPlus, Download, Trash2 } from 'lucide-react';
+import { downloadTextFile, safeExportFileName } from '@/lib/downloadTextFile';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { persistFishAccountPreference } from '@/hooks/useFishAccountSettings';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
@@ -94,6 +95,11 @@ export function FishCaptureTemplates({ owner, locked, snapshot, apply }: Props) 
             <span className="min-w-0 flex-1 break-all">{row.name}</span>
             <button type="button" className={action} aria-label={`载入模板 ${row.name}`} disabled={locked || busy || !!draft}
               onClick={() => void perform(async () => { if (row.version !== 1) throw Error('当前版本无法核验此模板'); await apply(row.settings); setOpen(false); setDraft(undefined); setName(''); })}>载入</button>
+            <button type="button" className={action} aria-label={`导出模板 ${row.name}`} title="下载完整捕捞模板 JSON"
+              onClick={() => void perform(async () => {
+                const filename = safeExportFileName(row.name) || '捕捞模板';
+                downloadTextFile(filename + '.json', JSON.stringify(row, null, 2), 'application/json', false);
+              })}><Download aria-hidden className="h-3 w-3"/>导出</button>
             <button type="button" className={action + ' text-muted-foreground hover:text-destructive'} disabled={busy || !!draft} aria-label={`删除模板 ${row.name}`}
               onClick={() => {
                 if (!window.confirm(`删除捕捞模板「${row.name}」？`)) return;

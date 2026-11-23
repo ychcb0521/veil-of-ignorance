@@ -1,3 +1,4 @@
+import * as downloads from '@/lib/downloadTextFile';
 import * as sync from '@/lib/simStateSync';
 import { FISH_HIT_RATE_SETTINGS_KEY, type FishHitRateSettings } from '@/lib/fish/hitRateSettings';
 import { FISH_WICK_SETTINGS_KEY } from '@/lib/fish/downwardWick';
@@ -32,6 +33,13 @@ it('saves and reloads capture templates and runs the original formula after the 
   const storageKey = getUserPrefix() + FISH_CAPTURE_TEMPLATES_KEY;
   await waitFor(() => expect(screen.getByRole('button', {name:'载入模板 原公式'})).toBeEnabled());
   const serialized = localStorage.getItem(storageKey)!;
+  const download = vi.spyOn(downloads, 'downloadTextFile').mockReturnValue('原公式.json');
+  fireEvent.click(screen.getByRole('button', {name:'导出模板 原公式'}));
+  const [filename, json] = download.mock.calls[0];
+  expect(filename).toBe('原公式.json');
+  expect(JSON.parse(json)).toEqual(JSON.parse(serialized)[0]);
+  expect(localStorage.getItem(storageKey)).toBe(serialized);
+  download.mockRestore();
   expect(JSON.parse(serialized)[0].settings.cards[0].frozen.definition.formula).toBe(formula);
 
   view.unmount();
