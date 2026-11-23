@@ -1,4 +1,5 @@
 import type { ParallelAttempt, ParallelSignal } from './parallelUniverse';
+import { qualityEntryIdentity } from './quality';
 
 export interface RegretCandidate {
   id: string;
@@ -11,6 +12,30 @@ const CANDIDATES = 'candidates';
 const HISTORY = 'history';
 const SETTINGS = 'settings';
 const key = (owner: string | undefined) => owner ? 'user:' + owner : 'anonymous';
+const tablePrefix = (owner?: string) => ['parallel-table', key(owner)];
+export interface ParallelTableResult {
+  entryKey: string;
+  evaluatedAt: number;
+  planLabel: string;
+  reason: string;
+  markerAt?: number;
+  signal?: ParallelSignal;
+}
+
+export function loadParallelTableResults(owner?: string) {
+  const prefix = tablePrefix(owner);
+  return transaction<ParallelTableResult[]>(SETTINGS, 'readonly', (tx, result) => {
+    const request = tx.objectStore(SETTINGS).getAll(IDBKeyRange.bound(prefix, [...prefix, []], true, true));
+    request.onsuccess = () => result(request.result);
+  });
+}
+
+export function clearParallelTableResults(owner?: string) {
+  const prefix = tablePrefix(owner);
+  return transaction<void>(SETTINGS, 'readwrite', tx => {
+    tx.objectStore(SETTINGS).delete(IDBKeyRange.bound(prefix, [...prefix, []], true, true));
+  });
+}
 
 async function transaction<T>(
   stores: string | string[],
@@ -64,7 +89,7 @@ export function saveParallelAttempt(owner: string | undefined, attempt: Parallel
   const { candidate, proposedSignal } = attempt;
   const id = candidate.signalId ?? candidate.id;
   const ownerKey = key(owner);
-  return transaction<void>([CANDIDATES, HISTORY], 'readwrite', tx => {
+  return transaction<ParallelTableResult | undefined>([CANDIDATES, HISTORY, SETTINGS], 'readwrite', (tx, result) => {
     const store = tx.objectStore(CANDIDATES);
     const history = tx.objectStore(HISTORY);
     const historyKey = [ownerKey, id, attempt.baseline.evaluatedAt, attempt.id];
@@ -77,6 +102,13 @@ export function saveParallelAttempt(owner: string | undefined, attempt: Parallel
         const signal = previous?.signal ?? proposedSignal;
         store.put({ id, symbol: candidate.source.symbol, entryTime: candidate.enteredAt, signal }, [ownerKey, id]);
         history.add({ ...attempt, emitted: !previous?.signal && !!proposedSignal }, historyKey);
+        const entryKey = qualityEntryIdentity(candidate.source, candidate.enteredAt);
+        const tableResult: ParallelTableResult = {
+          entryKey, evaluatedAt: attempt.baseline.evaluatedAt, planLabel: attempt.plan.label,
+          reason: attempt.simulation.reason, markerAt: attempt.marker?.observedAt, signal,
+        };
+        tx.objectStore(SETTINGS).put(tableResult, [...tablePrefix(owner), entryKey]);
+        result(tableResult);
       };
     };
   });

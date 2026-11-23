@@ -75,7 +75,10 @@ function RegretPage<T>({ read, render, empty }: {
   </div>;
 }
 
-export function FishParallelUniverse({ owner, study, plans, selectedIds, run, state }: {
+export function FishParallelUniverse({ owner, study, plans, selectedIds, run, state, onTableResult, onRunningChange, trailing }: {
+  onTableResult?: (result: import('@/lib/fish/parallelUniverseStore').ParallelTableResult) => void;
+  onRunningChange?: (running: boolean) => void;
+  trailing?: React.ReactNode;
   state?: FishQualityState;
   owner?: string;
   study: FishQualityStudy;
@@ -145,6 +148,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
   const execute = async (first: Batch) => {
     if (controller.current) return;
     setRunning(true);
+    onRunningChange?.(true);
     for (let next: Batch | undefined = first; next; next = restart.current) {
       const batch = next;
       restart.current = undefined;
@@ -167,7 +171,8 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
           onProgress: next => setProgress({ ...next, done: offset + next.done, total: ids.length }),
           onResult: () => {},
           parallelUniverse: { additionCount: batch.conditions.additionCount, onAttempt: async attempt => {
-            await saveParallelAttempt(owner, attempt);
+            const result = await saveParallelAttempt(owner, attempt);
+            if (result) onTableResult?.(result);
             batch.completed.add(attempt.candidate.signalId ?? attempt.candidate.id);
           } },
         });
@@ -179,6 +184,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
     }
     controller.current = null;
     setRunning(false);
+    onRunningChange?.(false);
   };
   const start = (fromBeginning = false) => {
     try {
@@ -193,7 +199,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
       void execute(batch);
     } catch (cause) { setError(errorText(cause)); }
   };
-  return <FishQualityModule level="submodule" title="平行宇宙" icon={Activity} testId="quality-parallel-controls"
+  return <FishQualityModule level="submodule" title="平行宇宙" icon={Activity} testId="quality-parallel-controls" trailing={trailing}
     summary={<FishQualityInfo label="平行宇宙说明"><p>用持仓监测方案推演已勾选的候选。镜像前终止只记标记，达到设置的第 N 次加仓后，将信号和触发依据记入后悔库。</p><p>暂停后继续会沿用本轮的候选和条件。所有操作均为模拟。</p></FishQualityInfo>}
     status={error && !settingsOpen ? <span role="alert">{error}</span> : !running && paused.current && <span>已暂停</span>}
     progress={progress && <FishQualityProgress label={running ? '推演进行中' : paused.current ? '推演已暂停' : '推演结束'}
