@@ -10,7 +10,7 @@ import { buildInstantCampaignData, buildOpenInstantCampaignData, buildSettlingIn
 import { qualityCampaignSheets } from '../qualityCampaignExport';
 import { qualityCampaignStaticRisk } from '../qualityCampaignRisk';
 import { makeQualitySellPlan } from '../qualitySellPlans';
-import { STATIC_DRAWDOWN_SELL_CHOICE } from '../qualityStaticDrawdownSell';
+import { STATIC_DRAWDOWN_SELL_CHOICE, TIMED_STATIC_DRAWDOWN_VERSION } from '../qualityStaticDrawdownSell';
 import { INSTANT_MANUAL_EXECUTION } from '../instantManualExecution';
 import { rebaseInstantMonitor } from '../instantMonitorSwitch';
 import { QUALITY_POSITION_MANAGEMENT_VERSION } from '../qualityPositionManagement';
@@ -160,4 +160,19 @@ it('uses the same remaining quantity on manual close and keeps the actual adds a
   expect(handCampaign.tradeRecords.filter(row => row.exitPrice === 98)).toHaveLength(2);
   expect(handCampaign.tradeRecords.reduce((pnl, row) => pnl + row.pnl, 0)).toBeCloseTo(15.5);
   expect(handCampaign.campaign.final_realized_pnl).toBeCloseTo(15.5);
+});
+
+it.each([5, 15, 30, 60])('applies the new drawdown threshold exactly at minute %s, including an opening gap', async minute => {
+  const base = makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 10, []);
+  const bands = [0, 5, 15, 30, 60].map(start => start < minute ? 10 : 2);
+  const plan = freezeQualityPlan({...base, rule: {...base.rule!, version: TIMED_STATIC_DRAWDOWN_VERSION, bandThresholds: bands}});
+  const timed = {...monitor, plan};
+  const prices: typeof load = async (_row, from, to, program) => Array.from({length:(to-from)/program.step}, (_, i) => {
+    const openTime = from + i * program.step;
+    const price = openTime >= entry + m ? 95 : 100;
+    return {openTime, open:price, high:price, low:price, close:price, volume:1, takerBuyVolume:.5};
+  });
+  const result = await evaluateInstantMonitor(sample, timed, entry + (minute+1)*m, prices, signal);
+  expect(result).toMatchObject({status:'closed', endTime:entry+minute*m, endPrice:95,
+    exitSnapshot:{cause:{id:TIMED_STATIC_DRAWDOWN_VERSION, threshold:2}}});
 });

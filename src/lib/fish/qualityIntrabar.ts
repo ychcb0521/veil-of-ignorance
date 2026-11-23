@@ -18,7 +18,7 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVetoReading, minuteDropReading, minuteDropWindow, qualityConditionMet, qualityIntrabarStop, type QualityExitCause, type QualityHoldingPath, type QualityHoldingVeto, type QualityOperator } from './qualityVeto';
 
 import type { QualityMirrorTakeProfit, QualityMirrorFill } from './qualityMirror';
-import { ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION, type StaticDrawdownSellRule } from './qualityStaticDrawdownSell';
+import { ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL, staticDrawdownThresholdAt, type StaticDrawdownSellRule } from './qualityStaticDrawdownSell';
 
 const MINUTE = 60_000;
 export interface QualityTrigger {
@@ -130,17 +130,18 @@ export async function findQualityIntrabarExit(o: {
     // current minute's high can switch stages only when that minute closes.
     const after = switched(), rule = after ? o.afterStaticSell : o.staticSell;
     if (!rule) return;
-    const level = holding.entry * (1 - rule.threshold / 100);
+    const threshold = staticDrawdownThresholdAt(rule, (minute.openTime - (o.holdingStartedAt ?? o.entry)) / MINUTE);
+    const level = holding.entry * (1 - threshold / 100);
     const observed = atOpen ? minute.open : minute.low;
     if (![holding.entry, minute.open, observed].every(price => Number.isFinite(price) && price > 0)) {
       throw new Error('静态最大回撤止损缺少有效分钟价格');
     }
     if (!(level > 0) || observed > level * (1 + 1e-12)) return;
     const price = atOpen ? minute.open : level;
-    return { at: minute.openTime, barOpenTime: minute.openTime, atOpen, reading: atOpen ? Math.max(rule.threshold, (holding.entry - price) / holding.entry * 100) : rule.threshold,
+    return { at: minute.openTime, barOpenTime: minute.openTime, atOpen, reading: atOpen ? Math.max(threshold, (holding.entry - price) / holding.entry * 100) : threshold,
       fillPrice: price, fillPeak: Math.max(holding.peak, minute.open), previous: staticPrevious,
       ...(o.switchPct != null ? { stage: after ? 'after' : 'before' } : {}),
-      cause: { id: STATIC_DRAWDOWN_SELL_VERSION, label: ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL, kind: 'sell-static-drawdown', direction: '>=', threshold: rule.threshold } };
+      cause: { id: rule.version, label: ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL, kind: 'sell-static-drawdown', direction: '>=', threshold } };
   };
   const enabled = activeHoldingVetoes(o.vetoes);
   const deadlines=enabled.filter(v=>v.kind===MIRROR_DEADLINE_KIND).sort((a,b)=>a.threshold-b.threshold||a.id.localeCompare(b.id));

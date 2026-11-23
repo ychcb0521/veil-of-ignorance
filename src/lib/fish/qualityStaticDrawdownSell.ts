@@ -9,14 +9,24 @@ export const STATIC_DRAWDOWN_SELL_LABEL = '限制静态最大回撤';
 export const DEFAULT_STATIC_DRAWDOWN_SELL_PCT = 3;
 export const STATIC_DRAWDOWN_SELL_METRIC = 'staticDrawdown';
 export const STATIC_DRAWDOWN_SELL_CHOICE = STATIC_DRAWDOWN_SELL_VERSION + ':' + STATIC_DRAWDOWN_SELL_METRIC;
+export const TIMED_STATIC_DRAWDOWN_VERSION = 'sell-static-drawdown-timed-v2' as const;
+export const DRAWDOWN_BAND_STARTS = [0, 5, 15, 30, 60] as const;
+export const DRAWDOWN_BAND_LABELS = ['0–5', '5–15', '15–30', '30–60', '60 及以后'] as const;
+export function staticDrawdownThresholdAt(rule: StaticDrawdownSellRule, elapsedMinutes: number) {
+  if (!rule.bandThresholds) return rule.threshold;
+  const nextBand = DRAWDOWN_BAND_STARTS.findIndex(start => elapsedMinutes < start);
+  const index = nextBand < 0 ? DRAWDOWN_BAND_STARTS.length - 1 : Math.max(0, nextBand - 1);
+  return rule.bandThresholds[index];
+}
 export type StaticDrawdownSellRule = {
   metric: typeof STATIC_DRAWDOWN_SELL_METRIC;
   direction: '>=';
   threshold: number;
-  version: typeof STATIC_DRAWDOWN_SELL_VERSION;
+  version: typeof STATIC_DRAWDOWN_SELL_VERSION | typeof TIMED_STATIC_DRAWDOWN_VERSION;
+  bandThresholds?: number[];
 };
 export const isStaticDrawdownSell = (rule?: QualityExitRule): rule is StaticDrawdownSellRule =>
-  rule?.version === STATIC_DRAWDOWN_SELL_VERSION;
+  rule?.version === STATIC_DRAWDOWN_SELL_VERSION || rule?.version === TIMED_STATIC_DRAWDOWN_VERSION;
 export const isStaticDrawdownSellSnapshot = (snapshot: FishSnapshot) => snapshot.featureId === STATIC_DRAWDOWN_SELL_VERSION;
 
 const priceSource: DeepDigFeatureDef = {
@@ -37,13 +47,20 @@ export function validateQualityExitRule(snapshot: FishSnapshot, rule?: QualityEx
       || !Number.isFinite(rule.threshold) || rule.threshold <= 0 || rule.threshold >= 100) {
       throw Error(`${STATIC_DRAWDOWN_SELL_LABEL}须填写大于 0、低于 100% 的阈值`);
     }
+    if (rule.version === TIMED_STATIC_DRAWDOWN_VERSION
+      ? !Array.isArray(rule.bandThresholds) || rule.bandThresholds.length !== 5 ||
+        Array.from(rule.bandThresholds).some(value => !Number.isFinite(value) || value <= 0 || value >= 100) ||
+        rule.threshold !== rule.bandThresholds[0]
+      : rule.bandThresholds !== undefined) {
+      throw Error('分时回撤需要五个大于 0、低于 100% 的门槛');
+    }
   } else if (rule && (rule.version != null || !Number.isFinite(rule.threshold) || !['<', '>'].includes(rule.direction))) {
     throw Error('卖出门槛必须是有限数字');
   }
 }
 
 export const qualityExitThresholdText = (rule: QualityExitRule) =>
-  isStaticDrawdownSell(rule) ? `≥ ${rule.threshold}%` : `${rule.direction} ${rule.threshold}`;
+  isStaticDrawdownSell(rule) ? rule.bandThresholds ? rule.bandThresholds.map((value, i) => `${DRAWDOWN_BAND_LABELS[i]} 分钟 ≥ ${value}%`).join(' / ') : `≥ ${rule.threshold}%` : `${rule.direction} ${rule.threshold}`;
 
 export const qualityExitAlgorithmLabel = (rule: QualityExitRule | undefined, label: string) =>
   isStaticDrawdownSell(rule) && label === ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL ? STATIC_DRAWDOWN_SELL_LABEL : label;

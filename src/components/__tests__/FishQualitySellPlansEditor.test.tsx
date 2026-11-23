@@ -1,3 +1,4 @@
+import { STATIC_DRAWDOWN_SELL_CHOICE, TIMED_STATIC_DRAWDOWN_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishQualitySellPlansEditor } from '../FishQualitySellPlansEditor';
@@ -214,4 +215,21 @@ it('copies a complete combination with unsaved algorithm edits into an independe
 });
 it('copies incomplete drafts and gives repeated copies unique names and IDs without validating or saving',()=>{
  const save=vi.fn();render(<FishQualitySellPlansEditor plans={initial().slice(2,3)} ready onSave={save}/>);fireEvent.change(screen.getByLabelText('卖出算法 1 切换涨幅'),{target:{value:'-1'}});fireEvent.click(screen.getByLabelText('复制卖出算法 1'));expect(screen.getByLabelText('卖出算法 2 切换涨幅')).toHaveValue(-1);fireEvent.click(screen.getByLabelText('复制卖出算法 1'));expect((screen.getByLabelText('卖出算法 2 名称') as HTMLInputElement).value).toContain('副本 2');expect(new Set(screen.getAllByTestId(/sell-plan-draft-\d/).map(n=>n.getAttribute('data-plan-id'))).size).toBe(3);expect(save).not.toHaveBeenCalled();
+});
+
+it('saves and restores independent holding-time drawdown thresholds', () => {
+  const original = freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 3, []));
+  const snapshot = structuredClone(original);
+  const save = vi.fn();
+  const view = render(<FishQualitySellPlansEditor plans={[original]} ready onSave={save}/>);
+  fireEvent.click(screen.getByRole('checkbox', {name:'按持仓时长设置'}));
+  const late = '卖出算法 1 60 及以后 分钟回撤门槛';
+  fireEvent.change(screen.getByLabelText(late), {target:{value:'2.25'}});
+  fireEvent.click(screen.getByRole('button', {name:'保存卖出算法'}));
+  const [saved] = save.mock.calls[0][0];
+  expect(saved.rule).toMatchObject({version:TIMED_STATIC_DRAWDOWN_VERSION, bandThresholds:[3,3,3,3,2.25]});
+  expect(original).toEqual(snapshot);
+  view.unmount();
+  render(<FishQualitySellPlansEditor plans={[saved]} ready onSave={save}/>);
+  expect(screen.getByLabelText(late)).toHaveValue(2.25);
 });

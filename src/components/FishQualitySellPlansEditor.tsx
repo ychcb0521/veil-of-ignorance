@@ -20,7 +20,7 @@ import { freezeSavedPlans,planVersionChanges } from '@/lib/fish/qualityPlanVersi
 import { PlanVersionList } from '@/components/FishQualityPlanVersions';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
-import { DEFAULT_STATIC_DRAWDOWN_SELL_PCT, STATIC_DRAWDOWN_SELL_CHOICE, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
+import { DRAWDOWN_BAND_LABELS, TIMED_STATIC_DRAWDOWN_VERSION, validateQualityExitRule, DEFAULT_STATIC_DRAWDOWN_SELL_PCT, STATIC_DRAWDOWN_SELL_CHOICE, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
 import { qualityFilterDefinitions, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
 import { additionMetricTime, withMetricSnapshotTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import { FishMetricTimeFields } from './FishMetricTimeFields';
@@ -29,6 +29,7 @@ import { isLegacyQualityPlan, LEGACY_ENGINE_LABEL, legacyToEditablePlan } from '
 
 const field = 'h-7 min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring';
 interface Draft {
+  bands?: string[]; afterBands?: string[];
   advantageOptions?: QualityAdvantageOptions;
   id: string; original?: QualityGroup; label: string; choice: string; direction: '<' | '>' | '>='; threshold: string;
   combo: boolean; afterChoice: string; afterDirection: '<' | '>' | '>='; afterThreshold: string; switchPct: string;
@@ -36,6 +37,7 @@ interface Draft {
 }
 const draftOf = (plan: QualityGroup): Draft => ({ id: plan.id, original: plan, label: plan.label, advantageOptions: plan.advantage ? { screenWeak:plan.advantage.screenWeak,beforeFirst:plan.advantage.beforeFirst,afterAddition:plan.advantage.afterAddition,confirmations:plan.advantage.confirmations } : undefined,
   choice: plan.snapshot.featureId + ':' + plan.metric, direction: plan.rule?.direction ?? plan.snapshot.direction ?? '<',
+  bands: plan.rule?.bandThresholds?.map(String), afterBands: plan.combo?.after.rule.bandThresholds?.map(String),
   time: additionMetricTime(plan.snapshot),
   threshold: plan.rule ? String(plan.rule.threshold) : '', combo: !!plan.combo,
   afterChoice: plan.combo ? plan.combo.after.snapshot.featureId + ':' + plan.combo.after.metric : 'state:state',
@@ -127,7 +129,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     return Number(value);
   };
   const baseOf = (d: Draft) => plans.find(p => p.id === d.id) ?? d.original;
-  const algorithmFields = (d: Draft) => JSON.stringify([d.choice,d.direction,d.threshold,d.time??{},d.combo,...(d.combo?[d.afterChoice,d.afterDirection,d.afterThreshold,d.switchPct,d.afterTime??{}]:[])]);
+  const algorithmFields = (d: Draft) => JSON.stringify([d.choice,d.direction,d.threshold,d.bands,d.time??{},d.combo,...(d.combo?[d.afterChoice,d.afterDirection,d.afterThreshold,d.afterBands,d.switchPct,d.afterTime??{}]:[])]);
   const labelOf = (d: Draft, base?: QualityGroup) => d.original && d.label === d.original.label ? base?.label ?? d.label : d.label.trim() || (d.choice === STATIC_DRAWDOWN_SELL_CHOICE ? STATIC_DRAWDOWN_SELL_LABEL : choices.find(c=>c.key===d.choice)?.label) || base?.label || `新${action}算法`;
   const duplicate = (source: Draft, index: number) => {
     const base = structuredClone(baseOf(source)!);
@@ -197,23 +199,30 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         // 旧引擎方案只改名称，其余原样保存
         if (base && isLegacyQualityPlan(base)) return { ...structuredClone(base), label: labelOf(d,base) };
         if (base && d.original && algorithmFields(d) === algorithmFields(draftOf(d.original))) return { ...structuredClone(base), label: labelOf(d,base) };
-        const threshold = number(d.threshold, true);
+        const applyBands = (plan: Pick<QualityGroup, "rule" | "snapshot">, bands?: string[]) => {
+          if (!bands || !plan.rule || plan.rule.version !== STATIC_DRAWDOWN_SELL_VERSION) return;
+          plan.rule = {...plan.rule, version: TIMED_STATIC_DRAWDOWN_VERSION, bandThresholds: bands.map(value => number(value)!)};
+          validateQualityExitRule(plan.snapshot, plan.rule);
+        };
+        const threshold = d.choice === STATIC_DRAWDOWN_SELL_CHOICE && d.bands ? number(d.bands[0]) : number(d.threshold, true);
         const original = base && draftOf(base);
         const plan = base && d.choice === original?.choice && d.choice !== STATIC_DRAWDOWN_SELL_CHOICE && d.direction !== '>='
           ? { ...structuredClone(base), snapshot:{ ...structuredClone(base.snapshot), direction:d.direction, threshold:threshold ?? 0 },
               rule:threshold == null ? undefined : {metric:base.metric,direction:d.direction,threshold} }
           : makeQualitySellPlan(d.choice, d.direction, threshold, definitions, base, d.id);
+        applyBands(plan, d.bands);
         const timed = d.choice === STATIC_DRAWDOWN_SELL_CHOICE ? plan : withMetricSnapshotTime(plan, d.time);
         plan.snapshot = timed.snapshot;
         plan.label = d.label.trim() || timed.label;
         if (d.combo) {
-          const afterThreshold = number(d.afterThreshold)!;
+          const afterThreshold = number(d.afterChoice === STATIC_DRAWDOWN_SELL_CHOICE ? d.afterBands?.[0] ?? d.afterThreshold : d.afterThreshold)!;
           const saved = d.afterChoice === original?.afterChoice && d.afterChoice !== STATIC_DRAWDOWN_SELL_CHOICE ? base?.combo?.after : undefined;
           const afterDirection = d.afterDirection;
           const after = saved && afterDirection !== '>='
             ? { ...saved, snapshot:{ ...saved.snapshot,direction:afterDirection,threshold:afterThreshold },
                 rule:{metric:saved.metric,direction:afterDirection,threshold:afterThreshold} }
             : makeQualitySellPlan(d.afterChoice, d.afterDirection, afterThreshold, definitions);
+          applyBands(after, d.afterBands);
           const timedAfter = d.afterChoice === STATIC_DRAWDOWN_SELL_CHOICE ? after : withMetricSnapshotTime(after,d.afterTime);
           const switchPct = number(d.switchPct)!;
           if (!(switchPct > 0)) throw new Error('分段切换涨幅须大于 0');
@@ -267,7 +276,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     </div>;
   };
   const sellerFields = (label: string, choice: string, direction: Draft['direction'], threshold: string, time: AdditionMetricTime | undefined,
-    snapshot: QualityGroup['snapshot'] | undefined, set: (choice: string, direction: Draft['direction'], threshold: string, time?: AdditionMetricTime) => void, after = false) => {
+    snapshot: QualityGroup['snapshot'] | undefined, set: (choice: string, direction: Draft['direction'], threshold: string, time?: AdditionMetricTime) => void, after = false, bands?: string[], setBands?: (values?: string[]) => void) => {
     const priceStop = choice === STATIC_DRAWDOWN_SELL_CHOICE;
     const heading = label + (after ? ' 后段' : '');
     const fieldLabel = (name: string) => heading + (after ? '' : ' ') + name;
@@ -280,12 +289,23 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
           {priceStop ? <option value=">=">≥</option> : <><option value="<">&lt;</option><option value=">">&gt;</option></>}
         </select>
         <div className="flex min-w-0 items-center gap-1">
-          <input aria-label={fieldLabel('门槛')} className={field + ' w-full'} type="number" step="any" min={priceStop ? 0 : undefined}
+          {(!bands || !priceStop) && <><input aria-label={fieldLabel('门槛')} className={field + ' w-full'} type="number" step="any" min={priceStop ? 0 : undefined}
             max={priceStop ? 100 : undefined} placeholder={priceStop ? '填百分比' : '未设置'} value={threshold}
             onChange={event => set(choice, direction, event.target.value, time)}/>
-          {priceStop && <span className="text-[10px]">%</span>}
+          {priceStop && <span className="text-[10px]">%</span>}</>}
         </div>
       </div>
+      {priceStop && setBands && <div className="space-y-2">
+        <label className="flex items-center gap-2 text-[11px]"><input type="checkbox" checked={!!bands}
+          onChange={event => setBands(event.target.checked ? DRAWDOWN_BAND_LABELS.map(() => threshold) : undefined)}/> 按持仓时长设置</label>
+        {bands && <><div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          {DRAWDOWN_BAND_LABELS.map((band, index) => <label key={band} className="space-y-1 text-[11px]">
+            <span className="block">{band} 分钟</span>
+            <span className="flex items-center gap-1"><input aria-label={fieldLabel(band + ' 分钟回撤门槛')} className={field + ' w-full'}
+              type="number" step="any" value={bands[index]} onChange={event => setBands(bands.map((value, i) => i === index ? event.target.value : value))}/> %</span>
+          </label>)}
+        </div><p className="text-[10.5px] text-muted-foreground">从首仓计时，到达分界点立即使用下一段门槛。加仓及卖出算法切换不重置计时。</p></>}
+      </div>}
       {priceStop ? <p className="text-[10.5px] text-muted-foreground">1 分钟行情模拟触价成交。止损线以首仓买入价计算，开盘跳空越线时按开盘价成交。</p>
         : <FishMetricTimeFields label={heading} metric={choice.slice(choice.indexOf(':')+1)}
             definition={metricDefinitions.get(choice.split(':')[0])} snapshot={snapshot} time={time}
@@ -318,10 +338,10 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
       {alias&&!readOnly&&<p className="text-[10.5px] text-muted-foreground">原名：{alias.originalName}</p>}
       {baseOf(d)?.router ? <p className="text-[10.5px] text-muted-foreground">条件分支方案：在下方修改两个分支的卖出、镜像、加仓与止损设置。</p> : <fieldset disabled={isLegacyQualityPlan(baseOf(d))} className="contents">
       {sellerFields(`${action}算法 ${i+1}`, d.choice, d.direction, d.threshold, d.time, mainSnapshot,
-        (choice, direction, threshold, time) => patch(d.id, { choice, direction, threshold, time }))}
+        (choice, direction, threshold, time) => patch(d.id, { choice, direction, threshold, time, bands: choice === d.choice ? d.bands : undefined }), false, d.bands, bands => patch(d.id, {bands}))}
       {d.combo && <div className="space-y-1.5 border-t border-border/40 pt-1.5"><label className="flex items-center gap-1 text-[11px] text-muted-foreground">相对买入价上涨<input aria-label={`${action}算法 ` + (i + 1) + ' 切换涨幅'} type="number" step="any" className={field + ' w-20'} value={d.switchPct} onChange={e => patch(d.id, { switchPct: e.target.value })} />% 后切换为</label>
         {sellerFields(`${action}算法 ${i+1}`, d.afterChoice, d.afterDirection, d.afterThreshold, d.afterTime, afterSnapshot,
-          (afterChoice, afterDirection, afterThreshold, afterTime) => patch(d.id, { afterChoice, afterDirection, afterThreshold, afterTime }), true)}
+          (afterChoice, afterDirection, afterThreshold, afterTime) => patch(d.id, { afterChoice, afterDirection, afterThreshold, afterTime, afterBands: afterChoice === d.afterChoice ? d.afterBands : undefined }), true, d.afterBands, afterBands => patch(d.id, {afterBands}))}
       </div>}</fieldset>}
     {!embedded && baseOf(d)?.advantage && <FishQualityAdvantageSettings selection={d.advantageOptions?.structureTimeframe} rule={{...baseOf(d)!.advantage!,...d.advantageOptions}} onChange={readOnly?undefined:options=>patch(d.id,{advantageOptions:options})}/>}
     </div>;})}
