@@ -1027,7 +1027,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
               onSelected={()=>{sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}}/>
           </FishQualityModule>}
           {state.runParallelUniverse && <FishParallelUniverse key={state.account ?? 'anonymous'} owner={state.account}
-            study={study} plans={plans} selectedIds={scopedSelected.map(row => row.id)} run={state.runParallelUniverse}/>}
+            state={state} study={study} plans={plans} selectedIds={scopedSelected.map(row => row.id)} run={state.runParallelUniverse}/>}
         </FishQualityModuleGroup>
         <FishQualityModule title="持仓监测" icon={Activity} testId="quality-run-controls" trailing={<QualityResultTools kind="monitor" hidden={hideMonitor} onToggle={() => toggleHidden('monitor')} count={study.results.length} onClear={lockedBatch ? undefined : state.clearMonitorResults} disabled={!ready || !!state.archiving}/>} titleTestId="quality-mode" summary={<FishQualityInfo label="持仓监测说明"><p>新方案默认 333 USDT 名义仓位、5 倍杠杆。</p>{vetoCount > 0 && <p>{vetoCount} 项监测条件</p>}<p className="text-muted-foreground">按已勾选信号和当前卖出规则独立监测，支持后台运行；已算完且条件没变的结果直接沿用；要全部重算，点监测按钮右侧的 ▾。归档按时间排列，目录内使用当时的组合表快照，后续重算不会覆盖。</p><p>开始时可选原信号时间或动态筛选的首次满足时间。继续监测沿用本轮起点。各次加仓及其后的卖出条件按方案保存的生效范围执行。</p></FishQualityInfo>} status={!running && lastPause && <p className="max-w-[22rem] truncate text-muted-foreground" data-testid="quality-last-pause" title={`上一轮于 ${formatUTC8(lastPause.at)}（UTC+8）暂停：${lastPause.reason}`}>已暂停：{lastPause.reason}</p>}>
           <div role="group" aria-label="监测运行" className="inline-flex h-6 shrink-0 items-stretch">

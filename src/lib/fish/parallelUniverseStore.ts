@@ -41,6 +41,7 @@ async function transaction<T>(
 }
 
 export interface ParallelSettings {
+  plans?: import('./quality').QualityGroup[];
   planId: string;
   additionCount: number;
   observeHours: number;
