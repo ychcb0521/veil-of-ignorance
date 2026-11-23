@@ -1,3 +1,4 @@
+import { downloadTextFile, safeExportFileName } from '@/lib/downloadTextFile';
 import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
 import type { QualityTemplateName } from '@/lib/fish/qualityTemplateNames';
 import { beijingTemplateDay, nextQualityPlanName, qualityTemplateNames } from '@/lib/fish/qualityTemplateNames';
@@ -13,7 +14,7 @@ import { withQualityAdvantageOptions, type QualityAdvantageOptions } from '@/lib
 import {validateQualityVetoStages} from '@/lib/fish/qualityVetoStages';
 import {validateQualitySellStages} from '@/lib/fish/qualitySellStages';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { BookmarkPlus, Copy, LayoutTemplate, Plus, Trash2, X } from 'lucide-react';
+import { BookmarkPlus, Copy, Download, LayoutTemplate, Plus, Trash2, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { qualityPlanFromTemplate, qualityPlanTemplateSummary, type QualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import { freezeSavedPlans,planVersionChanges } from '@/lib/fish/qualityPlanVersions';
@@ -89,6 +90,10 @@ export function TemplatePicker({ actions, disabled, onUse, purpose='sell', allow
         return <li key={t.id} className="group flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-item">
         <div className="min-w-0 flex-1"><p className="truncate font-medium">{displayName(t)}</p><p className="truncate text-[10px] text-muted-foreground" title={summary}>{summary}</p><p className="text-[9.5px] text-muted-foreground/70 tabular-nums">保存于 {date(t.savedAt)} · <button type="button" className={`underline-offset-2 hover:underline ${versionChanged ? 'text-destructive' : 'text-primary/80'}`} aria-expanded={versionsOf === t.id} aria-label={`模板 ${displayName(t)} 的算法版本`} onClick={() => setVersionsOf(versionsOf === t.id ? '' : t.id)}>{versionChanged ? '版本已变' : '版本'} {versionsOf === t.id ? '▴' : '▾'}</button></p>
           {versionsOf === t.id && <div className="mt-1.5 rounded border border-border/60 bg-background p-1.5">{displayName(t)!==t.name&&<p className="mb-1 text-muted-foreground">原名：{t.name}</p>}<PlanVersionList plan={t.plan}/></div>}</div>
+        <button type="button" className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`导出模板 ${displayName(t)}`} title="下载完整模板 JSON（含冻结版本）" onClick={() => {
+          const filename = safeExportFileName(displayName(t)) || '持仓监测模板';
+          downloadTextFile(filename + '.json', JSON.stringify(t, null, 2), 'application/json', false);
+        }}><Download aria-hidden className="h-3 w-3"/>导出</button>
         {!browseOnly&&<><button type="button" disabled={versionChanged||disabled} title={versionChanged ? '模板冻结的算法版本与当前代码不同，不能新建（展开「版本已变」看哪一项）' : undefined} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用模板 ${displayName(t)} 新建方案`} onClick={() => { onUse?.(t); setOpen(false); }}>新建</button>
         {confirm === t.id
           ? <button type="button" className="shrink-0 rounded bg-destructive/10 px-2 py-0.5 text-destructive" aria-label={`确认删除模板 ${displayName(t)}`} onClick={() => { actions.remove(t.id); setConfirm(''); }}>确认删除</button>

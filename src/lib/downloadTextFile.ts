@@ -5,8 +5,8 @@
  * 这个模式此前在六处导出里各抄了一份（战役复盘、战役快照、情绪日记、时间机器、指南、分析面板），
  * 新的导出一律走这里。
  */
-export function downloadTextFile(fileName: string, content: string, mime = 'text/plain'): string {
-  const blob = new Blob([`﻿${content}`], { type: `${mime};charset=utf-8` });
+export function downloadTextFile(fileName: string, content: string, mime = 'text/plain', withBom = true): string {
+  const blob = new Blob([withBom ? `﻿${content}` : content], { type: `${mime};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
