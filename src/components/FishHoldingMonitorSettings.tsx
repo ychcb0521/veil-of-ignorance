@@ -10,6 +10,7 @@ import { FishPopoverContent as PopoverContent } from './FishPopoverContent';
 import { SettingsImageButton, useSettingsImageCapture } from './SettingsImageExport';
 import { HOLDING_LEDGER_ADDITION_VERSION } from '@/lib/fish/qualityHoldingLedger';
 import type { QualityMonitorTimeBasis } from '@/lib/fish/qualityAdmissionTime';
+import type { FishQualityStudy } from '@/lib/fish/quality';
 import { prepareQualityRouterDraft } from '@/lib/fish/qualityRouterDraft';
 import { isRaceRouter, raceAttackFromRound, routerNextOrdinal, routerOrdinal, routerPrefixText } from '@/lib/fish/qualityPlanRouter';
 import { FishQualityMonitorSettingsView } from './FishQualityMonitorSettingsView';
@@ -225,7 +226,7 @@ export function MonitorTimePicker({ trigger, onChoose, restart = false, running 
   </Popover>;
 }
 
-export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount,outsideHint,instant,templateName}:{state:FishQualityState;activeId:string|null;onSelect:(id:string)=>void;done:()=>void;selectedCount:number;outsideHint?:ReactNode;instant?:boolean;templateName?:QualityTemplateName}) {
+export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount,outsideHint,instant,templateName,templateSource}:{state:FishQualityState;activeId:string|null;onSelect:(id:string)=>void;done:()=>void;selectedCount:number;outsideHint?:ReactNode;instant?:boolean;templateName?:QualityTemplateName;templateSource?:FishQualityStudy}) {
   const imageCapture=useSettingsImageCapture();
   const settingsStudy=!instant&&state.monitorSettings?state.monitorSettings.study:state.study;
   const settingsReady=!instant&&state.monitorSettings?state.monitorSettings.ready:state.ready;
@@ -267,9 +268,10 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
   });
   const recoverablePlans=useMemo(()=>instant?undefined:recoverableQualityPlans(settingsStudy,readSavedQualityPlans(state.account)),
     [instant,state.account,settingsStudy.sellPlans,settingsStudy.monitorLibrary,settingsStudy.campaignRuns]);
+  const templateStudy=templateSource??settingsStudy;
   const templates=!instant&&state.savePlanTemplate&&state.deletePlanTemplate?{
     owner:state.account,restore:state.restorePlanTemplate,
-    templates:activeQualityPlanTemplates(settingsReady?settingsStudy:{planTemplates:state.templateCatalog}),
+    templates:activeQualityPlanTemplates(settingsReady?templateStudy:{planTemplates:state.templateCatalog}),
     save:state.savePlanTemplate,remove:state.deletePlanTemplate,
   }:undefined;
   if(!instant&&!settingsReady) return <div className="space-y-2 text-[11px]">

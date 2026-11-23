@@ -238,8 +238,8 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
               setSimulationPlans(copied);
               void saveParallelSettings(owner,{...settings(),plans:copied}).catch(cause=>setError(errorText(cause)));
             },
-            savePlanTemplate:undefined,deletePlanTemplate:undefined,restorePlanTemplate:undefined}}
-          activeId={plan?.id ?? null} onSelect={setPlanId} done={()=>setSettingsOpen(false)} selectedCount={selectedIds.length}/>}
+            savePlanTemplate:state.savePlanTemplate,deletePlanTemplate:state.deletePlanTemplate,restorePlanTemplate:state.restorePlanTemplate}}
+          templateSource={state.study} activeId={plan?.id ?? null} onSelect={setPlanId} done={()=>setSettingsOpen(false)} selectedCount={selectedIds.length}/>}
         {error && <p role="alert">{error}</p>}
         <button type="button" className={qualitySettingsAction} onClick={() => void saveSettings()}>保存条件</button>
       </FishConditionSettings></FishConditionDialogContent>
