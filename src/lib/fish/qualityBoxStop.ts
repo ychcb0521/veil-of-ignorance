@@ -162,7 +162,7 @@ export function boxStopIdentity(r: BoxStopRule) {
 export const boxStopLabel = (r: BoxStopRule):string => r.channels?boxStopRuleEntries(r).map(c=>`${BOX_STOP_CHANNEL_LABELS[c.channel!]}${c.enabled?'：'+boxStopLabel(c.rule):'（未启用）'}`).join('；任一路触发退出；'):isBoxSecondBreakExitOnly(r)?`${boxStopAlgorithmLabel(r)} 持仓期间二次断裂终止；首次只计数，不因本条件停加仓；第二次断裂下一分钟开盘全仓卖出`:isBoxSecondBreak(r)?`${boxStopAlgorithmLabel(r)} 首次支撑断裂停止加仓，第二次断裂下一分钟开盘全仓卖出`:isBoxBreak(r)?`${boxStopAlgorithmLabel(r)} 支撑断裂（防守线红叉确认）；下一分钟开盘全仓卖出`:`${boxStopAlgorithmLabel(r)} ${r.reference?BOX_STOP_REFERENCE_LABELS[r.reference.kind]:r.structure.kSource==='guard' ? `防守线${r.guardRegime ? `（${BOX_STOP_GUARD_REGIMES[r.guardRegime]}）` : ''}` : r.structure.kBasis==='invalidation'?'失效线':'箱底'} − ${r.structure.buffer}${r.structure.bufferUnit==='atr'?'ATR':'%'}；${({fixed:'首次有效线固定','raise-only':'只升不降',follow:'跟随最新线'})[r.update]}；${r.confirmation==='touch'?'触碰 K 立即卖出':`${r.confirmation==='close-1m'?'1 分钟':DBL5_PROFILES[structureDbl5Timeframe(r.structure)].periodLabel}连续 ${r.closes} 根收盘 ≤ K`}`;
 
 /** Only already closed native structures can place a stop for the next minute. */
-export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>;activationAt?:()=>number|undefined}) {
+export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>;activationAt?:()=>number|undefined;ignoreExit?:(cause:QualityTrigger["cause"])=>boolean}) {
   const load = o.load.boxStopMarketLoad ?? o.load;
   let observationEntry=o.entry,observationSince=o.since;
   const rules=o.vetoes.filter(v=>v.enabled&&v.kind===BOX_STOP_KIND).flatMap(v=>{
@@ -265,7 +265,9 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
         if(r.state.count>=r.rule.closes)candidates.push({at:minute.openTime+60000,reading:minute.close,barOpenTime:minute.openTime,cause});
       }
     }
-    return candidates.sort((a,b)=>a.at-b.at||Number(!!b.atOpen)-Number(!!a.atOpen)||(b.fillPrice??0)-(a.fillPrice??0))[0];
+    candidates.sort((a,b)=>a.at-b.at||Number(!!b.atOpen)-Number(!!a.atOpen)||(b.fillPrice??0)-(a.fillPrice??0));
+    const ignore = o.ignoreExit;
+    return ignore ? candidates.find(trigger => !ignore(trigger.cause)) : candidates[0];
   };
   return {read,states,statesAt,deactivateBefore(boundary:number){
     for(const r of rules){if(r.v.mirrorStage?.stage!=='before')continue;

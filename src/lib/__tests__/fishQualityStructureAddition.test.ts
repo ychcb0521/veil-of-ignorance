@@ -9,6 +9,10 @@ import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
 import {holdingVetoLabel,validateHoldingVeto,validatePayoffStops} from '../fish/qualityVeto';
 import {ADDITION_INDICATOR_INCREASE_VERSION,additionIdentity,additionMirrorIdentity,defaultQualityAddition,validateQualityAddition,additionEvidenceHeaders,additionEvidenceValues} from '../fish/qualityAddition';
 import {evaluateQualitySample,type QualityGroup,type QualitySample} from '../fish/quality';
+import {replayParallelCandidate} from '../fish/parallelUniverse';
+import {MIRROR_DEADLINE_KIND} from '../fish/qualityMirrorDeadline';
+import {makeQualityHoldingVeto} from '../fish/qualityFilters';
+import {qualityAdditionStopOrder} from '../fish/qualityAdditionStopOrder';
 import {definitionKey} from '../deepDig/features';
 import {buildQualityCampaignData} from '../fish/qualityCampaigns';
 import type {ResearchBar} from '../deepRsa/window';
@@ -32,6 +36,34 @@ const dblRows=()=>computeDbl5(sample(),{symbol:row.symbol}).rows;
 const evidence=()=>structureAdditionSignal(rule('dbl5','confirm'),dblRows()[7],T-24*3600000)!;
 
 describe('native box decisions for holding additions',()=>{
+ it('records the ordinary mirror deadline and emits from the second simulated structure addition',async()=>{
+  const o=context(sbsComplete());
+  const definition={id:'price',name:'价格',short:'价格',definition:'',formula:'raw = C',interval:'1m' as const,scale:1,unit:'',positive:'1',control:'0'};
+  const snapshot=makeQualityBuyFilter('price:raw','<',0,true,[definition]).snapshot;
+  const candidate:QualitySample={id:'parallel',enteredAt:o.entry,basis:'signal',importedAt:o.entry,groups:[],source:{...o.row,timeMs:o.entry}};
+  const deadline=makeQualityHoldingVeto(MIRROR_DEADLINE_KIND,'>=',1/60);
+  const plan:QualityGroup={id:'parallel-plan',label:'SBS',snapshot,metric:'raw',
+    holdingVetoes:[deadline],mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},
+    addition:{...defaultQualityAddition(),enabled:true,source:'structure',structure:{...rule('sbs5m'),kBasis:'invalidation'},
+      entryBufferAtr:0,maxRounds:2}};
+  const frozen=structuredClone(plan);
+  const simulate=(continuation:boolean)=>evaluateQualitySample(candidate,plan,0,o.end,o.load,o.signal,undefined,undefined,undefined,continuation);
+  const {baseline,simulation,marker,proposedSignal}=await replayParallelCandidate(o.row.symbol,2,simulate);
+  expect(baseline).toMatchObject({status:'closed',endTime:o.entry+M});
+  expect(marker?.cause?.kind).toBe(MIRROR_DEADLINE_KIND);
+  expect(simulation.additionFills,simulation.reason).toHaveLength(2);
+  const second=simulation.additionFills![1];
+  expect(proposedSignal).toEqual({symbol:o.row.symbol,buyPrice:second.price,time:second.at,
+    stopPrice:qualityAdditionStopOrder({quality_addition_fill:second})!.price,source:'平行宇宙',additionCount:2});
+  await expect(replayParallelCandidate(o.row.symbol,3,simulate)).resolves.toMatchObject({proposedSignal:undefined});
+  const noDeadline=await replayParallelCandidate(o.row.symbol,2,
+    () => evaluateQualitySample(candidate,{...plan,holdingVetoes:[]},0,o.end,o.load,o.signal));
+  expect(noDeadline.simulation.additionFills).toHaveLength(2);
+  expect(noDeadline.marker).toBeUndefined();
+  expect(noDeadline.proposedSignal).toBeUndefined();
+  expect(plan).toEqual(frozen);
+  expect(await simulate(false)).toEqual(baseline);
+ });
  it('blocks additions on pre-entry historical peak damage while retaining the identical original-range fills',async()=>{
   const o=context(sample()),base={...o,structure:{...rule(),kSource:'current' as const},maxRounds:1},plainResult=await findCalculatorAdditions(base);expect(plainResult.fills).toHaveLength(1);
   const load:FishReconstructionLoader=async(...args)=>(await o.load(...args)).map(b=>args[3].step===STEP&&b.openTime===o.entry-2*3600000?{...b,high:180}:b);

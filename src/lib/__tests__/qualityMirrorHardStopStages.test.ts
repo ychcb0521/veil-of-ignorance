@@ -1,6 +1,7 @@
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import * as features from '@/lib/deepDig/features';
 import {evaluateQualitySample,type QualitySample,type QualityGroup,qualityResultKey} from '@/lib/fish/quality';
+import {replayParallelCandidate} from '@/lib/fish/parallelUniverse';
 import {defaultBoxBreak,defaultBoxStop,defaultBoxSecondExit,defaultBoxSecondBreak} from '@/lib/fish/qualityBoxStop';
 import {mirrorHardStopStage as stage,MIRROR_HARD_STOP_STAGES_VERSION as V} from '@/lib/fish/qualityMirrorHardStopStages';
 import {holdingVetoDraft,parseHoldingVetoDraft,makeQualityHoldingVeto} from '@/lib/fish/qualityFilters';
@@ -26,6 +27,15 @@ beforeEach(()=>{vi.spyOn(features,'evaluateOnBars').mockImplementation((bars,com
 afterEach(()=>vi.restoreAllMocks());
 it('镜像前保持第一次断裂即退出，尚未发生减仓就由前段保护',async()=>{
  const r=await run(group(),20,path(9));expect(r).toMatchObject({status:'closed',endTime:T+5*M,exitSnapshot:{cause:{id:'before',mirrorStage:{version:V,stage:'before'}}}});expect(r.mirrorFill).toBeUndefined();
+});
+it('平行推演把镜像前箱体断裂记为标记，镜像后保护仍按原逻辑退出',async()=>{
+ const plan=group([box('before'),risk('after')]);
+ const load=loader(t=>t===T+9*M?bar(t,100,106,99,104):t===T+10*M?bar(t,100,100,90,100):bar(t));
+ const result=await replayParallelCandidate(row.symbol,2,
+  continuation=>evaluateQualitySample(sample,plan,0,T+20*M,load,signal,undefined,undefined,undefined,continuation));
+ expect(result.marker).toMatchObject({observedAt:T+5*M,cause:{id:'before'}});
+ expect(result.simulation).toMatchObject({status:'closed',endTime:T+10*M,mirrorFill:{at:T+9*M},exitSnapshot:{cause:{id:'risk-after'}}});
+ expect(result.proposedSignal).toBeUndefined();
 });
 it('减仓后停用前段一次退出，后段首次只观察、第二次全仓退出',async()=>{
  const g=group(),l=path(),first=await run(g,12,l);

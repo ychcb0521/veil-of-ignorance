@@ -77,6 +77,7 @@ export async function findQualityIntrabarExit(o: {
   holdingStartedAt?:number;
   /** Real positions may count only exchange-reconciled checkpoint fills. */
   actualMirrorFillOnly?:boolean;
+  continueAfterMirrorMarker?: boolean;
   mirror?: QualityMirrorTakeProfit; mirrorFill?: QualityMirrorFill;
   boxStopStates?:Record<string,BoxStopState>;
   conditions?: QualityIntrabarCondition[]; vetoes?: readonly QualityHoldingVeto[]; holding?:QualityHoldingPath;
@@ -147,6 +148,7 @@ export async function findQualityIntrabarExit(o: {
   const deadlines=enabled.filter(v=>v.kind===MIRROR_DEADLINE_KIND).sort((a,b)=>a.threshold-b.threshold||a.id.localeCompare(b.id));
   const deadlineEntry=o.holdingStartedAt??o.entry;
   const checkDeadline=(at:number):QualityTrigger|undefined=>{
+    if(o.continueAfterMirrorMarker)return;
     for(const v of deadlines){
       const deadline=mirrorDeadlineAt(deadlineEntry,v.threshold);
       if(at<deadline||mirrorCompletedBy(o.actualMirrorFillOnly?o.mirrorFill:mirrorFill,deadlineEntry,deadline))continue;
@@ -155,10 +157,12 @@ export async function findQualityIntrabarExit(o: {
         cause:{...phaseCause(v),mirrorDeadlineVersion:v.mirrorDeadlineVersion}};
     }
   };
-  const boxReader=createBoxStopReader({vetoes:enabled,row:o.row,entry:o.entry,since:o.since,load:o.load,signal:o.signal,previous:o.boxStopStates,activationAt:()=>postMirrorProtectionAt(mirrorFill)});
+  const markOnly = (rule?: { mirrorStage?: MirrorHardStopStage }) =>
+    !!o.continueAfterMirrorMarker && rule?.mirrorStage?.stage === 'before';
+  const boxReader=createBoxStopReader({vetoes:enabled,row:o.row,entry:o.entry,since:o.since,load:o.load,signal:o.signal,previous:o.boxStopStates,activationAt:()=>postMirrorProtectionAt(mirrorFill), ignoreExit: o.continueAfterMirrorMarker ? markOnly : undefined});
   const boxState=()=>enabled.some(v=>v.kind==='box-stop')?{boxStopStates:boxReader.states(),boxStopStateAt:boxReader.statesAt}:{};
   const risk=enabled.filter(v=>v.kind==='static-drawdown'||v.kind==='dynamic-drawdown').sort((a,b)=>a.id.localeCompare(b.id));
-  const activeRisk=(at:number)=>risk.filter(v=>mirrorHardStopActive(v,mirrorFill,at));
+  const activeRisk=(at:number)=>risk.filter(v=>mirrorHardStopActive(v,mirrorFill,at) && !markOnly(v));
   const phaseCause=(v:QualityHoldingVeto)=>({...{id:v.id,label:v.mirrorStage?holdingVetoName(v):v.label,kind:v.kind,direction:v.direction,threshold:v.threshold},...(v.limitedStaticVersion?{limitedStaticVersion:v.limitedStaticVersion}:{}),...(v.mirrorStage?{mirrorStage:v.mirrorStage,...(postMirrorProtectionAt(mirrorFill)!=null?{mirrorStageBoundary:postMirrorProtectionAt(mirrorFill)}:{})}:{})});
   const drops=enabled.filter(v=>minuteDropWindow(v.kind)>0).sort((a,b)=>a.id.localeCompare(b.id));
   const dropMinutes: ResearchBar[] = [], dropPrevious = new Map<string, { at: number; reading: number }>();
@@ -182,7 +186,7 @@ export async function findQualityIntrabarExit(o: {
       const value=minuteDropReading(dropMinutes,minuteDropWindow(v.kind),phaseEntry,at);
       if(!value)continue;
       const {reading,start}=value;
-      if(at>=checkFrom&&(reading>=v.threshold||Math.abs(reading-v.threshold)<=Number.EPSILON*32*Math.max(1,reading,v.threshold)))return {at,reading,barOpenTime:start,previous:dropPrevious.get(v.id),cause:phaseCause(v)};
+      if(!markOnly(v)&&at>=checkFrom&&(reading>=v.threshold||Math.abs(reading-v.threshold)<=Number.EPSILON*32*Math.max(1,reading,v.threshold)))return {at,reading,barOpenTime:start,previous:dropPrevious.get(v.id),cause:phaseCause(v)};
       dropPrevious.set(v.id,{at,reading});
     }
   };
@@ -232,8 +236,10 @@ export async function findQualityIntrabarExit(o: {
       if(at>=checkFrom&&met&&(!confirmation||confirmation.confirmed)) {
         const cause=s.cause?{...s.cause,...(s.activation?{activation:s.activation,activationAt}:{}),...(s.mirrorStage?{mirrorStage:s.mirrorStage,...(postMirrorProtectionAt(mirrorFill)!=null?{mirrorStageBoundary:postMirrorProtectionAt(mirrorFill)}:{})}:{})}:undefined;
         const trigger:QualityTrigger={at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause,...(s.stage?{stage:s.stage}:{}),...(confirmation?{advantage:confirmation.evidence}:{})};
-        if(o.matchMode!=='all')return trigger;
-        matches.push(trigger);
+        if(!markOnly(cause)) {
+          if(o.matchMode!=='all')return trigger;
+          matches.push(trigger);
+        }
       }
       s.previous={at,reading};
     }

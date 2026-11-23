@@ -187,7 +187,7 @@ it('keeps static and dynamic modules separate and opens the new three-stage sett
  expect(dynamic.getByRole('button',{name:'开始筛选'}).className).toBe(holding.getByRole('button',{name:'开始监测'}).className);
  expect(dynamic.getByLabelText('动态筛选条件').className).toBe(holding.getByLabelText('持仓监测条件').className);
  expect(dynamic.getByRole('button',{name:'打开筛选库'})).toBeInTheDocument();
- const toggle = dynamic.getByRole('button',{name:/^动态筛选$/});
+ const toggle = dynamic.getByRole('button',{name:/^动态监测$/});
  const instant = within(screen.getByTestId('quality-instant-controls'));
  const screened = within(instant.getByTestId('fish-screened')).getByRole('button',{name:/^筛选鱼\s*0$/});
  expect(screened).toHaveAttribute('aria-expanded','true');

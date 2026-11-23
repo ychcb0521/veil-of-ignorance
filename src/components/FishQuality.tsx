@@ -26,6 +26,7 @@ import {latestEntryDirectory,sourceDirectoryKeys,sourceDirectoryIds,matchesMinin
 import {type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import { FishPreEntryMonitor } from './FishPreEntryMonitor';
 import { HoldingMonitorSettings, MonitorTimePicker } from './FishHoldingMonitorSettings';
+import { FishParallelUniverse } from './FishParallelUniverse';
 import { ADDITION_VETO_LABELS, type AdditionEntryVetoKind } from '@/lib/fish/qualityAdditionVeto';
 import { readQualityTableSheet,downloadQualityTableSheet } from '@/lib/fish/qualityTableExport';
 import {qualityOrigins,qualitySourceLabel,QUALITY_SOURCE_NAMES,isSignalLibraryOrigin,type QualityOrigin} from '@/lib/fish/qualitySources';
@@ -1020,11 +1021,13 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
           {state.signalValues?.error && <p role="alert" className="text-[11px] text-destructive">{state.signalValues.error}</p>}
           {state.filterError && <p role="alert" className="text-[11px] text-destructive">{state.filterError}</p>}
           </FishQualityModule>
-          {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls"
+          {state.preEntry&&<FishQualityModule level="submodule" title="动态监测" icon={Activity} testId="quality-dynamic-controls"
             trailing={<QualityResultTools kind="screening" hidden={hideScreening} onToggle={()=>toggleHidden('screening')} count={screeningResults.length} onClear={lockedBatch ? undefined : state.clearScreeningResults} disabled={!ready||!state.preEntry?.ready||!!state.archiving}/>} summary={<FishQualityInfo label="动态筛选说明"><ol className="list-decimal space-y-2 pl-4"><li>必要条件。原信号时点全部通过，或跳过本步，即可继续。未通过时可启用动态门槛逐分钟追踪。</li><li>事件准入。任一启用项触发即成为候选。首次进入本步时，已达标的指标也可触发。跳过本步时，具备资格的观察时点直接成为候选。</li><li>排除检查。从候选时点向前检查。通过或跳过本步即入选。被排除就继续找候选，沿用原截止时间。</li></ol><p>三步开关适用于新版方案。已保存方案按冻结版本运行。</p></FishQualityInfo>}>
             <FishPreEntryMonitor renderTemplate={(table,close,source)=>renderTemplate(table,close,'screening',source)} openRequest={directoryRequests['pre-entry']} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('pre-entry',id,snapshot,ids)} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:!workspace&&filtersOn} onJump={onJump}
               onSelected={()=>{sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}}/>
           </FishQualityModule>}
+          {state.runParallelUniverse && <FishParallelUniverse key={state.account ?? 'anonymous'} owner={state.account}
+            study={study} plans={plans} selectedIds={scopedSelected.map(row => row.id)} run={state.runParallelUniverse}/>}
         </FishQualityModuleGroup>
         <FishQualityModule title="持仓监测" icon={Activity} testId="quality-run-controls" trailing={<QualityResultTools kind="monitor" hidden={hideMonitor} onToggle={() => toggleHidden('monitor')} count={study.results.length} onClear={lockedBatch ? undefined : state.clearMonitorResults} disabled={!ready || !!state.archiving}/>} titleTestId="quality-mode" summary={<FishQualityInfo label="持仓监测说明"><p>新方案默认 333 USDT 名义仓位、5 倍杠杆。</p>{vetoCount > 0 && <p>{vetoCount} 项监测条件</p>}<p className="text-muted-foreground">按已勾选信号和当前卖出规则独立监测，支持后台运行；已算完且条件没变的结果直接沿用；要全部重算，点监测按钮右侧的 ▾。归档按时间排列，目录内使用当时的组合表快照，后续重算不会覆盖。</p><p>开始时可选原信号时间或动态筛选的首次满足时间。继续监测沿用本轮起点。各次加仓及其后的卖出条件按方案保存的生效范围执行。</p></FishQualityInfo>} status={!running && lastPause && <p className="max-w-[22rem] truncate text-muted-foreground" data-testid="quality-last-pause" title={`上一轮于 ${formatUTC8(lastPause.at)}（UTC+8）暂停：${lastPause.reason}`}>已暂停：{lastPause.reason}</p>}>
           <div role="group" aria-label="监测运行" className="inline-flex h-6 shrink-0 items-stretch">
