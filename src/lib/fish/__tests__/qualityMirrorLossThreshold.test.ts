@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {makeQualityHoldingVeto,makeQualityBuyFilter,holdingVetoDraft,parseHoldingVetoDraft} from '../qualityFilters';
-import {MIRROR_LOSS_REVIEW_KIND as KIND,MIRROR_LOSS_REVIEW_VERSION as V2,MIRROR_LOSS_THRESHOLD_VERSION as V3,reviewMirrorLoss,type MirrorLossThreshold} from '../qualityMirrorLossReview';
+import {MIRROR_LOSS_REVIEW_KIND as KIND,MIRROR_LOSS_REVIEW_VERSION as V2,MIRROR_LOSS_THRESHOLD_VERSION as V3,MIRROR_PNL_THRESHOLD_VERSION as V6,reviewMirrorLoss,type MirrorLossThreshold} from '../qualityMirrorLossReview';
 import {holdingVetoIdentity,validateHoldingVeto} from '../qualityVeto';
 import {freezeQualityPlan,planVersionChanges,qualityPlanVersions} from '../qualityPlanVersions';
 import {evaluateQualitySample,qualityResultKey,type QualityGroup,type QualitySample} from '../quality';
@@ -64,4 +64,12 @@ it('freezes units and full-precision values in identities, result keys and manif
  expect(current.frozenVersions?.find(v=>v.key==='hard-stop-mirror-loss-review')?.version).toContain(V3);
  expect(planVersionChanges(changed).some(v=>v.key==='hard-stop-mirror-loss-review')).toBe(true);
  expect(planVersionChanges(current)).toEqual([]);expect(qualityPlanVersions(old)).toEqual(before.frozenVersions);expect(old).toEqual(before);
+});
+
+it.each([[1,100.5,true],[1,101,false],[1,101.5,false],[-1,98.5,true],[-1,99,false],[-1,99.5,false],[0,99.5,true],[0,100,false]] as const)(
+ 'checks signed PnL below %s at price %s',async(value,price,closes)=>{
+ const signed=makeQualityHoldingVeto(KIND,'>=',1,true,[],100,{version:V6,unit:'percent',value});
+ const result=await reviewMirrorLoss({rules:[signed],entry:T,end:T+60*M,entryPrice:100,notional:100,additions:[],readPrice:async()=>price});
+ expect(Boolean(result.stop)).toBe(closes);
+ expect(result.states[signed.id].version).toBe(V6);
 });

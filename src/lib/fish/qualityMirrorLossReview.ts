@@ -8,15 +8,21 @@ export const MIRROR_LOSS_REVIEW_KIND='mirror-loss-review' as const;
 export const MIRROR_LOSS_REVIEW_VERSION='holding-mirror-loss-review-v2' as const;
 export const MIRROR_LOSS_THRESHOLD_VERSION='holding-mirror-loss-threshold-v3' as const;
 export const MIRROR_REVIEW_SCHEDULE_VERSION='holding-mirror-review-schedule-v4' as const;
-export interface MirrorLossThreshold {version:typeof MIRROR_LOSS_THRESHOLD_VERSION;unit:'percent'|'usdt';value:number}
+export const MIRROR_PNL_THRESHOLD_VERSION='holding-mirror-pnl-threshold-v6' as const;
+export interface MirrorLossThreshold {version:typeof MIRROR_LOSS_THRESHOLD_VERSION|typeof MIRROR_PNL_THRESHOLD_VERSION;unit:'percent'|'usdt';value:number}
 export const MIRROR_REVIEW_ONCE_VERSION='holding-mirror-review-once-v5' as const;
 export type MirrorReviewSchedule =
  | {version:typeof MIRROR_REVIEW_SCHEDULE_VERSION;intervalHours:number;endHours:12}
  | {version:typeof MIRROR_REVIEW_ONCE_VERSION;intervalHours:null;endHours:12};
-export type MirrorLossReviewVersion=typeof MIRROR_LOSS_REVIEW_VERSION|typeof MIRROR_LOSS_THRESHOLD_VERSION|typeof MIRROR_REVIEW_SCHEDULE_VERSION|typeof MIRROR_REVIEW_ONCE_VERSION;
+export type MirrorLossReviewVersion=typeof MIRROR_LOSS_REVIEW_VERSION|typeof MIRROR_LOSS_THRESHOLD_VERSION|typeof MIRROR_REVIEW_SCHEDULE_VERSION|typeof MIRROR_REVIEW_ONCE_VERSION|typeof MIRROR_PNL_THRESHOLD_VERSION;
 export function validateMirrorLossThreshold(rule:{mirrorDeadlineVersion?:string;mirrorLossThreshold?:MirrorLossThreshold;mirrorReviewSchedule?:MirrorReviewSchedule}){
  const value=rule.mirrorLossThreshold;
  const schedule=rule.mirrorReviewSchedule;
+ if(rule.mirrorDeadlineVersion===MIRROR_PNL_THRESHOLD_VERSION){
+  if(!value||value.version!==MIRROR_PNL_THRESHOLD_VERSION||!['percent','usdt'].includes(value.unit)||!Number.isFinite(value.value))throw Error('请填写有限数字盈亏门槛');
+  validateMirrorLossThreshold({mirrorDeadlineVersion:schedule?.version??MIRROR_LOSS_THRESHOLD_VERSION,mirrorLossThreshold:{...value,version:MIRROR_LOSS_THRESHOLD_VERSION,value:0},mirrorReviewSchedule:schedule});
+  return;
+ }
  if(rule.mirrorDeadlineVersion===MIRROR_LOSS_REVIEW_VERSION){if(value!==undefined||schedule!==undefined)throw Error('原版定时检查不能自动套用新版亏损门槛或间隔，请新建副本');return;}
  if(rule.mirrorDeadlineVersion===MIRROR_REVIEW_ONCE_VERSION){
   if(schedule?.version!==MIRROR_REVIEW_ONCE_VERSION||schedule.intervalHours!==null||schedule.endHours!==12)throw Error('单次检查的参数与版本不符');
@@ -31,7 +37,7 @@ export const MIRROR_LOSS_REVIEW_INTERVAL_HOURS=.5;
 export const MIRROR_LOSS_REVIEW_END_HOURS=12;
 export const isMirrorClockExit=(cause?:{kind:string;mirrorDeadlineVersion?:string})=>
  cause?.kind===MIRROR_DEADLINE_KIND&&cause.mirrorDeadlineVersion===MIRROR_DEADLINE_VERSION
- ||cause?.kind===MIRROR_LOSS_REVIEW_KIND&&(cause.mirrorDeadlineVersion===MIRROR_LOSS_REVIEW_VERSION||cause.mirrorDeadlineVersion===MIRROR_LOSS_THRESHOLD_VERSION||cause.mirrorDeadlineVersion===MIRROR_REVIEW_SCHEDULE_VERSION||cause.mirrorDeadlineVersion===MIRROR_REVIEW_ONCE_VERSION);
+ ||cause?.kind===MIRROR_LOSS_REVIEW_KIND&&(cause.mirrorDeadlineVersion===MIRROR_LOSS_REVIEW_VERSION||cause.mirrorDeadlineVersion===MIRROR_LOSS_THRESHOLD_VERSION||cause.mirrorDeadlineVersion===MIRROR_REVIEW_SCHEDULE_VERSION||cause.mirrorDeadlineVersion===MIRROR_REVIEW_ONCE_VERSION||cause.mirrorDeadlineVersion===MIRROR_PNL_THRESHOLD_VERSION);
 export interface MirrorLossReviewCheck {
  at:number;price:number;pnl:number;quantity:number;cost:number;realizedPnl:number;
  decision:'continue'|'close';
@@ -48,7 +54,8 @@ export function mirrorLossReviewPoints(entry:number,firstHours:number,intervalHo
  const count=Math.floor((MIRROR_LOSS_REVIEW_END_HOURS-firstHours)/intervalHours+1e-10);
  return Array.from({length:Math.max(0,count+1)},(_,i)=>Math.ceil((entry+(firstHours+i*intervalHours)*3_600_000)/60_000)*60_000);
 }
-export const mirrorLossReviewSummary=(hours:number,loss?:MirrorLossThreshold,schedule?:MirrorReviewSchedule)=>`${schedule?.intervalHours===null?`持仓 ${hours} 小时后只检查一次`:`首次 ${hours} 小时，此后每 ${schedule?.intervalHours??.5} 小时检查至 12 小时`}；未镜像且${loss&&loss.value>0?`亏损达到 ${loss.value}${loss.unit==='percent'?'%':' USDT'}`:'整笔账面盈亏 < 0'} 时市价清仓，盈利或持平继续观察`;
+export const signedMirrorPnl=(value:number)=>value>0?'+'+value:String(value);
+export const mirrorLossReviewSummary=(hours:number,loss?:MirrorLossThreshold,schedule?:MirrorReviewSchedule)=>`${schedule?.intervalHours===null?`持仓 ${hours} 小时后只检查一次`:`首次 ${hours} 小时，此后每 ${schedule?.intervalHours??.5} 小时检查至 12 小时`}；未镜像且${loss?.version===MIRROR_PNL_THRESHOLD_VERSION?`整笔盈亏 < ${signedMirrorPnl(loss.value)}${loss.unit==='percent'?'%':' USDT'}`:loss&&loss.value>0?`亏损达到 ${loss.value}${loss.unit==='percent'?'%':' USDT'}`:'整笔账面盈亏 < 0'} 时市价清仓，达到继续持有条件时继续观察`;
 export async function reviewMirrorLoss(o:{
  rules:readonly QualityHoldingVeto[];entry:number;end:number;entryPrice:number;notional:number;
  additions:readonly QualityAdditionFill[];reductions?:readonly QualityReductionFill[];mirror?:QualityMirrorFill;
@@ -91,7 +98,9 @@ export async function reviewMirrorLoss(o:{
   const loss=rule.mirrorLossThreshold;
   const target=loss?loss.unit==='usdt'?loss.value:ledger.totalInvested*loss.value/100:0;
   if(!Number.isFinite(target))throw Error('亏损门槛超出可计算范围');
-  const met=pnl < -tolerance&&(-pnl>=target||Math.abs(-pnl-target)<=tolerance);
+  const met=loss?.version===MIRROR_PNL_THRESHOLD_VERSION
+   ? pnl < target-tolerance
+   : pnl < -tolerance&&(-pnl>=target||Math.abs(-pnl-target)<=tolerance);
   const check:MirrorLossReviewCheck={at,price,pnl,quantity:ledger.held,cost:ledger.cost,realizedPnl:ledger.realized,decision:met?'close':'continue',
    ...(loss?{pnlPct:pnl/ledger.totalInvested*100,totalInvested:ledger.totalInvested,lossThreshold:structuredClone(loss)}:{})};
   state.checks.push(check);state.through=at;
