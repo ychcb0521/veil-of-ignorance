@@ -1,6 +1,6 @@
 import { usdtLiveRiskMetrics } from './usdtLiveCampaignMetrics';
 import type {TradeCampaign} from '@/types/journal';
-import { initialLimitedDrawdownPct, qualityLimitedDrawdownText } from './qualityStaticDrawdownSell';
+import { initialLimitedDrawdownPct, qualityLimitedDrawdownText, timedDrawdownPayoffPct } from './qualityStaticDrawdownSell';
 /** The denominator is frozen initial risk, never the later enlarged investment or realized drawdown. */
 export function qualityCampaignStaticRisk(campaign?:TradeCampaign){
  if(!campaign?.comparison)return;
@@ -10,7 +10,7 @@ export function qualityCampaignStaticRisk(campaign?:TradeCampaign){
  const evidence=campaign.comparison.sellEvidence;
  const stops=(evidence?.holdingVetoes??[]).filter(v=>v.kind==='static-drawdown'&&(v.direction==='>='||v.direction==='>')&&Number.isFinite(v.threshold)&&v.threshold>0&&v.threshold<=100);
  const plan=campaign.comparison.monitorPlan;
- const limited=plan && initialLimitedDrawdownPct(plan);
+ const limited=plan && (timedDrawdownPayoffPct(plan) ?? initialLimitedDrawdownPct(plan));
  const percent=limited ?? (campaign.comparison.section==='instant'&&!plan
   ? campaign.comparison.instant?.initialStaticStopPct
   : evidence&&Object.prototype.hasOwnProperty.call(evidence,'initialStaticStopPct')?evidence.initialStaticStopPct:stops.length?Math.min(...stops.map(v=>v.threshold)):undefined);

@@ -72,6 +72,16 @@ export function qualityStaticDrawdownReason(result?: Pick<QualityResult, 'exitSn
   return result?.reason;
 }
 
+/** Reporting only: keep the risk unit fixed across all five holding-time bands. */
+export function timedDrawdownPayoffPct(plan: Pick<QualityGroup, 'rule' | 'combo' | 'router'>) {
+  const initial = plan.router?.structure ?? plan;
+  const rule = initial.rule?.version === TIMED_STATIC_DRAWDOWN_VERSION ? initial.rule
+    : initial.combo?.after.rule.version === TIMED_STATIC_DRAWDOWN_VERSION ? initial.combo.after.rule : undefined;
+  const bands = rule?.bandThresholds;
+  return bands?.length === DRAWDOWN_BAND_STARTS.length && bands.every(value => Number.isFinite(value) && value > 0 && value < 100)
+    ? Math.max(...bands) : undefined;
+}
+
 function limitedDrawdownPct(rule?: QualityExitRule) {
   return isStaticDrawdownSell(rule) && Number.isFinite(rule.threshold) && rule.threshold > 0 && rule.threshold < 100
     ? rule.threshold : undefined;

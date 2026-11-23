@@ -6,7 +6,7 @@ import type { QualityGroup, QualityResult } from './quality';
 import type { QualityMirrorFill, QualityMirrorTakeProfit } from './qualityMirror';
 import { mirrorFillGainPct } from './qualityMirror';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { initialLimitedDrawdownPct } from './qualityStaticDrawdownSell';
+import { initialLimitedDrawdownPct, timedDrawdownPayoffPct } from './qualityStaticDrawdownSell';
 import { payoffStopL0Pct } from './qualityVeto';
 export const qualityPeakPct = (result?: QualityResult): number | null => result && ['open','closed'].includes(result.status) && result.peakPct != null && Number.isFinite(result.peakPct) ? Math.max(0,result.peakPct) : null;
 /** Original buy price to actual final sale price; independent of partial sales/addition sizing. */
@@ -62,7 +62,7 @@ export const qualityGeometricPositionText=(value:number|null)=>value==null?'—'
  */
 export function qualityPayoffRatio(plan:QualityRiskPlan,result?:QualityResult):{value:number|null;reason:string}{
  if(result?.status!=='closed')return {value:null,reason:result?.status==='open'?'持有中，卖出后才有盈亏比':'尚无卖出结果'};
- const stopPct=qualityReportedInitialRiskPct(plan);
+ const stopPct=timedDrawdownPayoffPct(plan) ?? qualityReportedInitialRiskPct(plan);
  if(stopPct==null)return {value:null,reason:'缺少初始最大预期亏损 L₀：请在组合算法起始阶段设置限制静态最大回撤'};
  const notional=result.initialNotional??100,L0=notional*stopPct/100,pnl=result.pnl;
  if(pnl==null||!Number.isFinite(pnl)||!(L0>0))return {value:null,reason:'缺少已实现盈亏'};

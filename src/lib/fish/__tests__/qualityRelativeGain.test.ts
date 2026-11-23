@@ -5,7 +5,7 @@ import { defaultQualityAddition } from '../qualityAddition';
 import { buildQualityCampaignData } from '../qualityCampaigns';
 import { qualityPayoffRatio, qualityRelativeGain, qualityRelativeGainText } from '../qualityPresentation';
 import { makeQualitySellPlan, replaceQualitySellPlans } from '../qualitySellPlans';
-import { STATIC_DRAWDOWN_SELL_CHOICE, qualityLimitedDrawdownText } from '../qualityStaticDrawdownSell';
+import { STATIC_DRAWDOWN_SELL_CHOICE, TIMED_STATIC_DRAWDOWN_VERSION, initialPayoffRiskThreshold, qualityLimitedDrawdownText } from '../qualityStaticDrawdownSell';
 import { campaignLimitedDrawdownText, qualityCampaignStaticRisk } from '../qualityCampaignRisk';
 import { freezeQualityPlan, planVersionChanges } from '../qualityPlanVersions';
 import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
@@ -85,4 +85,19 @@ it('几何仓位 follows the campaign formula; without additions it equals the c
   const plain = { ...noAdd.result, mirrorFill: undefined };expect(qualityGeometricPosition(plain)).toBe(1);
   expect(qualityGeometricPosition({ ...noAdd.result, status: 'open' })).toBe(1);
   expect(qualityGeometricPositionText(2.5)).toBe('2.50x');expect(qualityGeometricPositionText(null)).toBe('—');
+});
+
+it('uses the largest timed threshold for reported payoff even when the trade ended in the first band', () => {
+  const {plan, result, data} = trade([]);
+  const fixed = makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 1, [], plan);
+  const timed = freezeQualityPlan({...fixed, rule: {...fixed.rule!,
+    version: TIMED_STATIC_DRAWDOWN_VERSION, bandThresholds: [1, 1.5, 3, 2, 2.5]}});
+  const saved = structuredClone(timed);
+  data.campaign.comparison!.monitorPlan = timed;
+  const early = {...result, endTime: T + 4 * M, pnl: -1};
+  expect(qualityPayoffRatio(timed, early).value).toBeCloseTo(-1 / 3);
+  expect(qualityCampaignStaticRisk(data.campaign)).toMatchObject({percent: 3, loss: 3});
+  expect(initialPayoffRiskThreshold(timed)).toBe(1);
+  expect(timed).toEqual(saved);
+  expect(planVersionChanges(timed)).toEqual([]);
 });
