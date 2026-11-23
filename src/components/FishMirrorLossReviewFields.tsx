@@ -15,7 +15,7 @@ export function FishMirrorLossReviewFields({draft,label,onChange}:{draft:Holding
     <input aria-label={label+'开始时间（小时）'} type="number" min={1/60} max={12} step="any" className={field} style={width(start)} value={start} onChange={e=>onChange({threshold:e.target.value})}/><span>小时后</span>
    </span></label>
    <label className="space-y-1 text-[10px] text-muted-foreground"><span className="block">判断间隔</span><span className="flex items-center gap-1 text-foreground">
-    <input aria-label={label+'判断间隔（小时）'} type="number" min={1/60} max={12} step="any" className={field} style={width(interval)} value={interval} onChange={e=>onChange({saved:undefined,
+    <input aria-label={label+'判断间隔（小时）'} type="number" min={1/60} max={12} step="any" className={field} style={width(interval)} placeholder="留空只查一次" value={interval} onChange={e=>onChange({saved:undefined,
       lossThreshold:draft.lossThreshold??{version:MIRROR_LOSS_THRESHOLD_VERSION,unit:'percent',value:'0'},
       reviewSchedule:{version:MIRROR_REVIEW_SCHEDULE_VERSION,intervalHours:e.target.value,endHours:12}})}/><span>小时</span>
    </span></label>
@@ -26,7 +26,7 @@ export function FishMirrorLossReviewFields({draft,label,onChange}:{draft:Holding
     <input aria-label={label+'亏损门槛'} type="number" min="0" step="any" className={field} style={width(loss)} value={loss} onChange={e=>onChange({saved:undefined,lossThreshold:{version:MIRROR_LOSS_THRESHOLD_VERSION,unit,value:e.target.value}})}/><span data-testid="mirror-review-loss-unit">{suffix}</span>
    </label></div>
   </div>
-  <p className="text-[10px] leading-relaxed text-foreground" data-testid="mirror-review-rule-summary">未完成镜像止盈时，从持仓 {start||'…'} 小时开始，每 {interval||'…'} 小时判断；{lossText}时，全余仓市价平仓。</p>
-  <p className="text-[10px] text-muted-foreground">检查至持仓 12 小时；已镜像后结束本项，未触发则继续按原规则持有。</p>
+  <p className="text-[10px] leading-relaxed text-foreground" data-testid="mirror-review-rule-summary">未完成镜像止盈时，{interval.trim()?`从持仓 ${start||'…'} 小时开始，每 ${interval} 小时判断`:`持仓 ${start||'…'} 小时后只检查一次`}；{lossText}时，全余仓市价平仓。</p>
+  <p className="text-[10px] text-muted-foreground">{interval.trim()&&"检查至持仓 12 小时；"}已镜像后结束本项，未触发则继续按原规则持有。</p>
  </div>;
 }

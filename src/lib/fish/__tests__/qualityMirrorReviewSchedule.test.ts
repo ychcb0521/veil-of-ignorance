@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {makeQualityHoldingVeto,makeQualityBuyFilter,parseHoldingVetoDraft,holdingVetoDraft} from '../qualityFilters';
-import {MIRROR_LOSS_REVIEW_KIND as KIND,MIRROR_LOSS_THRESHOLD_VERSION as V3,MIRROR_REVIEW_SCHEDULE_VERSION as V4,mirrorLossReviewPoints,type MirrorReviewSchedule} from '../qualityMirrorLossReview';
+import {MIRROR_LOSS_REVIEW_KIND as KIND,MIRROR_LOSS_THRESHOLD_VERSION as V3,MIRROR_REVIEW_SCHEDULE_VERSION as V4,MIRROR_REVIEW_ONCE_VERSION as V5,reviewMirrorLoss,mirrorLossReviewPoints,type MirrorReviewSchedule} from '../qualityMirrorLossReview';
 import {freezeQualityPlan,planVersionChanges,qualityPlanVersions} from '../qualityPlanVersions';
 import {evaluateQualitySample,qualityResultKey,type QualityGroup,type QualitySample} from '../quality';
 import {holdingVetoIdentity,validateHoldingVeto} from '../qualityVeto';
@@ -30,7 +30,6 @@ it('preserves precision and rejects unknown versions or silent legacy conversion
  const saved=[rule(.25123456789,.5123456789)],before=structuredClone(saved);expect(parseHoldingVetoDraft(holdingVetoDraft(saved),[])).toEqual(saved);expect(saved).toEqual(before);
  expect(()=>validateHoldingVeto({...saved[0],mirrorReviewSchedule:{...saved[0].mirrorReviewSchedule!,version:'future-v5' as typeof V4}})).toThrow(/执行版本/);
  expect(()=>validateHoldingVeto({...saved[0],mirrorDeadlineVersion:V3})).toThrow(/不能自动/);
- const draft=holdingVetoDraft(saved);draft[0].reviewSchedule!.intervalHours='';expect(()=>parseHoldingVetoDraft(draft,[])).toThrow(/判断间隔/);
  expect(()=>validateHoldingVeto({...saved[0],mirrorReviewSchedule:{...saved[0].mirrorReviewSchedule!,endHours:13} as unknown as MirrorReviewSchedule})).toThrow(/截止/);
 });
 it('freezes interval changes independently while saved v3 data and manifests remain unchanged',()=>{
@@ -39,4 +38,20 @@ it('freezes interval changes independently while saved v3 data and manifests rem
  expect(planVersionChanges(current)).toEqual([]);expect(planVersionChanges(changed).some(v=>v.key==='hard-stop-mirror-loss-review')).toBe(true);
  expect(qualityResultKey(sample,current,0)).not.toBe(qualityResultKey(sample,changed,0));expect(holdingVetoIdentity(current.holdingVetoes)).not.toEqual(holdingVetoIdentity(changed.holdingVetoes));
  expect(current.frozenVersions?.find(v=>v.key==='hard-stop-mirror-loss-review')?.version).toContain(V4);expect(qualityPlanVersions(legacy)).toEqual(before.frozenVersions);expect(planVersionChanges(legacy)).toEqual([]);expect(legacy).toEqual(before);
+});
+
+it('round-trips a blank interval and never rechecks after the single checkpoint',async()=>{
+ const draft=holdingVetoDraft([rule()]);
+ draft[0].reviewSchedule!.intervalHours='';
+ const saved=parseHoldingVetoDraft(draft,[]);
+ expect(saved[0].mirrorDeadlineVersion).toBe(V5);
+ expect(holdingVetoDraft(saved)[0].reviewSchedule?.intervalHours).toBe('');
+ expect(parseHoldingVetoDraft(holdingVetoDraft(saved),[])).toEqual(saved);
+ const review={rules:saved,entry:T,end:T+720*M,entryPrice:100,notional:100,additions:[],
+   readPrice:async(at:number)=>at===T+60*M?101:90};
+ const result=await reviewMirrorLoss(review);
+ expect(result.stop).toBeUndefined();
+ expect(result.states[saved[0].id].checks.map(c=>c.at)).toEqual([T+60*M]);
+ const lossAtFirst=await reviewMirrorLoss({...review,readPrice:async()=>90});
+ expect(lossAtFirst.stop?.check.at).toBe(T+60*M);
 });
