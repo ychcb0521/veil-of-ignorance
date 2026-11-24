@@ -1324,9 +1324,18 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
 
   const performanceSection = campaign?.comparison?.section;
   const performanceSellKey = campaign?.comparison?.sellKey;
+  const [statsForCampaign, setStatsForCampaign] = useState<string>();
+  const deferStats = !batchExport && (performanceSection === 'sell' || performanceSection === 'detect') && statsForCampaign !== id;
   const performanceClosedAt = campaign?.closed_at;
   useEffect(() => {
     if (!campaignOwnerId || !viewerUserId) return;
+    if (deferStats) {
+      setCampaignPerformance(null);
+      setCampaignAsymmetricRisk(null);
+      setCampaignPerformanceError(null);
+      setCampaignPerformanceLoading(false);
+      return;
+    }
     if (batchExport?.options.sections.overview === false) {
       setCampaignPerformanceLoading(false);
       setBatchMetricsOwnerReady(campaignOwnerId);
@@ -1378,7 +1387,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       cancelled = true;
       controller.abort();
     };
-  }, [campaignOwnerId, viewerUserId, batchExport, reportBatchError, localRecoveryRevision, performanceSection, performanceSellKey, performanceClosedAt]);
+  }, [campaignOwnerId, viewerUserId, batchExport, reportBatchError, localRecoveryRevision, performanceSection, performanceSellKey, performanceClosedAt, deferStats]);
 
   const effectiveClosedAt = useMemo(() => {
     if (!campaign) return null;
@@ -3054,6 +3063,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
 
           <CampaignPnlOverviewPanel
             title="盈亏概览"
+            footer={deferStats ? <button type="button" className="text-primary hover:underline" onClick={() => setStatsForCampaign(id)}>计算账户风险贡献</button> : undefined}
             items={overviewItems}
           />
 

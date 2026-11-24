@@ -293,6 +293,22 @@ function ListLocationProbe() {
 }
 
 describe('JournalCampaignDetailPage metrics', () => {
+  it('opens monitor details repeatedly without loading account history until requested', async () => {
+    const api = await import('@/lib/fish/qualityCampaigns');
+    const stats = vi.spyOn(api, 'loadQualityCampaignPerformance').mockRejectedValue(new Error('offline'));
+    try {
+      vi.mocked(getCampaignFullData).mockResolvedValue({...detailsById.winner, ...qualityMirrorCampaignFixture()});
+      const open = () => render(<MemoryRouter initialEntries={['/journal/campaigns/winner']}><Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage/>}/></Routes></MemoryRouter>);
+      const first = open();
+      await screen.findByTestId('quality-mirror-board');
+      first.unmount();
+      open();
+      const button = await screen.findByRole('button', {name:'计算账户风险贡献'});
+      expect(stats).not.toHaveBeenCalled();
+      fireEvent.click(button);
+      await waitFor(() => expect(stats).toHaveBeenCalledTimes(1));
+    } finally { stats.mockRestore(); }
+  });
   it('puts mirror execution on the candle board and labels the joint final sale of all remaining lots', async () => {
     const data=qualityMirrorCampaignFixture();
     vi.mocked(getCampaignFullData).mockResolvedValue({...detailsById.winner,...data});
