@@ -724,11 +724,11 @@ async function evaluateQualitySampleCore(sample:QualitySample,group:QualityGroup
    const entry=Math.ceil(sample.enteredAt/QUALITY_MINUTE)*QUALITY_MINUTE;
    if (Math.floor(now/QUALITY_MINUTE)*QUALITY_MINUTE>entry) try {
     const at=sample.binanceEntry ? sample.source.timeMs : entry;
-    const [bar]=sample.binanceEntry ? [] : await load(sample.source,entry,entry+QUALITY_MINUTE,pricePlan(),signal);
+    const [bar]=sample.binanceEntry ? [] : await load({...sample.source,timeMs:entry+QUALITY_MINUTE},entry,entry+QUALITY_MINUTE,pricePlan(),signal);
     const price=sample.binanceEntry?.price??bar?.open;
     if (!(price>0) || !Number.isFinite(price)) throw Error('缺少首仓买入价');
     const {createBoxStopReader}=await import('./qualityBoxStop');
-    const reader=createBoxStopReader({vetoes:initialDbl5RiskVetoes(group),row:sample.source,entry:at,since:at,load,signal});
+    const reader=createBoxStopReader({vetoes:initialDbl5RiskVetoes(group),row:{...sample.source,timeMs:at},entry:at,since:at,load,signal});
     await reader.read({openTime:at,open:price,high:price,low:price,close:price,volume:0,takerBuyVolume:0});
     const distances=reader.latestLines().filter(line=>line<price).map(line=>(price-line)/price*100);
     initialPayoffRiskPct=distances.length?Math.min(...distances):null;

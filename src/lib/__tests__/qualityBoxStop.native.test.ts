@@ -72,7 +72,8 @@ it('saves DBL-5 sellers with a payoff stop and freezes the entry distance as R',
  const {newQualityStudy}=await import('@/lib/fish/quality');
  const {PAYOFF_STOP_KIND}=await import('@/lib/fish/qualityVeto');
  const entry=T+15*300000, bars=new Map(dblSample().map(b=>[b.openTime,b]));
- const load:FishReconstructionLoader=async(_r,a,b,p)=>Array.from({length:(b-a)/p.step},(_,i)=>{
+ const load:FishReconstructionLoader=async(row,a,b,p)=>Array.from({length:(b-a)/p.step},(_,i)=>{
+   expect(b).toBeLessThanOrEqual(Math.floor(row.timeMs/p.step)*p.step);
    const openTime=a+i*p.step;
    return {...bars.get(openTime)??{openTime,open:100,high:100,low:100,close:100,volume:10,takerBuyVolume:5,quoteVolume:1000,takerBuyQuoteVolume:500},
      ...(p.step===60000?{open:200,high:200,low:1,close:200}:{}),DBL5_tick_size:1};
