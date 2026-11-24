@@ -1,15 +1,17 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useContext, useEffect, useMemo, useState} from 'react';
 import {formatUTC8} from '@/lib/timeFormat';
 import {editRegretDirectory, importRegretArchive, loadLegacyRegretAttempts, loadRegretAttempts, loadRegretCatalog, loadRegretRound, type RegretAttempt, type RegretImportReceipt} from '@/lib/fish/parallelUniverseStore';
 import {qualityAdditionFills} from '@/lib/fish/qualityAddition';
 import {qualityAdditionStopOrder} from '@/lib/fish/qualityAdditionStopOrder';
 import {createQualityTemplateDirectory} from '@/lib/fish/qualityTemplateDirectory';
-import type {FishQualityStudy} from '@/lib/fish/quality';
+import {importQualityLibrary, newQualityStudy, qualityDisplayRows, type FishQualityStudy} from '@/lib/fish/quality';
 import {FishContinuousTable} from './FishContinuousTable';
 import {FishScrollBoundary} from './FishScrollBoundary';
 import {FishLibraryTimeDirectory, type FishDirectoryItem, type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import {libraryCell} from './FishLibraryDialog';
 import {FishQualityMonitorSettingsView} from './FishQualityMonitorSettingsView';
+
+import {DirectoryImportContext} from './FishWorkspaceSource';
 
 const LEGACY_ID = 'legacy-regret';
 const columns = ['标的', '原信号 / 推演起点', '推演方案', '推演结果', '首次满足时间', '推演过程'];
@@ -39,7 +41,42 @@ function AttemptEvidence({attempt}: {attempt: RegretAttempt}) {
   </details>;
 }
 
-function RegretRecords({owner, id}: {owner?: string; id: string}) {
+function generatedSignal(attempt: RegretAttempt) {
+  const signal = attempt.proposedSignal;
+  if (!attempt.emitted || !signal || !Number.isFinite(signal.time) || signal.time <= 0) return;
+  const {exchange, market, underlying, binanceSymbol} = attempt.candidate.source;
+  return {
+    id: 'regret:' + attempt.id, symbol: signal.symbol, timeMs: signal.time,
+    timeLabel: formatUTC8(signal.time), fallbackZone: '',
+    exchange, market, underlying, binanceSymbol,
+  };
+}
+
+function RegretRecords({owner, id, picking, close}: {
+  owner?: string; id: string; picking: boolean; close: () => void;
+}) {
+  const workspace = useContext(DirectoryImportContext);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState('');
+  const canPick = picking && !!workspace;
+  const importSelected = async () => {
+    if (!workspace || importing || !selected.size) return;
+    const signals = rows.flatMap(attempt => {
+      const signal = selected.has(attempt.id) && generatedSignal(attempt);
+      return signal ? [signal] : [];
+    });
+    const snapshot = importQualityLibrary(newQualityStudy(), signals, Date.now(), 'regret');
+    const ids = qualityDisplayRows(snapshot).map(row => row.id);
+    setImporting(true);
+    setImportError('');
+    try {
+      const imported = await (workspace.onImportInformation ?? workspace.onImport)(snapshot, ids);
+      if (!imported) throw Error('未能导入组合表，请重试。');
+      close();
+    } catch (cause) { setImportError(errorText(cause)); }
+    finally { setImporting(false); }
+  };
   const [rows, setRows] = useState<RegretAttempt[]>([]);
   const [next, setNext] = useState<IDBValidKey>();
   const [request, setRequest] = useState<{before?: IDBValidKey}>({});
@@ -61,10 +98,34 @@ function RegretRecords({owner, id}: {owner?: string; id: string}) {
     setError('');
     setRequest({before});
   };
-  return <FishContinuousTable items={rows} getKey={attemptKey} columns={columns.length} resetKey={id}
+  const visibleRows = canPick ? rows.filter(generatedSignal) : rows;
+  const allLoadedSelected = visibleRows.length > 0 && visibleRows.every(row => selected.has(row.id));
+  return <>
+    {canPick && <div className="flex flex-wrap items-center gap-3 px-3 py-2 text-xs">
+      <label className="inline-flex items-center gap-1">
+        <input type="checkbox" checked={allLoadedSelected} disabled={importing || !visibleRows.length}
+          onChange={event => setSelected(new Set(event.target.checked ? visibleRows.map(row => row.id) : []))}/>
+        全选已加载信号
+      </label>
+      <button type="button" className="text-primary disabled:opacity-50" disabled={importing || !selected.size}
+        onClick={() => void importSelected()}>{importing ? '正在导入…' : `导入组合表（${selected.size} 条）`}</button>
+      {importError && <p role="alert" className="text-destructive">{importError}</p>}
+    </div>}
+    <FishContinuousTable items={visibleRows} getKey={attemptKey} columns={columns.length + Number(canPick)} resetKey={id}
     label="后悔库推演记录" testId="regret-records" className="max-h-[55dvh]" tableClassName="text-[11px]" estimate={37}
-    header={<tr className="bg-muted/40">{columns.map(label => <th key={label} scope="col" className={`${libraryCell} whitespace-nowrap text-left font-medium`}>{label}</th>)}</tr>}
+    header={<tr className="bg-muted/40">{canPick && <th scope="col" className={libraryCell}>选取</th>}{columns.map(label => <th key={label} scope="col" className={`${libraryCell} whitespace-nowrap text-left font-medium`}>{label}</th>)}</tr>}
     row={attempt => <tr className="bg-background align-top hover:bg-muted/30" data-testid="regret-attempt-row">
+      {canPick && <td className={libraryCell}><input type="checkbox" disabled={importing} checked={selected.has(attempt.id)}
+        aria-label={`选取 ${attempt.candidate.source.symbol} ${date(attempt.proposedSignal?.time)}`}
+        onChange={event => {
+          const checked = event.target.checked;
+          setSelected(previous => {
+            const updated = new Set(previous);
+            if (checked) updated.add(attempt.id);
+            else updated.delete(attempt.id);
+            return updated;
+          });
+        }}/></td>}
       <td className={`${libraryCell} font-mono`}>{attempt.candidate.source.symbol}</td>
       <td className={`${libraryCell} whitespace-nowrap`}>{date(originalTime(attempt))}{attempt.candidate.enteredAt !== originalTime(attempt) && <><br/><span className="text-muted-foreground">{date(attempt.candidate.enteredAt)}</span></>}</td>
       <td className={libraryCell}>{attempt.plan.label}</td>
@@ -72,10 +133,11 @@ function RegretRecords({owner, id}: {owner?: string; id: string}) {
       <td className={`${libraryCell} whitespace-nowrap`}>{date(attempt.proposedSignal?.time)}</td>
       <td className={libraryCell}><AttemptEvidence attempt={attempt}/></td>
     </tr>}
-    empty={!loading && !error && <p className="px-3 py-4 text-xs text-muted-foreground">暂无推演记录。</p>}
+    empty={!loading && !error && !next && <p className="px-3 py-4 text-xs text-muted-foreground">{canPick ? '本轮暂无已生成的信号。' : '暂无推演记录。'}</p>}
     footer={loading ? <p role="status" className="px-3 py-2 text-xs text-muted-foreground">正在读取归档…</p>
       : error ? <p role="alert" className="px-3 py-2 text-xs text-destructive">{error} <button type="button" className="underline" onClick={() => read(request.before)}>重试读取</button></p>
-      : next ? <FishScrollBoundary key={rows.length} onReach={() => read(next)}/> : null}/>;
+      : next ? <FishScrollBoundary key={rows.length} onReach={() => read(next)}/> : null}/>
+  </>;
 }
 
 async function downloadHistory(owner?: string) {
@@ -147,11 +209,11 @@ export function FishRegretLibrary({owner, revision, templates, openRequest}: {
         <p>第 {round.additionCount} 次加仓生成信号 · 观察时长 {round.observeHours} 小时</p>
         <FishQualityMonitorSettingsView plan={round.plan} savedOnly/>
       </>,
-      content: () => <RegretRecords key={`${round.id}:${round.done}`} owner={owner} id={round.id}/>,
+      content: (close, picking) => <RegretRecords key={`${round.id}:${round.done}`} owner={owner} id={round.id} picking={picking} close={close}/>,
     }));
     if (catalog?.legacy) entries.push({
       id: LEGACY_ID, at: 0, label: '历史推演', summary: '旧版归档',
-      content: () => <RegretRecords key={LEGACY_ID} owner={owner} id={LEGACY_ID}/>,
+      content: (close, picking) => <RegretRecords key={LEGACY_ID} owner={owner} id={LEGACY_ID} picking={picking} close={close}/>,
     });
     return entries;
   }, [rounds, catalog?.legacy, owner, templates]);

@@ -416,7 +416,7 @@ function reconcilePreEntryEntries(study:FishQualityStudy,incoming:readonly Trade
   const kept=selected?.filter(id=>!([...aliases.keys()].some(old=>id===old||id.startsWith(old+'/detector/')))||validRows.has(id));
   return {...study,samples,...(selected?{selectedRowIds:[...new Set([...kept!,...extra!])]}:{})};
 }
-export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now(), origin: 'library' | 'turing' | 'pre-entry' = 'library'): FishQualityStudy {
+export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now(), origin: 'library' | 'turing' | 'pre-entry' | 'regret' = 'library'): FishQualityStudy {
   study=resolveLegacySourceMemberships(study,signals,origin);
   if(origin==='pre-entry')study=reconcilePreEntryEntries(study,signals);
   if(origin==='library'){

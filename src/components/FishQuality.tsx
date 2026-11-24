@@ -799,7 +799,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
     setDirectoryChoice(undefined);setOrigin(value);if(value === 'fish')setDetectorExpanded(false);resetScroll();
   };
   const openWorkspaceLibrary = (kind: QualitySourceDirectory['kind']|'monitor'|'regret') =>
-    setDirectoryRequests(requests=>({...requests,[kind]:{key:(requests[kind]?.key??0)+1,importSelection:kind!=='regret'}}));
+    setDirectoryRequests(requests=>({...requests,[kind]:{key:(requests[kind]?.key??0)+1,importSelection:true}}));
   const importWorkspace = (snapshot: FishQualityStudy, ids: readonly string[]) => {
     if (!workspace?.importRows(snapshot,ids)) return false;
     setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();
@@ -1169,7 +1169,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
           <FishWorkspaceSource name="捕捞库" loadSnapshot={workspace.sources?.mined} onImport={importWorkspace}/>}
         <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('filter')}><Database aria-hidden className="h-3 w-3"/>过滤库</button>
         <button type="button" className={fishSourceButton} disabled={!state.preEntry} onClick={()=>openWorkspaceLibrary('pre-entry')}><Database aria-hidden className="h-3 w-3"/>筛选库</button>
-        {state.runParallelUniverse && <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('regret')}><Database aria-hidden className="h-3 w-3"/>后悔库</button>}
+        {state.runParallelUniverse && <button type="button" className={fishSourceButton} disabled={!!lockedBatch} onClick={()=>openWorkspaceLibrary('regret')}><Database aria-hidden className="h-3 w-3"/>后悔库</button>}
         <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('monitor')}><Database aria-hidden className="h-3 w-3"/>监测库</button>
       </FishQualityModule>}
       {!lockedBatch && <div className="flex flex-wrap items-center gap-1.5">

@@ -34,7 +34,7 @@ export interface FishDirectoryItem {
   preview?:()=>FishQualityStudy|Promise<FishQualityStudy>;
   campaignPath?:(result:QualityResult)=>string|undefined;
   details?:ReactNode|((close:()=>void)=>ReactNode);
-  content?:()=>ReactNode;
+  content?:(close:()=>void,importSelection:boolean)=>ReactNode;
   study?:(signal?:AbortSignal)=>FishQualityStudy|Promise<FishQualityStudy>;
 }
 const NO_DIRECTORY_ITEMS: FishDirectoryItem[] = [];
@@ -365,7 +365,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             <button type="button" className={action} onClick={()=>setBodyId(item.id)}>载入所选目录</button>
           </div>}
           {selectedId===item.id&&(!confirmBodyLoad||bodyId===item.id)&&!item.content&&!snapshot&&<p role={archiveError?'alert':'status'} className={'border-t px-4 py-3 text-[10.5px] '+(archiveError?'text-destructive':'text-muted-foreground')}>{archiveError??'正在读取归档…'}{archiveError&&<button type="button" className="ml-2 underline" onClick={()=>setLoadAttempt(attempt=>attempt+1)}>重试读取归档</button>}</p>}
-          {selectedId===item.id&&(!confirmBodyLoad||bodyId===item.id)&&item.content&&<div className="border-t" data-testid={prefix+'-archive-content'}>{item.content()}</div>}
+          {selectedId===item.id&&(!confirmBodyLoad||bodyId===item.id)&&item.content&&<div className="border-t" data-testid={prefix+'-archive-content'}>{item.content(()=>changeOpen(false),importSelection)}</div>}
           {selectedId===item.id&&snapshot&&<div className="border-t" data-testid={prefix+'-archive-content'}>
             <FilterDetectorContext.Provider value={picked?.id===item.id?item.filterRecords?.filter(r=>picked.records.has(r.id)):item.filterRecords}>{picked?.id===item.id&&workspaceImport ? <FishWorkspaceRows key={item.id} snapshot={snapshot} {...workspaceImport} initiallySelected onDone={()=>changeOpen(false)}/> : <>
             {onSelectDirectory&&<div className="px-4 pt-3"><button type="button" className={action+' text-primary'} disabled={loading||!!loadError||!!busy} onClick={async()=>{setBusy(item.id);setError('');try{if(!await onSelectDirectory(item.id,snapshot))throw Error('目录未载入，当前组合表保留，请重试');changeOpen(false);}catch(e){setError(e instanceof Error?e.message:'目录选择失败');}finally{setBusy('');}}}>{busy===item.id?'正在载入…':'选择此目录'}</button></div>}
