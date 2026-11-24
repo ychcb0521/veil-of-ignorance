@@ -892,6 +892,23 @@ it('saves and deletes plan templates without pausing a running monitor', async (
   expect(activeQualityPlanTemplates(h.result.current.study)).toEqual([]); expect(monitoring.signal.aborted).toBe(false);
 });
 
+it('saves the exact counterfactual plan to the shared catalog, including when its id is reused', async () => {
+  const {freezeQualityPlan} = await import('@/lib/fish/qualityPlanVersions');
+  const h = renderHook(() => useFishQuality('a', [signal], async () => {}));
+  await flush();
+  const active = structuredClone(h.result.current.study.sellPlans!);
+  const simulation = freezeQualityPlan({...active[0], label: '独立推演', mirrorTakeProfit: {enabled:true, gainPct:17, sellPct:63}});
+  const independent = {...simulation, id:'parallel-only'};
+  act(() => {
+    h.result.current.savePlanTemplate(simulation.id, '相同 ID', simulation);
+    h.result.current.savePlanTemplate(independent.id, '仅反事实法', independent);
+  });
+  expect(h.result.current.study.planTemplates?.find(t => t.name === '相同 ID')?.plan).toEqual(simulation);
+  expect(h.result.current.study.planTemplates?.find(t => t.name === '仅反事实法')?.plan).toEqual(independent);
+  expect(h.result.current.study.sellPlans).toEqual(active);
+  expect(() => h.result.current.savePlanTemplate('wrong-id', '错误', independent)).toThrow('所选方案已变更');
+});
+
 it('persists a campaign snapshot absent from current plans and exposes it to the same template library without restarting', async () => {
   const { activeQualityPlanTemplates } = await import('@/lib/fish/qualityPlanTemplates');
   const tasks: QualityRunOptions[] = [];

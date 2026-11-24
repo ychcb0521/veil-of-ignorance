@@ -998,7 +998,12 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(s => s.results.length ? { ...archiveQualityStudy(s), results: [] } : s);
   }, [change,cancel]);
   /** 【用户要求】2026-11-02 方案模板：只改模板，不暂停、不重算监测。 */
-  const savePlanTemplate = useCallback((planId: string, name: string) => {
+  const savePlanTemplate = useCallback((planId: string, name: string, savedSimulationPlan?: QualityGroup) => {
+    if (savedSimulationPlan) {
+      if (savedSimulationPlan.id !== planId) throw Error('所选方案已变更，请重新选择后保存模板');
+      changeTemplates(study => saveQualityPlanTemplate(study, savedSimulationPlan, name));
+      return;
+    }
     if (planId === 'static-filter') {
       if (!readyRef.current || filterController.current) throw Error('请先保存静态过滤设置');
       const study = current.current;

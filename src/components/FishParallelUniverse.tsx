@@ -80,6 +80,12 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
     } catch (cause) { setError(errorText(cause)); }
     finally { setSaving(false); }
   };
+  const saveSharedTemplate = state?.savePlanTemplate;
+  const saveSimulationTemplate = saveSharedTemplate && ((id: string, name: string) => {
+    const savedPlan = availablePlans.find(plan => plan.id === id);
+    if (!settingsReady || saving || !savedPlan) throw Error('请先保存这套方案，再存为模板');
+    saveSharedTemplate(id, name, savedPlan);
+  });
   const canStart = settingsReady && !saving && !!plan && selectedIds.length > 0;
   const prepare = () => {
     const selected = qualityRunSamples({ ...study, selectedRowIds: selectedIds }).filter(row => !row.binanceEntry);
@@ -206,7 +212,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
             selectSell: setPlanId,
             start: async () => {},
             instantPosition: undefined,
-            savePlanTemplate:state.savePlanTemplate,deletePlanTemplate:state.deletePlanTemplate,restorePlanTemplate:state.restorePlanTemplate}}
+            savePlanTemplate:saveSimulationTemplate,deletePlanTemplate:state.deletePlanTemplate,restorePlanTemplate:state.restorePlanTemplate}}
           templateSource={state.monitorSettings?.study ?? state.study} activeId={planId || plan?.id || null} onSelect={setPlanId} done={()=>{}} selectedCount={0}/>}
         {!state && <button type="button" disabled={saving} className={qualitySettingsAction} onClick={() => void saveSettings()}>保存条件</button>}
       </FishConditionSettings></FishConditionDialogContent>

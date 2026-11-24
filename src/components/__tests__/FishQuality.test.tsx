@@ -74,6 +74,30 @@ function defaultDetectorState(): FishQualityState {
   return { ...s, study };
 }
 afterEach(cleanup);
+it('sends the saved counterfactual plan to the shared template catalog', async () => {
+  const store = await import('@/lib/fish/parallelUniverseStore');
+  const s = state();
+  const saved = {...s.study.sellPlans![0], id: 'parallel-only', label: '已保存的反事实方案'};
+  s.runParallelUniverse = vi.fn(async () => {});
+  s.savePlanTemplate = vi.fn();
+  s.deletePlanTemplate = vi.fn();
+  const load = vi.spyOn(store, 'loadParallelSettings').mockResolvedValue({
+    plans:[saved], planId:saved.id, observeHours:0, additionCount:2,
+  });
+  try {
+    render(<FishQuality state={s}/>);
+    const edit = screen.getByRole('button', {name:'反事实法'});
+    await waitFor(() => expect(edit).toBeEnabled());
+    fireEvent.click(edit);
+    fireEvent.click(within(screen.getByRole('dialog', {name:'反事实法'})).getByRole('button', {name:'把卖出算法 1 存为模板'}));
+    fireEvent.click(screen.getByRole('button', {name:'保存模板'}));
+    expect(s.savePlanTemplate).toHaveBeenCalledExactlyOnceWith(saved.id, saved.label, saved);
+    expect(s.setSellPlans).not.toHaveBeenCalled();
+  } finally {
+    load.mockRestore();
+  }
+});
+
 it('sorts all Parallel Universe columns using the stored row result and keeps missing values last', async () => {
   const store = await import('@/lib/fish/parallelUniverseStore');
   const {qualityEntryIdentity} = await import('@/lib/fish/quality');
