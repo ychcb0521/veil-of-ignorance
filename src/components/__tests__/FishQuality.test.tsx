@@ -1597,7 +1597,7 @@ it('displays the archived plan, result, match time and evidence on the imported 
   }
 });
 
-it('shows the saved buy-filter percentage beside the independent signal-time ATR reading', async () => {
+it('shows the configured DBL-5 percentage in the working table even when the old ATR reading exists', async () => {
   const {qualityFilterReadingKey} = await import('@/lib/fish/quality');
   const {makeQualitySignalMetrics} = await import('@/lib/fish/qualityFilters');
   const {guardDistanceSignalChoices} = await import('@/lib/fish/qualityGuardDistance');
@@ -1622,5 +1622,38 @@ it('shows the saved buy-filter percentage beside the independent signal-time ATR
   view.rerender(<FishQuality state={s}/>);
   expect(screen.getByTestId('quality-filter-column')).toHaveTextContent('< 3% · 冗余 0.5 ATR · v2');
   expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveTextContent('2.8%满足');
-  expect(screen.getAllByTestId('quality-signal-reading-cell')[0]).toHaveTextContent('-1.25 ATR');
+  expect(screen.queryByText('-1.25 ATR')).toBeNull();
+});
+
+it('configures a same-signal percentage threshold from the legacy combination-table column', async () => {
+  const {makeQualitySignalMetrics} = await import('@/lib/fish/qualityFilters');
+  const {guardDistanceSignalChoices} = await import('@/lib/fish/qualityGuardDistance');
+  const {signalReadingKey,signalGuardPercentMetric} = await import('@/lib/fish/qualitySignalReadings');
+  const {qualityFilterReadingKey} = await import('@/lib/fish/quality');
+  const [metric] = makeQualitySignalMetrics([guardDistanceSignalChoices[0].key],[]);
+  const s = state(), row = qualityComparisonRows(s.study)[0];
+  s.saveStaticSettings = vi.fn(async () => true);
+  s.runStaticSettings = vi.fn(async () => {});
+  const raw = {key:signalReadingKey(row,metric),value:2.88589};
+  s.study = {...s.study,independentFilters:true,signalMetrics:[metric],signalReadings:[raw]};
+  const view = render(<FishQuality state={s}/>);
+  expect(screen.getAllByTestId('quality-signal-reading-cell')[0]).toHaveTextContent('待计算');
+  expect(screen.queryByText(/2.88589/)).toBeNull();
+  const pct = signalGuardPercentMetric(metric);
+  s.study = {...s.study,signalReadings:[raw,{key:signalReadingKey(row,pct),value:2.35}]};
+  view.rerender(<FishQuality state={s}/>);
+  expect(screen.getAllByTestId('quality-signal-reading-cell')[0]).toHaveTextContent('2.35%');
+  fireEvent.click(screen.getByRole('button',{name:'设置百分比门槛'}));
+  expect(screen.getByLabelText('买入条件 1 门槛')).toHaveValue(3);
+  fireEvent.change(screen.getByLabelText('买入条件 1 冗余 ATR'),{target:{value:'.5'}});
+  fireEvent.click(screen.getByRole('button',{name:'保存并运行'}));
+  await waitFor(()=>expect(s.runStaticSettings).toHaveBeenCalledOnce());
+  const [metrics,filters] = vi.mocked(s.saveStaticSettings).mock.calls[0];
+  expect(metrics).toEqual([]);
+  const [filter] = filters!;
+  expect(filter).toMatchObject({signalGuardAtr:.5,threshold:3,direction:'<',snapshot:{unit:'%'}});
+  s.study = {...s.study,buyFilters:[filter],signalMetrics:[],filterReadings:[{key:qualityFilterReadingKey(row,filter),value:3}]};
+  view.rerender(<FishQuality state={s}/>);
+  expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveTextContent('3%不满足');
+  expect(s.study.signalReadings![0]).toEqual(raw);
 });

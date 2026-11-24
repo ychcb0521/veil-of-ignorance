@@ -5,7 +5,7 @@ import { preserveQualityWorkspace } from '@/lib/fish/qualitySignalReadingsStore'
 import type { PreEntrySettings } from '@/lib/fish/preEntryMonitor';
 import { editWorkspaceFilter, editWorkspaceMonitor, importQualityWorkspaceRows, pickQualityWorkspaceRows, saveWorkspaceFilterRounds, saveWorkspaceMonitorRounds } from '@/lib/fish/qualityWorkspace';
 import {qualityExecutionSnapshot} from '@/lib/fish/qualityExecutionSnapshot';
-import { activeSignalMetrics, signalReadingKey, type QualitySignalMetric } from '@/lib/fish/qualitySignalReadings';
+import { activeSignalMetrics, signalGuardPercentMetric, signalReadingKey, type QualitySignalMetric } from '@/lib/fish/qualitySignalReadings';
 import { createStaticFilterPlan, validateTuringStaticFilterPlan } from '@/lib/fish/qualityStaticFilterPlan';
 import { standaloneBuyFilters } from '@/lib/fish/quality';
 import {preserveQualitySourceRatings,rateQualitySource} from '@/lib/fish/qualitySourceRatings';
@@ -587,7 +587,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (!readyRef.current || filterController.current || !selectedMetrics.length) return;
     const rows = qualityRunSamples({...current.current, selectedRowIds: rowIds});
     if (!rows.length) return;
-    const metrics = [...new Map(selectedMetrics.map(metric => [metric.id, metric])).values()];
+    // Keep frozen ATR readings under their original keys. The working table has a separate percentage cache.
+    const metrics = [...new Map(selectedMetrics.flatMap(metric => [metric,signalGuardPercentMetric(metric)])
+      .map(metric => [metric.id, metric])).values()];
     const saved = new Set((current.current.signalReadings ?? []).filter(reading => !reading.error && Number.isFinite(reading.value)).map(reading => reading.key));
     const pendingKeys = new Set<string>();
     let total = 0;

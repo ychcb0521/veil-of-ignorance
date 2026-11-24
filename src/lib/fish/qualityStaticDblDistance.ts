@@ -1,4 +1,5 @@
-import Decimal from 'decimal.js-light';
+import {staticDblDistancePct} from './dblDistancePct';
+export {staticDblDistancePct} from './dblDistancePct';
 import {compileFishProgram,shortFishHash} from './algorithm';
 import {dbl5SellAsBox, makeDbl5Sell} from './qualityDbl5Sell';
 import {createBoxStopReader, validateBoxStop} from './qualityBoxStop';
@@ -39,12 +40,6 @@ export function makeStaticDblDistance(choice:NonNullable<ReturnType<typeof stati
     snapshot:{featureId:choice.featureId,featureShort:price.short,featureName:price.name,definitionKey:definition,
       statistic:choice.metric,interval:'5m',scale:1,unit:'%',threshold,direction,cutoffMs:0,
       average:0,cbi2:0,startAverage:0,previousAverage:0}};
-}
-
-// Work in decimal prices so an exact threshold (including fractional ticks) stays equal.
-export function staticDblDistancePct(close: number, line: number, atr: number, multiple: number): number {
-  const gap = new Decimal(close).minus(line).abs();
-  return gap.plus(new Decimal(atr).times(multiple)).times(100).div(close).toNumber();
 }
 
 export async function readStaticDblDistance(sample:QualitySample, filter:QualityBuyFilter, load:FishReconstructionLoader, signal:AbortSignal) {

@@ -77,7 +77,7 @@ import { FishMetricTimeFields } from './FishMetricTimeFields';
 import { shortFishHash } from '@/lib/fish/algorithm';
 import { qualityResultMap, qualityRowResult } from '@/lib/fish/qualityComparison';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from '@/lib/fish/qualityFilterColumns';
-import { activeSignalMetrics, signalReadingCell, signalReadingKey, type QualitySignalMetric } from '@/lib/fish/qualitySignalReadings';
+import { activeSignalMetrics, SIGNAL_GUARD_PCT, makeSignalGuardFilter, signalGuardPercentMetric, signalReadingCell, signalReadingKey, type QualitySignalMetric } from '@/lib/fish/qualitySignalReadings';
 import { createStaticFilterPlan, createTuringStaticFilterPlan } from '@/lib/fish/qualityStaticFilterPlan';
 import { activeQualityPlanTemplates, qualityPlanFromTemplate } from '@/lib/fish/qualityPlanTemplates';
 import { SaveTemplateButton, TemplatePicker } from './FishQualitySellPlansEditor';
@@ -130,13 +130,13 @@ type SignalMetricDraft = { key: string; saved?: QualitySignalMetric; time?: Addi
 
 const staticFilterDraft = (filters: readonly QualityBuyFilter[]): FilterDraft[] => filters.map(saved => ({
   choice: qualityFilterChoiceKey(saved), direction: saved.direction, threshold: String(saved.threshold),
-  enabled: saved.enabled, saved, atr:saved.staticDblDistance?.atr.toString(), time:additionMetricTime(saved.snapshot),
+  enabled: saved.enabled, saved, atr:(saved.signalGuardAtr ?? saved.staticDblDistance?.atr)?.toString(), time:additionMetricTime(saved.snapshot),
 }));
 const signalMetricDraft = (metrics: readonly QualitySignalMetric[]): SignalMetricDraft[] => metrics.map(saved => ({
   key: qualityFilterChoiceKey(saved), saved, time:additionMetricTime(saved.snapshot),
 }));
 
-function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualityState; done: () => void; selectedCount: number }) {
+function BuyFilterEditor({ state, done, selectedCount, initialGuard }: { state: FishQualityState; done: () => void; selectedCount: number; initialGuard?: QualitySignalMetric }) {
   const definitions = useFeatureDefinitions();
   const choices = useMemo(() => [...qualityFilterMenuChoices(definitions),...staticDblDistanceChoices], [definitions]);
   const filterDefinitions = useMemo(() => qualityFilterDefinitions(definitions), [definitions]);
@@ -148,11 +148,17 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
   const savedTuring = state.study.turingStaticSettings;
   const activePlan = savedTuring?.active ? savedTuring.plan : undefined;
   const [planDraft, setPlanDraft] = useState(activePlan);
-  const [draft, setDraft] = useState(() => staticFilterDraft(activePlan?.staticFilter?.filters ?? savedFilters));
-  const [readingDraft, setReadingDraft] = useState(() => signalMetricDraft(activePlan?.staticFilter?.metrics ?? state.study.signalMetrics ?? []));
+  const [draft, setDraft] = useState(() => {
+    const existing = activePlan?.staticFilter?.filters ?? savedFilters;
+    return staticFilterDraft(initialGuard ? [...existing,makeSignalGuardFilter(initialGuard,0,3)] : existing);
+  });
+  const [readingDraft, setReadingDraft] = useState(() => signalMetricDraft(
+    (activePlan?.staticFilter?.metrics ?? state.study.signalMetrics ?? []).filter(metric =>
+      !initialGuard || signalGuardPercentMetric(metric).id !== initialGuard.id)));
+
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useState(!!initialGuard);
   const turing = !!planDraft?.initialization;
   const configured = readingDraft.length > 0 || draft.some(row => row.enabled);
   const canSave = state.ready && !!(readingDraft.length || draft.length || state.study.signalMetrics?.length || savedFilters.length);
@@ -183,6 +189,13 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
       const filters = draft.map(row => {
         const {saved} = row;
         if (!row.threshold.trim() || !Number.isFinite(Number(row.threshold))) throw Error('每条条件都要填有限数字门槛');
+        if (saved?.signalGuardAtr !== undefined) {
+          const atr = row.atr?.trim() ? Number(row.atr) : NaN;
+          const threshold = Number(row.threshold);
+          if (saved.signalGuardAtr === atr && saved.threshold === threshold && saved.enabled === row.enabled &&
+              saved.direction === row.direction) return saved;
+          return makeSignalGuardFilter(saved,atr,threshold,row.enabled,row.direction);
+        }
         const distance=staticDblDistanceChoice(row.choice);
         if (distance) {
           const atr=row.atr ?? '0';
@@ -256,16 +269,24 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
         <option value="">添加算法（可多选）</option>
         {signalGroups.map(group => <optgroup key={group} label={group}>
           {signalChoices.filter(choice => choice.group === group).map(choice => <option key={choice.key} value={choice.key}
-            disabled={readingDraft.some(row => row.key === choice.key)}>{choice.label}</option>)}
+            disabled={readingDraft.some(row => row.key === choice.key)}>{choice.key.includes(':guard-distance-atr-') ? choice.label.replace('（ATR）','（%）') : choice.label}</option>)}
         </optgroup>)}
       </select>
       {!!readingDraft.length && <ul aria-label="已选读数算法" className="flex flex-wrap gap-2">
         {readingDraft.map((row, index) => {
-          const label = row.saved?.label ?? signalChoices.find(choice => choice.key === row.key)?.label ?? row.key;
+          const guard = row.key.includes(':guard-distance-atr-');
+          const originalLabel = row.saved?.label ?? signalChoices.find(choice => choice.key === row.key)?.label ?? row.key;
+          const label = guard ? originalLabel.replace('（ATR）','（%）') : originalLabel;
           return <li key={row.saved?.id ?? row.key} className="flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-border/65 bg-muted/50 py-1 pl-2 pr-1">
             <span className="min-w-0 break-words">{label}</span><button type="button" className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label={'移除信号读数列 ' + label} onClick={() => { setDirty(true); setReadingDraft(previous => previous.filter((_, i) => i !== index)); }}><X aria-hidden className="h-3.5 w-3.5"/></button>
-            {row.key.includes(':guard-distance-atr-') ? <span className="text-muted-foreground">K 线周期 5m</span> :
+            {guard ? <button type="button" className="text-primary" onClick={()=>{
+              const metric = row.saved ?? makeQualitySignalMetrics([row.key], definitions)[0];
+              const filter = makeSignalGuardFilter(metric,0,3);
+              setDraft(previous=>[...previous,...staticFilterDraft([filter])]);
+              setReadingDraft(previous=>previous.filter((_,i)=>i!==index));
+              setDirty(true);
+            }}>设置百分比门槛</button> :
               <FishMetricTimeFields label={`信号读数 ${index+1}`} metric={row.saved?.metric ?? signalChoices.find(choice=>choice.key===row.key)?.metric}
                 definition={readingDefinitions.get(row.key.split(':')[0])} snapshot={row.saved?.snapshot} time={row.time}
                 onChange={time=>{ setDirty(true); setReadingDraft(previous=>previous.map((item,i)=>i===index?{...item,time}:item)); }}/>}
@@ -291,9 +312,10 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
         <select aria-label={'买入条件 ' + (i + 1) + ' 方向'} className={field} value={row.direction} onChange={event => patch(i, {direction: event.target.value as '<' | '>'})}><option value=">">&gt;</option><option value="<">&lt;</option></select>
         <input aria-label={'买入条件 ' + (i + 1) + ' 门槛'} type="number" step="any" className={field} value={row.threshold} onChange={event => patch(i, {threshold: event.target.value})}/>
         <button type="button" aria-label={'删除买入条件 ' + (i + 1)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => { setDirty(true); setDraft(previous => previous.filter((_, index) => index !== i)); }}><X aria-hidden className="h-3.5 w-3.5"/></button>
-        {staticDblDistanceChoice(row.choice) ? <label className="col-span-full flex items-center gap-2">
+        {staticDblDistanceChoice(row.choice) || row.saved?.signalGuardAtr !== undefined ? <label className="col-span-full flex items-center gap-2">
           冗余 ATR <input aria-label={`买入条件 ${i+1} 冗余 ATR`} type="number" min={0} step="any" className={field+' w-24'} value={row.atr ?? '0'} onChange={event=>patch(i,{atr:event.target.value})}/>
-          <span className="text-muted-foreground">{row.saved?.staticDblDistance?.version === LEGACY_STATIC_DBL_DISTANCE_VERSION
+          <span className="text-muted-foreground">{row.saved?.signalGuardAtr !== undefined ? '按原信号时点的现价、有效防守线和 ATR 计算，门槛单位为 %'
+            : row.saved?.staticDblDistance?.version === LEGACY_STATIC_DBL_DISTANCE_VERSION
             ? 'v1 · 买前 5 分钟收盘价到下移后价线的距离（%）'
             : 'v2 ·（5 分钟收盘价与原线的绝对价差 + 冗余倍数 × ATR）÷ 收盘价 × 100%'}</span>
         </label> : <FishMetricTimeFields label={`买入条件 ${i+1}`} className="col-span-full" metric={row.saved?.metric ?? choices.find(choice=>choice.key===row.choice)?.metric}
@@ -496,6 +518,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
     }, () => {});
     return () => { active = false; };
   }, [parallelEnabled, state.account, study.samples, regretBoardRevision]);
+  const [initialGuard, setInitialGuard] = useState<QualitySignalMetric>();
   const [filterOpen, setFilterOpen] = useState(false), [monitorOpen, setMonitorOpen] = useState(false);
   // Saved library boards always show their own frozen results, regardless of the working table's preferences.
   const [filterHidden, setHideFilter] = useState(() => !archiveView && readHidden('filter')),
@@ -594,6 +617,8 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   // 旧试验兼容绑定过滤；新工作流的过滤列与卖出结果各自显示。
   const filtersOn = anyBuyFilters(study), filterReadings = study.filterReadings;
   const signalMetrics = useMemo(()=>activeSignalMetrics(study),[study.signalMetrics,study.turingStaticSettings]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tableSignalMetrics = useMemo(() => archiveView || templateTable ? signalMetrics : signalMetrics.map(signalGuardPercentMetric),
+    [archiveView,templateTable,signalMetrics]);
   const readingsOn = !!state.runStaticSettings && !!signalMetrics?.length;
   const signalReadingMap = useMemo(()=>new Map(study.signalReadings?.map(reading=>[reading.key,reading])),[study.signalReadings]);
   const filterColumns = useMemo(() => { const columns = qualityFilterColumns(study); return qualityVariables(columns.map(c => c.filter)).flatMap(v => v.levels.map(f => columns.find(c => c.filter === f)!)); }, [study.sellPlans, study.buyFilters, study.independentFilters, study.turingStaticSettings]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -654,7 +679,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
       if (sort === 'quality') return normalizeSignalQuality(r.source.quality) ?? null;
       if (sort === 'process') return !archiveKind && isLibrary(r) ? null : r.source.fish?.cutoffMs ?? null;
       if (sort === 'detector') { const g = detectorMap.get(r.detectorId ?? ''); return g ? `${g.label}\u0000${String(g.snapshot.threshold).padStart(12, '0')}\u0000${g.metric}` : null; }
-      if (sort.startsWith('signal-value:')) { const metric=signalMetrics?.find(metric=>`signal-value:${metric.id}`===sort); return metric ? signalReadingMap.get(signalReadingKey(r,metric,signalViewId(r)))?.value ?? null : null; }
+      if (sort.startsWith('signal-value:')) { const metric=tableSignalMetrics.find(metric=>`signal-value:${metric.id}`===sort); return metric ? signalReadingMap.get(signalReadingKey(r,metric,signalViewId(r)))?.value ?? null : null; }
       if (sort.startsWith('filter:')) { const column = filterColumns.find(c => `filter:${c.id}` === sort); return column ? qualityFilterValue(r, column.filter, filterReadingMap) : null; }
       if(sort.startsWith('entry:')){const p=plansForSort?.find(p=>p.id===sort.slice(6));if(!p)return null;const f=filterStatus.get(p.id)?.get(r.signalId??r.id);if(f&&f.state!=='pass')return null;const result=resultFor(r,p),key=qualityEntryKey(r.source,result,p,qualityEntryParts(p)[0]),reading=key?entryReadings.get(key):undefined;return validEntryReading(reading)?reading!.value!:null;}
       if(sort.startsWith('price-change:')){const p=plansForSort?.find(p=>p.id===sort.slice(13));if(!p)return null;const f=filterStatus.get(p.id)?.get(r.signalId??r.id);return f&&f.state!=='pass'?null:qualitySalePriceChangePct(resultFor(r,p));}
@@ -682,7 +707,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
       const order = typeof a.v === 'string' ? a.v.localeCompare(String(b.v)) : a.v - (b.v as number);
       return order * (ascending ? 1 : -1) || qualitySignalTime(b.r.source) - qualitySignalTime(a.r.source) || a.r.id.localeCompare(b.r.id);
     }).map(x => x.r);
-  }, [directoryReadings,runScopeRows, sort, ascending, detectorMap, resultMap, templateTable, catchTypes, archiveKind, plansForSort, monitorTimeBasisByRow, study.monitorTimeBasis, filterStatus, filterColumns, signalMetrics, signalReadingMap, filterReadingMap, postExitReadings, entryReadings,screeningIndex,screeningRoundId,screeningRunId,mergeCabinSignals,screenName,parallelResults]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [directoryReadings,runScopeRows, sort, ascending, detectorMap, resultMap, templateTable, catchTypes, archiveKind, plansForSort, monitorTimeBasisByRow, study.monitorTimeBasis, filterStatus, filterColumns, tableSignalMetrics, signalReadingMap, filterReadingMap, postExitReadings, entryReadings,screeningIndex,screeningRoundId,screeningRunId,mergeCabinSignals,screenName,parallelResults]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows: QualityTableRow[] = useMemo(() => detectorExpanded ? sortedRows : collapseQualityTableRows(sortedRows, templateTable ? 'saved-entry' : mergeCabinSignals ? 'signal' : 'entry'), [sortedRows, detectorExpanded, mergeCabinSignals, templateTable]);
   // 表格为空时探测算法表头不显示：是它们滤空的，就在空状态里写明并给出清除
   const emptyByDetector = !rows.length && activeAlgorithms.length > 0 && searched.length > 0 && narrowed.length === 0;
@@ -702,8 +727,15 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   // 【用户要求】2026-11-02 入场读数与探测值重复，整列删除；过滤读数清除后（或还没跑过）整列不显示，有读数才出现；
   // 隐藏「买前过滤」时整组（探测值、探测算法、捕捞过程、过滤读数）都不显示
   const showStaticResults = !hideFilter && (!archiveKind || archiveKind==='filter');
-  const shownFilters = showStaticResults && (archiveKind==='filter'||filterReadings?.length) ? filterColumns : [];
-  const shownSignalMetrics = showStaticResults ? signalMetrics ?? [] : [];
+  const shownFilters = showStaticResults ? filterColumns.filter(({filter}) =>
+    archiveKind==='filter' || filterReadings?.length || filter.signalGuardAtr !== undefined || filter.staticDblDistance) : [];
+  const shownSignalMetrics = showStaticResults ? tableSignalMetrics.filter(metric => {
+    if (!metric.metric.startsWith(SIGNAL_GUARD_PCT)) return true;
+    return !shownFilters.some(({filter}) => filter.signalGuardAtr !== undefined &&
+      filter.metric === metric.metric && filter.snapshot.definitionKey === metric.snapshot.definitionKey ||
+      metric.metric === SIGNAL_GUARD_PCT+'guard-distance-atr-v1' && metric.snapshot.interval === '5m' &&
+      filter.staticDblDistance?.version === 'static-dbl5-distance-v2' && ['guard','nearest'].includes(filter.metric));
+  }) : [];
   const shownPlans = !hideMonitor && (!archiveKind || archiveKind==='monitor') ? plans : [];
   const showDetectorColumns = !workspace && !hideFilter && !archiveKind && !directoryReadings;
   const showCabinAlgorithms = archiveKind==='filter';
@@ -1129,8 +1161,8 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             </Popover>
           </div>
           {/* 【用户要求】2026-10-28 旁边已有「条件设置」，原「未设置过滤条件 · 点此设置」等行内提示纯属重复，已删除；为何不能开始见按钮悬停 */}
-          <Dialog open={filterOpen} onOpenChange={setFilterOpen}><DialogTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></DialogTrigger><FishConditionDialogContent>
-            <FishConditionSettings dialog title="静态过滤条件" description="读数和过滤可单独设置，也可以一起运行。"><BuyFilterEditor key={state.account} state={state} selectedCount={selectedCount} done={() => setFilterOpen(false)}/></FishConditionSettings>
+          <Dialog open={filterOpen} onOpenChange={open=>{setInitialGuard(undefined);setFilterOpen(open);}}><DialogTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></DialogTrigger><FishConditionDialogContent>
+            <FishConditionSettings dialog title="静态过滤条件" description="读数和过滤可单独设置，也可以一起运行。"><BuyFilterEditor key={initialGuard?.id ?? state.account} initialGuard={initialGuard} state={state} selectedCount={selectedCount} done={() => setFilterOpen(false)}/></FishConditionSettings>
           </FishConditionDialogContent></Dialog>
           <FishFilterLibrary cleanupDirectory={{ready:archiveReady&&!state.studyReadWarning&&!!state.purgeDirectorySource,issue:state.error||state.studyReadWarning,load:state.error||state.studyReadWarning?state.retryStudyLoad:state.requestStudyArchive,remove:(owner,id)=>state.purgeDirectorySource!(owner,'filter',id)}} requestWorkspace={state.error?state.retryStudyLoad:state.requestStudyArchive} ready={archiveReady} account={state.account} loadError={ready ? state.studyReadWarning : state.error || undefined} onRetry={ready ? undefined : state.retryStudyLoad} renderTemplate={(table,close,source)=>renderTemplate(table,close,'filter',source)} onRename={state.renameLibraryEntry} openRequest={directoryRequests.filter} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('filter',id,snapshot,ids)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
           {staticRunning && <FishQualityProgress
@@ -1325,8 +1357,12 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
           {showDetectorColumns && <><th className={`${cell} border-l border-border/40 font-medium`} data-testid="quality-detector-value-column" aria-sort={ariaSort('detector-value')} title="当次探测快照的读数，按捕获时的倍率显示；展开后每个探测算法各占一行"><span className="inline-flex items-center gap-2">{sortButton('detector-value', '探测值')}<button type="button" aria-label="展开探测值明细" aria-expanded={detectorExpanded} onClick={() => expandDetectors(!detectorExpanded)} className="inline-flex items-center gap-1 text-primary hover:underline">{detectorExpanded ? '收起' : '展开'}<ChevronDown className={`h-3 w-3 ${detectorExpanded ? 'rotate-180' : ''}`}/></button></span></th>
           <th className={`${cell} relative font-medium`} data-testid="quality-detector-column" aria-sort={ariaSort('detector')}><span className="inline-flex items-center gap-2">{sortButton('detector', '探测算法')}{!lockedBatch && groups.length > 0 && <DetectorPicker choices={detectorChoices} signalsOf={signalsOf} selected={activeAlgorithms} onChange={setAlgorithms}><button type="button" aria-label="在表头选择探测算法" title={chosenChoices.length ? chosenChoices.map(choiceText).join('、') : '选择一个或多个探测算法'} className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 ${activeAlgorithms.length ? 'bg-primary/15 text-primary' : 'text-muted-foreground/70 hover:bg-muted hover:text-foreground'}`}><Filter className="h-3 w-3"/>{chosenChoices.length > 0 && <span className="font-mono text-[10px] tabular-nums">{chosenChoices.length}</span>}</button></DetectorPicker>}<button type="button" className="inline-flex items-center gap-1 text-primary hover:underline" aria-label="展开探测算法明细" aria-expanded={detectorExpanded} onClick={() => expandDetectors(!detectorExpanded)}>{detectorExpanded ? '收起' : '展开'}<ChevronDown className={`h-3 w-3 ${detectorExpanded ? 'rotate-180' : ''}`}/></button></span></th></>}
           {showClassicProcess && <th className={`${cell} font-medium`} aria-sort={ariaSort('process')} title="按捕捞时刻排序；信号库在最后">{sortButton('process', '捕捞过程')}</th>}
-          {shownFilters.map(column => <th key={column.id} className={`${cell} ${wrapCell} relative border-l border-border/40 font-medium`} data-testid="quality-filter-column" aria-sort={ariaSort(`filter:${column.id}`)} title="买入时刻之前最后一根已收盘 K 线的读数；独立过滤，不限制卖出监测。"><button type="button" className="block text-left hover:text-foreground" aria-label={`按过滤${column.filter.label} ${column.filter.direction} ${column.filter.threshold}读数排序`} onClick={() => changeSort(`filter:${column.id}`)}>过滤 · {column.filter.label}{arrow(`filter:${column.id}`)}</button><span className="mt-0.5 block font-mono text-primary">{column.filter.direction} {column.filter.threshold}{column.filter.staticDblDistance && `% · 冗余 ${column.filter.staticDblDistance.atr} ATR · ${column.filter.staticDblDistance.version === LEGACY_STATIC_DBL_DISTANCE_VERSION ? 'v1' : 'v2'}`}</span></th>)}
-          {shownSignalMetrics.map(metric=><th key={metric.id} className={`${cell} ${wrapCell} border-l border-border/40 font-medium`} data-testid="quality-signal-reading-column" aria-sort={ariaSort(`signal-value:${metric.id}`)} title={`原信号时点读数 · 算法周期 ${metric.snapshot.interval}`}>{sortButton(`signal-value:${metric.id}`,metric.snapshot.unit === 'ATR' ? '信号时点 · '+metric.label : metric.label)}</th>)}
+          {shownFilters.map(column => <th key={column.id} className={`${cell} ${wrapCell} relative border-l border-border/40 font-medium`} data-testid="quality-filter-column" aria-sort={ariaSort(`filter:${column.id}`)} title="买入时刻之前最后一根已收盘 K 线的读数；独立过滤，不限制卖出监测。"><button type="button" className="block text-left hover:text-foreground" aria-label={`按过滤${column.filter.label} ${column.filter.direction} ${column.filter.threshold}读数排序`} onClick={() => changeSort(`filter:${column.id}`)}>过滤 · {column.filter.label}{arrow(`filter:${column.id}`)}</button><span className="mt-0.5 block font-mono text-primary">{column.filter.direction} {column.filter.threshold}{column.filter.signalGuardAtr !== undefined && `% · 原信号时点 · 冗余 ${column.filter.signalGuardAtr} ATR`}{column.filter.staticDblDistance && `% · 冗余 ${column.filter.staticDblDistance.atr} ATR · ${column.filter.staticDblDistance.version === LEGACY_STATIC_DBL_DISTANCE_VERSION ? 'v1' : 'v2'}`}</span></th>)}
+          {shownSignalMetrics.map(metric=><th key={metric.id} className={`${cell} ${wrapCell} border-l border-border/40 font-medium`} data-testid="quality-signal-reading-column" aria-sort={ariaSort(`signal-value:${metric.id}`)} title={`原信号时点读数 · 算法周期 ${metric.snapshot.interval}`}>{sortButton(`signal-value:${metric.id}`,metric.label)}
+            {!archiveView && !templateTable && metric.metric.startsWith(SIGNAL_GUARD_PCT) && <div className="mt-1">
+              <span>冗余 0 ATR</span> <button type="button" className="text-primary" disabled={!ready || staticRunning || !!lockedBatch}
+                onClick={()=>{setInitialGuard(metric);setFilterOpen(true);}}>设置百分比门槛</button>
+            </div>}</th>)}
           {showScreening&&<ScreeningHeaders cell={cell} sort={sort} ascending={ascending} onSort={changeSort}/>}
           {showParallel && parallelColumns.map(([key, label, title]) =>
             <th key={key} className={`${cell} border-l border-border/40 font-medium`} aria-sort={ariaSort(key)} title={title}>

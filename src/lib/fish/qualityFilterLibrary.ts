@@ -40,7 +40,7 @@ export interface QualityFilterCapture {
 }
 
 const empty = (): QualityFilterLibrary => ({ version: 1, settings: [], records: [], rounds: [] });
-const conditionKey = (f: QualityBuyFilter) => [f.snapshot.featureId, f.metric, f.snapshot.definitionKey, f.snapshot.interval, f.direction, f.threshold, ...(f.initialization ? [f.initialization] : []), ...(f.staticDblDistance?.version === 'static-dbl5-distance-v2' ? staticDblDistanceKeyParts(f) : [])];
+const conditionKey = (f: QualityBuyFilter) => [f.snapshot.featureId, f.metric, f.snapshot.definitionKey, f.snapshot.interval, f.direction, f.threshold, ...(f.initialization ? [f.initialization] : []), ...(f.signalGuardAtr !== undefined || f.staticDblDistance?.version === 'static-dbl5-distance-v2' ? staticDblDistanceKeyParts(f) : [])];
 export const qualityFilterSettingSignature = (filters: readonly QualityBuyFilter[]) =>
   JSON.stringify(filters.map(conditionKey).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
 

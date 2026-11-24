@@ -6,7 +6,7 @@ import {
 } from './holdingImpulse1115Classification';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
 import {boxAdditionBlockedAt,BOX_SECOND_BREAK_VERSION,BOX_SECOND_EXIT_VERSION} from './qualityBoxStop';
-import {qualityLibraryEntryAt,qualityMonitorEntryAt,qualityMonitoringSample,qualityRowMonitorTimeBasis,type QualityMonitorEntry,type QualityMonitorTimeBasis} from './qualityAdmissionTime';
+import {qualitySignalTime,qualityLibraryEntryAt,qualityMonitorEntryAt,qualityMonitoringSample,qualityRowMonitorTimeBasis,type QualityMonitorEntry,type QualityMonitorTimeBasis} from './qualityAdmissionTime';
 import {preEntryWindowLoader} from './preEntryWindowLoader';
 import { qualityHistoryFrom, qualityInitializationPending, withTuringInitialization } from './qualityInitialization';
 import { evaluateQualityRouter, routerResultFingerprint } from './qualityPlanRouter';
@@ -168,7 +168,7 @@ export function qualityDrawdownPct(result: QualityResult | undefined, kind: 'sta
  * 【用户要求】2026-10-26「在比较卖出的时候，再增加一些买入的过滤机制，比如只有符合状态S大于0.7才买入（选择权给我）」
  * 买入过滤：全部启用的条件都满足才买入；读数取买入时刻之前最后一根已收盘的 K 线（不看买入之后）。
  */
-export interface QualityBuyFilter { staticDblDistance?: {version:import("./qualityStaticDblDistance").StaticDblDistanceVersion;atr:number;rules:import("./qualityDbl5Sell").Dbl5SellRule[]}; id: string; label: string; metric: string; direction: '<' | '>'; threshold: number; enabled: boolean; snapshot: FishSnapshot; initialization?: QualityGroup['initialization'] }
+export interface QualityBuyFilter { signalGuardAtr?: number; staticDblDistance?: {version:import("./qualityStaticDblDistance").StaticDblDistanceVersion;atr:number;rules:import("./qualityDbl5Sell").Dbl5SellRule[]}; id: string; label: string; metric: string; direction: '<' | '>'; threshold: number; enabled: boolean; snapshot: FishSnapshot; initialization?: QualityGroup['initialization'] }
 /** 买入时刻的读数缓存：与门槛无关，改门槛不必重新取数。 */
 export interface QualityFilterReading { key: string; value?: number; at?: number; error?: string }
 export interface FishQualityStudy {
@@ -564,11 +564,12 @@ export function qualityExitSuggestions(group: QualityGroup): { label: string; ru
 
 // Preserve the original v1 cache key. For v2, JSON storage may reorder frozen rule fields.
 export function staticDblDistanceKeyParts(filter: QualityBuyFilter) {
+  if (filter.signalGuardAtr !== undefined) return [filter.signalGuardAtr];
   const config = filter.staticDblDistance;
   if (!config) return [];
   return [config.version === 'static-dbl5-distance-v2' ? stableEntryJson(config) : config];
 }
-export const qualityFilterReadingKey = (row: QualitySample, f: QualityBuyFilter) => shortFishHash(JSON.stringify(['buy-filter', row.signalId ?? row.id, row.enteredAt, f.snapshot.definitionKey, f.metric, f.snapshot.interval, ...(f.initialization ? [f.initialization] : []), ...staticDblDistanceKeyParts(f)]));
+export const qualityFilterReadingKey = (row: QualitySample, f: QualityBuyFilter) => shortFishHash(JSON.stringify(['buy-filter', row.signalId ?? row.id, f.signalGuardAtr !== undefined ? qualitySignalTime(row.source) : row.enteredAt, f.snapshot.definitionKey, f.metric, f.snapshot.interval, ...(f.initialization ? [f.initialization] : []), ...staticDblDistanceKeyParts(f)]));
 /** 某套卖出方案的买入过滤（含停用的）；方案没单独设过时沿用旧版本的全局过滤。 */
 export const planBuyFilters = (study: FishQualityStudy, plan: QualityGroup | undefined): QualityBuyFilter[] => study.independentFilters ? [] : plan ? plan.buyFilters ?? study.buyFilters ?? [] : [];
 /** 某套卖出方案启用中的买入过滤。 */
@@ -630,8 +631,13 @@ function filterStatusForConditions(row: QualitySample, filters: readonly Quality
 /** 买入时刻之前最后一根已收盘 K 线上的读数（原值，倍率 1）。 */
 export async function evaluateQualityFilter(row: QualitySample, f: QualityBuyFilter, now: number, load: FishReconstructionLoader, signal: AbortSignal, marketStart?: QualityRunOptions['marketStart']): Promise<QualityFilterReading> {
   const key = qualityFilterReadingKey(row, f);
-  if (!row.enteredAt) return { key, error: '缺少有效买入时间' };
   try {
+    if (f.metric.startsWith('signal-guard-distance-pct-v1/')) {
+      if (f.signalGuardAtr === undefined || f.snapshot.unit !== '%') throw Error('缺少冻结的信号距离参数');
+      const {readSignalGuardDistance} = await import('./qualitySignalReadings');
+      return {key,...await readSignalGuardDistance(f,row,now,load,signal,marketStart,f.signalGuardAtr)};
+    }
+    if (!row.enteredAt) return { key, error: '缺少有效买入时间' };
     if (f.staticDblDistance || f.snapshot.featureId==='static-dbl5-distance-v1' || f.snapshot.featureId==='static-dbl5-distance-v2') {
       const {readStaticDblDistance}=await import('./qualityStaticDblDistance');
       const initialized = f.staticDblDistance?.version === 'static-dbl5-distance-v2' && f.initialization

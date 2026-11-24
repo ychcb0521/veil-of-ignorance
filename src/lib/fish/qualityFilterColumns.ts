@@ -1,3 +1,4 @@
+import {qualitySignalTime} from './qualityAdmissionTime';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { staticDblDistanceKeyParts, activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualitySample } from './quality';
 import { qualityTableMembers, qualityTableRange, type QualityTableRow } from './qualityTableRows';
@@ -27,7 +28,7 @@ export function qualityFilterCell(row: QualityTableRow, filter: QualityBuyFilter
   const details: string[] = [];
   const values = entries.map(entry => {
     const reading = readings.get(qualityFilterReadingKey(entry, filter)), value = qualityFilterValue(entry, filter, readings);
-    const prefix = `买入 ${entry.enteredAt ? formatUTC8(entry.enteredAt) : '时间缺失'}`;
+    const prefix = filter.signalGuardAtr !== undefined ? '信号 '+formatUTC8(qualitySignalTime(entry.source)) : `买入 ${entry.enteredAt ? formatUTC8(entry.enteredAt) : '时间缺失'}`;
     if (!reading) { pending++; details.push(`${prefix}：待计算`); }
     else if (value == null) { errors++; details.push(`${prefix}：${reading.error ?? '读数无效'}`); }
     else {
@@ -41,5 +42,5 @@ export function qualityFilterCell(row: QualityTableRow, filter: QualityBuyFilter
   const status = errors ? `缺数据${entries.length > 1 ? ` ${errors}/${entries.length}` : ''}`
     : pending ? `待计算${entries.length > 1 ? ` ${pending}/${entries.length}` : ''}`
     : state === 'mixed' ? `满足 ${passed}/${entries.length}` : passed ? '满足' : '不满足';
-  return { value: qualityTableRange(values, value => filter.staticDblDistance ? value + '%' : qualityFilterValueText(value)), state, status, detail: details.join('\n') };
+  return { value: qualityTableRange(values, value => filter.staticDblDistance || filter.signalGuardAtr !== undefined ? value + '%' : qualityFilterValueText(value)), state, status, detail: details.join('\n') };
 }

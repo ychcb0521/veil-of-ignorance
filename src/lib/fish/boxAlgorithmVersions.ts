@@ -147,6 +147,7 @@ export const BOX_K_EXECUTION_VERSIONS = Object.freeze([
   {id:'holding-support-second-exit-v1',since:'2026-11-19',summary:'新增独立选项“持仓期间二次断裂终止”：按冻结周期与防守线参数累计本次持仓后的独立原生红叉。首次只计数，不因本条件停止加仓；第二次确认后按下一分钟开盘价卖出全部持仓。预热与持续在线下不重复计数，防守线重建及暂停续算不清零，其他加仓否决和退出仍独立生效。保留原“首次断裂停加仓，二次断裂终止”版本及模板语义。'},
   {id:'holding-impulse-1115-classified-position-v1',since:'2026-11-19',summary:'加仓位置保留原急拉线，新增1115一类与二类；只在原生5分钟收盘确认新分类状态时生成机会，过渡状态、预热及持续同状态不补单。逐轮及备选独立冻结分类参数与K，沿用原方向、否决、定量及退出。'},
   {id:'payoff-stop-dbl5-initial-risk-v3',since:'2026-11-24',summary:'按买入时已确认的 DBL-5 执行线冻结首仓 L₀，取低于买入价的最小正距离。'},
+  {id:'signal-guard-distance-pct-v1',since:'2026-11-24',summary:'原信号时点用已收盘现价、该时刻有效的冻结防守线及其原生 ATR 计算含冗余的百分比，按未舍入读数比较门槛。'},
   {id:'static-dbl5-distance-v2',since:'2026-11-24',summary:'买前静态距离先取五分钟收盘价与原线价的绝对价差，再加冗余倍数乘 ATR，除以收盘价计百分比。最近线取有效防守线和急拉线距离的最小值。'},
   {id:'static-dbl5-distance-v1',since:'2026-11-24',summary:'静态买前过滤使用最近已收盘的五分钟价与已确认原生价线，独立冻结 ATR 冗余并比较百分比距离。'},
   {id:'sell-dbl5-line-or-v2',since:'2026-11-24',summary:'DBL-5 卖出新增防守实线与虚线的独立选择、各原生急拉基准，以及防守与急拉两路独立 ATR、任一路触价退出。'},
