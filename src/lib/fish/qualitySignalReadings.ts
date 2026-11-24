@@ -48,7 +48,7 @@ export function signalReadingCell(row: QualitySample, metric: QualitySignalMetri
   const status = value !== null ? '' : reading?.error ? '缺数据' : '待计算';
   const detail = [`信号时间 ${formatUTC8(qualitySignalTime(row.source))}`, reading?.at ? `读数截至 ${formatUTC8(reading.at)}` : '',
     value !== null ? String(value) + (metric.snapshot.unit === 'ATR' ? ' ATR' : '') : reading?.error ?? status].filter(Boolean).join('\n');
-  const text = value === null ? status : metric.metric.startsWith(SIGNAL_GUARD_PCT) ? value+'%' : metric.snapshot.unit === 'ATR' ? `${value > 0 ? '+' : ''}${Number(value.toPrecision(6))} ATR` : String(value);
+  const text = value === null ? status : metric.metric.startsWith(SIGNAL_GUARD_PCT) ? value.toFixed(2)+'%' : metric.snapshot.unit === 'ATR' ? `${value > 0 ? '+' : ''}${Number(value.toPrecision(6))} ATR` : String(value);
   return {value,status,detail,text};
 }
 

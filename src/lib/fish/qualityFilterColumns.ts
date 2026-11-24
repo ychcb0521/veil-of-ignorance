@@ -42,5 +42,5 @@ export function qualityFilterCell(row: QualityTableRow, filter: QualityBuyFilter
   const status = errors ? `缺数据${entries.length > 1 ? ` ${errors}/${entries.length}` : ''}`
     : pending ? `待计算${entries.length > 1 ? ` ${pending}/${entries.length}` : ''}`
     : state === 'mixed' ? `满足 ${passed}/${entries.length}` : passed ? '满足' : '不满足';
-  return { value: qualityTableRange(values, value => filter.staticDblDistance || filter.signalGuardAtr !== undefined ? value + '%' : qualityFilterValueText(value)), state, status, detail: details.join('\n') };
+  return { value: qualityTableRange(values, value => filter.staticDblDistance || filter.signalGuardAtr !== undefined ? value.toFixed(2) + '%' : qualityFilterValueText(value)), state, status, detail: details.join('\n') };
 }

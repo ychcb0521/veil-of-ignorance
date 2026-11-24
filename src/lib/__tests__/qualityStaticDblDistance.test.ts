@@ -17,13 +17,13 @@ it('uses absolute price gaps on both sides and compares the cached percentage st
   const condition = filter('guard', .5);
   const study = newQualityStudy(cut);
   const plan = {...study.groups[0], buyFilters:[condition]};
-  for (const [line, expected] of [[97.7, 2.8], [102.3, 2.8], [102.5, 3], [102.50000001, 3.00000001]]) {
+  for (const [line, expected] of [[97.7, 2.8], [102.3, 2.8], [102.49999, 2.99999], [102.5, 3], [102.50000001, 3.00000001]]) {
     const value = staticDblDistancePct(100, line, 1, .5);
     expect(value).toBe(expected);
     const key = qualityFilterReadingKey(row, condition);
     const readings = new Map([[key, {key, value}]]);
     const state = expected < 3 ? 'pass' : 'fail';
-    expect(qualityFilterCell(row, condition, readings)).toMatchObject({value:expected+'%', state});
+    expect(qualityFilterCell(row, condition, readings)).toMatchObject({value:expected.toFixed(2)+'%', state});
     expect(qualityFilterStatus(study, row, plan, readings).state).toBe(state);
   }
   expect(staticDblDistancePct(.1, .103, 1, 0)).toBe(3);
