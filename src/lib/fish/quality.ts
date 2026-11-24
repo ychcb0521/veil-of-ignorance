@@ -1099,6 +1099,9 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
   }
   const explicitEntry = !filtersOnly && !!study.monitorTimeBasis;
   const rows = explicitEntry ? qualityMonitorRunSamples(study) : study.sellPlans ? qualityRunSamples(study) : study.samples;
+  const parallel = options.parallelUniverse;
+  const parallelEngine = parallel ? await import('./parallelUniverse') : undefined;
+  const originalCandidates = parallel ? new Map(rows.map(row => [row.id, row])) : undefined;
   const tasks = study.sellPlans
     ? rows.flatMap(s => qualityRunGroups(study).map(g => ({ s, g })))
     : rows.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);
@@ -1133,7 +1136,24 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
     for (let batch = failure === undefined ? next() : undefined; batch; batch = failure === undefined ? next() : undefined) {
       // 买入过滤只作用于比较卖出：没买入的行仍按「比较探测」固定的那套卖出方案评估
       const kept: typeof batch = [];
-      for (const task of batch) { const bought = await passes(task.s, task.g); if (task.g.id === study.selectedSellId || bought) kept.push(task); }
+      for (const task of batch) {
+        const bought = await passes(task.s, task.g);
+        if (task.g.id === study.selectedSellId || bought) {
+          kept.push(task);
+        } else if (parallel && parallelEngine) {
+          abort(signal);
+          const { s, g } = task;
+          const skipped: QualityResult = {
+            key: qualityResultKey(s, g, study.observeHours), sampleId: s.id, groupId: g.id,
+            evaluatedAt: now, status: 'waiting', reason: '买入条件未通过或缺少读数',
+          };
+          await parallel.onAttempt({
+            version: parallelEngine.PARALLEL_UNIVERSE_VERSION, id: crypto.randomUUID(),
+            candidate: originalCandidates?.get(s.id) ?? s, plan: g, observeHours: study.observeHours,
+            additionCount: parallel.additionCount, baseline: skipped, simulation: skipped,
+          });
+        }
+      }
       if (kept.length < batch.length) { done += batch.length - kept.length; options.onProgress({ done, total: tasks.length, current: '' }); }
       batch = kept; if (!batch.length) continue;
       for (const { s, g } of batch) {
@@ -1161,7 +1181,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
                 continueAfterMirrorMarker => evaluateQualitySampleWithMarketRepair(s, g, study.observeHours, marketEnd, initializedLoad, signal, undefined, undefined, undefined, continueAfterMirrorMarker));
               abort(signal);
               await options.parallelUniverse.onAttempt({ ...attempt, version: PARALLEL_UNIVERSE_VERSION,
-                id: crypto.randomUUID(), candidate: s, plan: g, observeHours: study.observeHours,
+                id: crypto.randomUUID(), candidate: originalCandidates?.get(s.id) ?? s, plan: g, observeHours: study.observeHours,
                 additionCount: options.parallelUniverse.additionCount });
               result = attempt.simulation;
             } else if (isLegacyQualityPlan(g)) {

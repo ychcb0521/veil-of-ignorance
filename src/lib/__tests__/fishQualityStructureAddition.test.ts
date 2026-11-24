@@ -8,7 +8,7 @@ import {defaultStructureAddition,structureAdditionIdentity,structureAdditionLabe
 import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
 import {holdingVetoLabel,validateHoldingVeto,validatePayoffStops} from '../fish/qualityVeto';
 import {ADDITION_INDICATOR_INCREASE_VERSION,additionIdentity,additionMirrorIdentity,defaultQualityAddition,validateQualityAddition,additionEvidenceHeaders,additionEvidenceValues} from '../fish/qualityAddition';
-import {evaluateQualitySample,type QualityGroup,type QualitySample} from '../fish/quality';
+import {collectFishQuality,evaluateQualitySample,newQualityStudy,qualityComparisonRows,type QualityGroup,type QualitySample} from '../fish/quality';
 import {replayParallelCandidate} from '../fish/parallelUniverse';
 import {MIRROR_DEADLINE_KIND} from '../fish/qualityMirrorDeadline';
 import {makeQualityHoldingVeto} from '../fish/qualityFilters';
@@ -63,6 +63,16 @@ describe('native box decisions for holding additions',()=>{
   expect(noDeadline.proposedSignal).toBeUndefined();
   expect(plan).toEqual(frozen);
   expect(await simulate(false)).toEqual(baseline);
+  const study = {...newQualityStudy(), samples:[{...candidate, monitorEntry:{at:o.entry+M,records:[]}}],
+    sellPlans:[plan], independentFilters:true as const};
+  const [visible] = qualityComparisonRows(study);
+  const savedEntries: (number | null)[] = [];
+  await collectFishQuality({
+    study:{...study,selectedRowIds:[visible.id]}, task:'monitor', mode:'restart',
+    signal:o.signal,onResult:()=>{},onProgress:()=>{},
+    parallelUniverse:{additionCount:2,onAttempt:async attempt=>{savedEntries.push(attempt.candidate.enteredAt);}},
+  },o.load,o.end);
+  expect(savedEntries).toEqual([visible.enteredAt]);
  });
  it('blocks additions on pre-entry historical peak damage while retaining the identical original-range fills',async()=>{
   const o=context(sample()),base={...o,structure:{...rule(),kSource:'current' as const},maxRounds:1},plainResult=await findCalculatorAdditions(base);expect(plainResult.fills).toHaveLength(1);
