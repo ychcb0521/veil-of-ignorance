@@ -21,7 +21,7 @@ import { freezeSavedPlans,planVersionChanges } from '@/lib/fish/qualityPlanVersi
 import { PlanVersionList } from '@/components/FishQualityPlanVersions';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
-import {DBL5_SELL_LINES, dbl5SellChoice, dbl5SellChoiceLine, isDbl5SellLine} from '@/lib/fish/qualityDbl5Sell';
+import {DBL5_SELL_LINES, isParallelDbl5Sell, dbl5SellChoice, dbl5SellChoiceLine, isDbl5SellLine} from '@/lib/fish/qualityDbl5Sell';
 import { DRAWDOWN_BAND_LABELS, PRE_MIRROR_STATIC_SELL_VERSION, isStaticDrawdownSell, TIMED_STATIC_DRAWDOWN_VERSION, validateQualityExitRule, DEFAULT_STATIC_DRAWDOWN_SELL_PCT, STATIC_DRAWDOWN_SELL_CHOICE, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
 import { qualityFilterDefinitions, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
 import { additionMetricTime, withMetricSnapshotTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
@@ -37,9 +37,12 @@ interface Draft {
   combo: boolean; afterChoice: string; afterDirection: '<' | '>' | '>='; afterThreshold: string; switchPct: string;
   time?: AdditionMetricTime; afterTime?: AdditionMetricTime;
   preMirrorStatic?: boolean;
+  impulseAtr?: string; afterImpulseAtr?: string;
 }
 const draftOf = (plan: QualityGroup): Draft => ({ id: plan.id, original: plan, label: plan.label, advantageOptions: plan.advantage ? { screenWeak:plan.advantage.screenWeak,beforeFirst:plan.advantage.beforeFirst,afterAddition:plan.advantage.afterAddition,confirmations:plan.advantage.confirmations } : undefined,
   choice: plan.snapshot.featureId + ':' + plan.metric, direction: plan.rule?.direction ?? plan.snapshot.direction ?? '<',
+  impulseAtr: plan.rule?.boxSell?.channels?.impulse.rule.structure.buffer.toString(),
+  afterImpulseAtr: plan.combo?.after.rule.boxSell?.channels?.impulse.rule.structure.buffer.toString(),
   preMirrorStatic: !!(plan.rule?.mirrorScopeVersion || plan.combo?.after.rule.mirrorScopeVersion),
   bands: plan.rule?.bandThresholds?.map(String), afterBands: plan.combo?.after.rule.bandThresholds?.map(String),
   time: additionMetricTime(plan.snapshot),
@@ -137,7 +140,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     return Number(value);
   };
   const baseOf = (d: Draft) => plans.find(p => p.id === d.id) ?? d.original;
-  const algorithmFields = (d: Draft) => JSON.stringify([d.choice,d.direction,d.threshold,d.bands,!!d.preMirrorStatic,d.time??{},d.combo,...(d.combo?[d.afterChoice,d.afterDirection,d.afterThreshold,d.afterBands,d.switchPct,d.afterTime??{}]:[])]);
+  const algorithmFields = (d: Draft) => JSON.stringify([d.choice,d.direction,d.threshold,d.bands,d.impulseAtr,!!d.preMirrorStatic,d.time??{},d.combo,...(d.combo?[d.afterChoice,d.afterDirection,d.afterThreshold,d.afterBands,d.afterImpulseAtr,d.switchPct,d.afterTime??{}]:[])]);
   const labelOf = (d: Draft, base?: QualityGroup) => d.original && d.label === d.original.label ? base?.label ?? d.label : d.label.trim() || (d.choice === STATIC_DRAWDOWN_SELL_CHOICE ? STATIC_DRAWDOWN_SELL_LABEL : choices.find(c=>c.key===d.choice)?.label) || base?.label || `新${action}算法`;
   const duplicate = (source: Draft, index: number) => {
     const base = structuredClone(baseOf(source)!);
@@ -217,7 +220,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         const plan = base && d.choice === original?.choice && d.choice !== STATIC_DRAWDOWN_SELL_CHOICE && !dbl5SellChoiceLine(d.choice) && d.direction !== '>='
           ? { ...structuredClone(base), snapshot:{ ...structuredClone(base.snapshot), direction:d.direction, threshold:threshold ?? 0 },
               rule:threshold == null ? undefined : {metric:base.metric,direction:d.direction,threshold} }
-          : makeQualitySellPlan(d.choice, d.direction, threshold, definitions, base, d.id);
+          : makeQualitySellPlan(d.choice, d.direction, threshold, definitions, base, d.id, isParallelDbl5Sell(dbl5SellChoiceLine(d.choice)) ? number(d.impulseAtr ?? '0') : undefined);
         applyBands(plan, d.bands);
         if (d.preMirrorStatic && isStaticDrawdownSell(plan.rule)) plan.rule.mirrorScopeVersion = PRE_MIRROR_STATIC_SELL_VERSION;
         const timed = d.choice === STATIC_DRAWDOWN_SELL_CHOICE || dbl5SellChoiceLine(d.choice) ? plan : withMetricSnapshotTime(plan, d.time);
@@ -232,7 +235,8 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
             ? { ...saved, snapshot:{ ...saved.snapshot,direction:afterDirection,threshold:afterThreshold },
                 rule:{metric:saved.metric,direction:afterDirection,threshold:afterThreshold} }
             : makeQualitySellPlan(d.afterChoice, d.afterDirection, afterThreshold, definitions,
-                boxAfter && base?.combo ? {...base,...base.combo.after} : undefined);
+                boxAfter && base?.combo ? {...base,...base.combo.after} : undefined, undefined,
+                isParallelDbl5Sell(dbl5SellChoiceLine(d.afterChoice)) ? number(d.afterImpulseAtr ?? '0') : undefined);
           applyBands(after, d.afterBands);
           if (d.preMirrorStatic && isStaticDrawdownSell(after.rule)) after.rule.mirrorScopeVersion = PRE_MIRROR_STATIC_SELL_VERSION;
           const timedAfter = d.afterChoice === STATIC_DRAWDOWN_SELL_CHOICE || boxAfter ? after : withMetricSnapshotTime(after,d.afterTime);
@@ -306,7 +310,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
           {(!bands || !priceStop) && <><input aria-label={fieldLabel(boxSell ? '冗余 ATR' : '门槛')} className={field + ' w-full'} type="number" step="any" min={priceStop || boxSell ? 0 : undefined}
             max={priceStop ? 100 : undefined} placeholder={priceStop ? '填百分比' : '未设置'} value={threshold}
             onChange={event => set(choice, direction, event.target.value, time)}/>
-          {priceStop && <span className="text-[10px]">%</span>}{boxSell && <span className="text-[10px] whitespace-nowrap">冗余 ATR</span>}</>}
+          {priceStop && <span className="text-[10px]">%</span>}{boxSell && <span className="text-[10px] whitespace-nowrap">{isParallelDbl5Sell(dbl5SellChoiceLine(choice)) ? '防守线冗余 ATR' : '冗余 ATR'}</span>}</>}
         </div>
       </div>
       {priceStop && setBands && <div className="space-y-2">
@@ -327,6 +331,11 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
             onChange={value => set(choice, direction, threshold, value)}/>}
     </>;
   };
+  const parallelAtrField = (choice:string, value:string|undefined, update:(value:string)=>void) =>
+    isParallelDbl5Sell(dbl5SellChoiceLine(choice)) && <label className="flex items-center gap-2 text-[11px]">
+      急拉线冗余 ATR
+      <input type="number" min={0} step="any" className={field+' w-24'} value={value ?? '0'} onChange={event=>update(event.target.value)}/>
+    </label>;
   return <><fieldset disabled={readOnly} className="contents"><section className="mb-3 space-y-2 border-b border-border/60 pb-3" data-testid={embedded ? "quality-branch-sell-plans-editor" : "quality-sell-plans-editor"}>
     <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-medium">{renderHolding ? (purpose === 'entry' ? '① 筛选算法' : '① 组合算法') : `${action}算法`} <span className="text-muted-foreground" data-testid={embedded ? "branch-sell-plan-draft-count" : "sell-plan-draft-count"}>{drafts.length} 套</span></h4>
       {!readOnly && !embedded && !singlePlan && <><button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, purpose === 'entry' ? '>' : '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增{action}算法</button>{templates && <TemplatePicker actions={templates} disabled={!ready} onUse={fromTemplate}/>}</>}</div>
@@ -354,9 +363,11 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
       {baseOf(d)?.router ? <p className="text-[10.5px] text-muted-foreground">条件分支方案：在下方修改两个分支的卖出、镜像、加仓与止损设置。</p> : <fieldset disabled={isLegacyQualityPlan(baseOf(d))} className="contents">
       {sellerFields(`${action}算法 ${i+1}`, d.choice, d.direction, d.threshold, d.time, mainSnapshot,
         (choice, direction, threshold, time) => patch(d.id, { choice, direction, threshold, time, bands: choice === d.choice ? d.bands : undefined }), false, d.bands, bands => patch(d.id, {bands}))}
+      {parallelAtrField(d.choice,d.impulseAtr,impulseAtr=>patch(d.id,{impulseAtr}))}
       {d.combo && <div className="space-y-1.5 border-t border-border/40 pt-1.5"><label className="flex items-center gap-1 text-[11px] text-muted-foreground">相对买入价上涨<input aria-label={`${action}算法 ` + (i + 1) + ' 切换涨幅'} type="number" step="any" className={field + ' w-20'} value={d.switchPct} onChange={e => patch(d.id, { switchPct: e.target.value })} />% 后切换为</label>
         {sellerFields(`${action}算法 ${i+1}`, d.afterChoice, d.afterDirection, d.afterThreshold, d.afterTime, afterSnapshot,
           (afterChoice, afterDirection, afterThreshold, afterTime) => patch(d.id, { afterChoice, afterDirection, afterThreshold, afterTime, afterBands: afterChoice === d.afterChoice ? d.afterBands : undefined }), true, d.afterBands, afterBands => patch(d.id, {afterBands}))}
+        {parallelAtrField(d.afterChoice,d.afterImpulseAtr,afterImpulseAtr=>patch(d.id,{afterImpulseAtr}))}
       </div>}
       {purpose !== 'entry' && (d.choice === STATIC_DRAWDOWN_SELL_CHOICE || (d.combo && d.afterChoice === STATIC_DRAWDOWN_SELL_CHOICE)) &&
         <label className="flex items-start gap-2 text-[11px]">

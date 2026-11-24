@@ -3,7 +3,6 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {FishMonitorLibrary} from '../FishMonitorLibrary';
 import {FishQuality} from '../FishQuality';
 import {importQualityWorkspaceRows} from '@/lib/fish/qualityWorkspace';
-import type {FishQualityStudy} from '@/lib/fish/quality';
 import {FishHitRateTest} from '../FishHitRateTest';
 import * as hitRateSettings from '@/lib/fish/hitRateSettings';
 import type {FishHitRateOptions} from '@/lib/fish/hitRate';

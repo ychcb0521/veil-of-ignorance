@@ -13,11 +13,11 @@ import {DBL5_SELL_LINES, dbl5SellChoiceLine, isDbl5Sell, makeDbl5Sell} from './q
 
 export const newQualitySellPlanId = () => 'sell-' + (globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
 
-export function makeQualitySellPlan(choice: string, direction: '<' | '>' | '>=', threshold: number | undefined, definitions: readonly DeepDigFeatureDef[], original?: QualityGroup, id = newQualitySellPlanId()): QualityGroup {
+export function makeQualitySellPlan(choice: string, direction: '<' | '>' | '>=', threshold: number | undefined, definitions: readonly DeepDigFeatureDef[], original?: QualityGroup, id = newQualitySellPlanId(), impulseAtr?:number): QualityGroup {
   const line = dbl5SellChoiceLine(choice);
   if (line) {
     const prior = original?.snapshot.featureId === line && isDbl5Sell(original.rule) ? original.rule : undefined;
-    const {rule,snapshot} = makeDbl5Sell(line, threshold ?? NaN, definitions, prior);
+    const {rule,snapshot} = makeDbl5Sell(line, threshold ?? NaN, definitions, prior, impulseAtr);
     const plan: QualityGroup = {...original,id:original?.id ?? id,label:DBL5_SELL_LINES[line],
       metric:rule.metric,rule,snapshot,execution:'intrabar-1m',vetoFill:'stop'};
     delete plan.definitionSource;

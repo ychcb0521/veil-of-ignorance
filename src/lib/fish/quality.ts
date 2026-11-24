@@ -50,7 +50,7 @@ import { QUALITY_NOTIONAL, qualityPositionIdentity, qualityPositionSize, type Qu
 export { QUALITY_NOTIONAL };
 export const QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
-export interface QualityExitRule { metric: string; direction: '<' | '>' | '>='; threshold: number; version?: typeof import('./qualityStaticDrawdownSell').STATIC_DRAWDOWN_SELL_VERSION | typeof import('./qualityStaticDrawdownSell').TIMED_STATIC_DRAWDOWN_VERSION | typeof DBL5_SELL_VERSION; boxSell?: import('./qualityBoxStop').BoxStopRule; bandThresholds?: number[]; mirrorScopeVersion?: typeof import('./qualityStaticDrawdownSell').PRE_MIRROR_STATIC_SELL_VERSION }
+export interface QualityExitRule { metric: string; direction: '<' | '>' | '>='; threshold: number; version?: typeof import('./qualityStaticDrawdownSell').STATIC_DRAWDOWN_SELL_VERSION | typeof import('./qualityStaticDrawdownSell').TIMED_STATIC_DRAWDOWN_VERSION | typeof DBL5_SELL_VERSION | typeof import("./qualityDbl5Sell").DBL5_SELL_OR_VERSION; boxSell?: import('./qualityBoxStop').BoxStopRule; bandThresholds?: number[]; mirrorScopeVersion?: typeof import('./qualityStaticDrawdownSell').PRE_MIRROR_STATIC_SELL_VERSION }
 export interface QualityGroup {
   impulse1115Classification?:HoldingImpulse1115Rule;
   preEntryThreeStage?: import('./preEntryThreeStage').PreEntryThreeStage;

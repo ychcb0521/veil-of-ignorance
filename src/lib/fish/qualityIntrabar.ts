@@ -295,7 +295,7 @@ export async function findQualityIntrabarExit(o: {
       const seller = boxTrigger?.cause && ordinaryBoxSellers.find(v => v.id === boxTrigger?.cause?.id);
       if (boxTrigger && seller) {
         boxTrigger = {...boxTrigger, ...(o.switchPct != null ? {stage:switched() ? 'after' as const : 'before' as const} : {}),
-          cause:{...boxTrigger.cause!,label:seller.label}};
+          cause:{...boxTrigger.cause!,label:seller.boxStop?.channels ? boxTrigger.cause!.label : seller.label}};
       }
       if(o.mirror?.enabled && minute.openTime>=o.since && ![holding?.entry,minute.open,minute.high,minute.low,minute.close].every(n=>Number.isFinite(n)&&n!>0)) throw new Error('镜像止盈缺少有效的分钟价格，不能越过缺失行情模拟成交');
       if(holding&&minute.openTime>=o.since) {

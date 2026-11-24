@@ -252,3 +252,22 @@ it('saves and restores independent DBL-5 ATR buffers for both sell stages', () =
   expect(screen.getByLabelText(before)).toHaveValue(0.125);
   expect(screen.getByLabelText(after)).toHaveValue(1.25);
 });
+
+it('persists two independently buffered DBL-5 channels selected as an OR seller', () => {
+  const save = vi.fn();
+  const view = render(<FishQualitySellPlansEditor plans={initial().slice(0,1)} ready onSave={save}/>);
+  const feature = '卖出算法 1 指标 特征值';
+  fireEvent.change(screen.getByLabelText(feature), {target:{value:'sell-dbl5-guard-range+impulse0'}});
+  fireEvent.change(screen.getByLabelText('卖出算法 1 冗余 ATR'), {target:{value:'0.125'}});
+  fireEvent.change(screen.getByLabelText('急拉线冗余 ATR'), {target:{value:'1.25'}});
+  fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));
+  const [saved] = save.mock.calls[0][0];
+  expect(saved.rule).toMatchObject({version:'sell-dbl5-line-or-v2',boxSell:{channels:{
+    regular:{enabled:true,rule:{guardRegime:'range',structure:{buffer:0.125}}},
+    impulse:{enabled:true,rule:{reference:{kind:'impulse0'},structure:{buffer:1.25}}},
+  }}});
+  view.unmount();
+  render(<FishQualitySellPlansEditor plans={[saved]} ready onSave={save}/>);
+  expect(screen.getByLabelText(feature)).toHaveValue('sell-dbl5-guard-range+impulse0');
+  expect(screen.getByLabelText('急拉线冗余 ATR')).toHaveValue(1.25);
+});

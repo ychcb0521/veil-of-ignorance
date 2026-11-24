@@ -67,7 +67,7 @@ export function validateQualityExitRule(snapshot: FishSnapshot, rule?: QualityEx
 }
 
 export const qualityExitThresholdText = (rule: QualityExitRule) =>
-  isDbl5Sell(rule) ? `冗余 ${rule.threshold} ATR` : isStaticDrawdownSell(rule) ? rule.bandThresholds ? rule.bandThresholds.map((value, i) => `${DRAWDOWN_BAND_LABELS[i]} 分钟 ≥ ${value}%`).join(' / ') : `≥ ${rule.threshold}%` : `${rule.direction} ${rule.threshold}`;
+  isDbl5Sell(rule) ? rule.boxSell.channels ? `防守线 ${rule.threshold} ATR 或急拉线 ${rule.boxSell.channels.impulse.rule.structure.buffer} ATR` : `冗余 ${rule.threshold} ATR` : isStaticDrawdownSell(rule) ? rule.bandThresholds ? rule.bandThresholds.map((value, i) => `${DRAWDOWN_BAND_LABELS[i]} 分钟 ≥ ${value}%`).join(' / ') : `≥ ${rule.threshold}%` : `${rule.direction} ${rule.threshold}`;
 
 export const qualityExitAlgorithmLabel = (rule: QualityExitRule | undefined, label: string) =>
   isStaticDrawdownSell(rule) && label === ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL ? STATIC_DRAWDOWN_SELL_LABEL : label;
