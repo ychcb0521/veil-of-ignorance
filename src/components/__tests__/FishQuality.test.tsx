@@ -74,6 +74,51 @@ function defaultDetectorState(): FishQualityState {
   return { ...s, study };
 }
 afterEach(cleanup);
+it('sorts all Parallel Universe columns using the stored row result and keeps missing values last', async () => {
+  const store = await import('@/lib/fish/parallelUniverseStore');
+  const {qualityEntryIdentity} = await import('@/lib/fish/quality');
+  const s = state();
+  s.runParallelUniverse = vi.fn(async () => {});
+  s.study = importQualityLibrary(s.study, ['A', 'B', 'C', 'D'].map((id, i) => ({
+    id, symbol: id + 'SORTUSDT', timeMs: T + i * 60000, timeLabel: '', fallbackZone: '',
+  })));
+  s.study.samples = s.study.samples.filter(row => row.source.symbol.endsWith('SORTUSDT'));
+  const records: import('@/lib/fish/parallelUniverseStore').ParallelTableResult[] = s.study.samples.slice(0, 3).map(row => {
+    const symbol = row.source.symbol, id = symbol[0];
+    return {
+      entryKey: qualityEntryIdentity(row.source, row.enteredAt),
+      evaluatedAt: T, planLabel: {A:'Zulu', B:'Alpha', C:'Middle'}[id]!, reason: '推演理由',
+      markerAt: id === 'B' ? undefined : T + (id === 'A' ? 60000 : 120000),
+      signal: id === 'B' ? undefined : {
+        symbol, time: T + (id === 'A' ? 600000 : 300000), buyPrice: 2, stopPrice: 1, source: '平行宇宙', additionCount: 2,
+      },
+    };
+  });
+  const load = vi.spyOn(store, 'loadParallelTableResults').mockResolvedValue(records);
+  try {
+    render(<FishQuality state={s}/>);
+    await waitFor(() => expect(screen.getByText('Zulu')).toBeVisible());
+    const order = () => screen.getAllByTestId('quality-fish-row').map(row => row.textContent!.match(/[ABCD]SORTUSDT/)![0][0]).join('');
+    const cases = [
+      ['按推演方案排序', 'BCAD', 'ACBD', 'ascending'],
+      ['按推演结果排序', 'CABD', 'BCAD', 'descending'],
+      ['按首次满足时间排序', 'ACDB', 'CADB', 'descending'],
+      ['按推演过程排序', 'CADB', 'ACDB', 'descending'],
+    ] as const;
+    for (const [label, first, second, direction] of cases) {
+      const button = screen.getByRole('button', {name: label});
+      fireEvent.click(button);
+      expect(button.closest('th')).toHaveAttribute('aria-sort', direction);
+      expect(order()).toBe(first);
+      fireEvent.click(button);
+      expect(button.closest('th')).toHaveAttribute('aria-sort', direction === 'ascending' ? 'descending' : 'ascending');
+      expect(order()).toBe(second);
+    }
+    expect(s.setSelectedRows).not.toHaveBeenCalled();
+  } finally {
+    load.mockRestore();
+  }
+});
 it('shows stored templates while holding research loads and resumes normal editing when ready', () => {
   const s = state();
   const template = { id:'saved-template', name:'原持仓模板', savedAt:T, updatedAt:T, plan:s.study.sellPlans![0] };
