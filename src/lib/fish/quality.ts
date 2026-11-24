@@ -49,7 +49,7 @@ import { QUALITY_NOTIONAL, qualityPositionIdentity, qualityPositionSize, type Qu
 export { QUALITY_NOTIONAL };
 export const QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
-export interface QualityExitRule { metric: string; direction: '<' | '>' | '>='; threshold: number; version?: typeof import('./qualityStaticDrawdownSell').STATIC_DRAWDOWN_SELL_VERSION | typeof import('./qualityStaticDrawdownSell').TIMED_STATIC_DRAWDOWN_VERSION; bandThresholds?: number[] }
+export interface QualityExitRule { metric: string; direction: '<' | '>' | '>='; threshold: number; version?: typeof import('./qualityStaticDrawdownSell').STATIC_DRAWDOWN_SELL_VERSION | typeof import('./qualityStaticDrawdownSell').TIMED_STATIC_DRAWDOWN_VERSION; bandThresholds?: number[]; mirrorScopeVersion?: typeof import('./qualityStaticDrawdownSell').PRE_MIRROR_STATIC_SELL_VERSION }
 export interface QualityGroup {
   impulse1115Classification?:HoldingImpulse1115Rule;
   preEntryThreeStage?: import('./preEntryThreeStage').PreEntryThreeStage;
@@ -89,7 +89,7 @@ export interface QualityGroup {
 export interface QualitySellCombo { switchPct: number; beforeLabel: string; after: { label: string; metric: string; snapshot: FishSnapshot; rule: QualityExitRule } }
 /** 组合方案的身份（参与结果编号、监测库与存档的区分）；普通方案为 null，旧编号不变。 */
 export const qualityComboIdentity = (g: Pick<QualityGroup, 'combo'>) => g.combo ? ['combo-v1', g.combo.switchPct, g.combo.after.metric, g.combo.after.snapshot.featureId,
-  g.combo.after.snapshot.definitionKey, g.combo.after.snapshot.interval, g.combo.after.snapshot.scale, g.combo.after.rule.direction, g.combo.after.rule.threshold, ...(g.combo.after.rule.version ? [g.combo.after.rule.version] : []), ...(g.combo.after.rule.bandThresholds ? [g.combo.after.rule.bandThresholds] : [])] : null;
+  g.combo.after.snapshot.definitionKey, g.combo.after.snapshot.interval, g.combo.after.snapshot.scale, g.combo.after.rule.direction, g.combo.after.rule.threshold, ...(g.combo.after.rule.version ? [g.combo.after.rule.version] : []), ...(g.combo.after.rule.bandThresholds ? [g.combo.after.rule.bandThresholds] : []), ...(g.combo.after.rule.mirrorScopeVersion ? [g.combo.after.rule.mirrorScopeVersion] : [])] : null;
 /** 卖出条件的显示文字：普通方案「< 0.5」；组合方案「CDA < 0.5 → 涨 5.1% 后 状态 S < 0.5」。 */
 export function qualityRuleText(g: QualityGroup): string {
   const base = g.combo && g.rule ? `${qualityExitAlgorithmLabel(g.rule,g.combo.beforeLabel)} ${qualityExitThresholdText(g.rule)} → 涨 ${g.combo.switchPct}% 后 ${qualityExitAlgorithmLabel(g.combo.after.rule,g.combo.after.label)} ${qualityExitThresholdText(g.combo.after.rule)}` : g.rule ? qualityExitThresholdText(g.rule) : hasQualityExit(g) ? g.mirrorTakeProfit?.enabled ? '镜像止盈' : activeHoldingVetoes(g.holdingVetoes).length ? '仅一票否决' : '加仓与持仓估值' : '设置门槛';

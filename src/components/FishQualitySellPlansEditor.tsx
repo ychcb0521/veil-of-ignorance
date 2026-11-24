@@ -21,7 +21,7 @@ import { freezeSavedPlans,planVersionChanges } from '@/lib/fish/qualityPlanVersi
 import { PlanVersionList } from '@/components/FishQualityPlanVersions';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
-import { DRAWDOWN_BAND_LABELS, TIMED_STATIC_DRAWDOWN_VERSION, validateQualityExitRule, DEFAULT_STATIC_DRAWDOWN_SELL_PCT, STATIC_DRAWDOWN_SELL_CHOICE, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
+import { DRAWDOWN_BAND_LABELS, PRE_MIRROR_STATIC_SELL_VERSION, isStaticDrawdownSell, TIMED_STATIC_DRAWDOWN_VERSION, validateQualityExitRule, DEFAULT_STATIC_DRAWDOWN_SELL_PCT, STATIC_DRAWDOWN_SELL_CHOICE, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
 import { qualityFilterDefinitions, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
 import { additionMetricTime, withMetricSnapshotTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import { FishMetricTimeFields } from './FishMetricTimeFields';
@@ -35,9 +35,11 @@ interface Draft {
   id: string; original?: QualityGroup; label: string; choice: string; direction: '<' | '>' | '>='; threshold: string;
   combo: boolean; afterChoice: string; afterDirection: '<' | '>' | '>='; afterThreshold: string; switchPct: string;
   time?: AdditionMetricTime; afterTime?: AdditionMetricTime;
+  preMirrorStatic?: boolean;
 }
 const draftOf = (plan: QualityGroup): Draft => ({ id: plan.id, original: plan, label: plan.label, advantageOptions: plan.advantage ? { screenWeak:plan.advantage.screenWeak,beforeFirst:plan.advantage.beforeFirst,afterAddition:plan.advantage.afterAddition,confirmations:plan.advantage.confirmations } : undefined,
   choice: plan.snapshot.featureId + ':' + plan.metric, direction: plan.rule?.direction ?? plan.snapshot.direction ?? '<',
+  preMirrorStatic: !!(plan.rule?.mirrorScopeVersion || plan.combo?.after.rule.mirrorScopeVersion),
   bands: plan.rule?.bandThresholds?.map(String), afterBands: plan.combo?.after.rule.bandThresholds?.map(String),
   time: additionMetricTime(plan.snapshot),
   threshold: plan.rule ? String(plan.rule.threshold) : '', combo: !!plan.combo,
@@ -134,7 +136,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     return Number(value);
   };
   const baseOf = (d: Draft) => plans.find(p => p.id === d.id) ?? d.original;
-  const algorithmFields = (d: Draft) => JSON.stringify([d.choice,d.direction,d.threshold,d.bands,d.time??{},d.combo,...(d.combo?[d.afterChoice,d.afterDirection,d.afterThreshold,d.afterBands,d.switchPct,d.afterTime??{}]:[])]);
+  const algorithmFields = (d: Draft) => JSON.stringify([d.choice,d.direction,d.threshold,d.bands,!!d.preMirrorStatic,d.time??{},d.combo,...(d.combo?[d.afterChoice,d.afterDirection,d.afterThreshold,d.afterBands,d.switchPct,d.afterTime??{}]:[])]);
   const labelOf = (d: Draft, base?: QualityGroup) => d.original && d.label === d.original.label ? base?.label ?? d.label : d.label.trim() || (d.choice === STATIC_DRAWDOWN_SELL_CHOICE ? STATIC_DRAWDOWN_SELL_LABEL : choices.find(c=>c.key===d.choice)?.label) || base?.label || `新${action}算法`;
   const duplicate = (source: Draft, index: number) => {
     const base = structuredClone(baseOf(source)!);
@@ -216,6 +218,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
               rule:threshold == null ? undefined : {metric:base.metric,direction:d.direction,threshold} }
           : makeQualitySellPlan(d.choice, d.direction, threshold, definitions, base, d.id);
         applyBands(plan, d.bands);
+        if (d.preMirrorStatic && isStaticDrawdownSell(plan.rule)) plan.rule.mirrorScopeVersion = PRE_MIRROR_STATIC_SELL_VERSION;
         const timed = d.choice === STATIC_DRAWDOWN_SELL_CHOICE ? plan : withMetricSnapshotTime(plan, d.time);
         plan.snapshot = timed.snapshot;
         plan.label = d.label.trim() || timed.label;
@@ -228,6 +231,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
                 rule:{metric:saved.metric,direction:afterDirection,threshold:afterThreshold} }
             : makeQualitySellPlan(d.afterChoice, d.afterDirection, afterThreshold, definitions);
           applyBands(after, d.afterBands);
+          if (d.preMirrorStatic && isStaticDrawdownSell(after.rule)) after.rule.mirrorScopeVersion = PRE_MIRROR_STATIC_SELL_VERSION;
           const timedAfter = d.afterChoice === STATIC_DRAWDOWN_SELL_CHOICE ? after : withMetricSnapshotTime(after,d.afterTime);
           const switchPct = number(d.switchPct)!;
           if (!(switchPct > 0)) throw new Error('分段切换涨幅须大于 0');
@@ -347,7 +351,13 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
       {d.combo && <div className="space-y-1.5 border-t border-border/40 pt-1.5"><label className="flex items-center gap-1 text-[11px] text-muted-foreground">相对买入价上涨<input aria-label={`${action}算法 ` + (i + 1) + ' 切换涨幅'} type="number" step="any" className={field + ' w-20'} value={d.switchPct} onChange={e => patch(d.id, { switchPct: e.target.value })} />% 后切换为</label>
         {sellerFields(`${action}算法 ${i+1}`, d.afterChoice, d.afterDirection, d.afterThreshold, d.afterTime, afterSnapshot,
           (afterChoice, afterDirection, afterThreshold, afterTime) => patch(d.id, { afterChoice, afterDirection, afterThreshold, afterTime, afterBands: afterChoice === d.afterChoice ? d.afterBands : undefined }), true, d.afterBands, afterBands => patch(d.id, {afterBands}))}
-      </div>}</fieldset>}
+      </div>}
+      {purpose !== 'entry' && (d.choice === STATIC_DRAWDOWN_SELL_CHOICE || (d.combo && d.afterChoice === STATIC_DRAWDOWN_SELL_CHOICE)) &&
+        <label className="flex items-start gap-2 text-[11px]">
+          <input type="checkbox" checked={!!d.preMirrorStatic} onChange={event=>patch(d.id,{preMirrorStatic:event.target.checked})}/>
+          <span>限制静态最大回撤仅在镜像平衡减仓成交前生效。成交后在「镜像后硬性终止」设置自由静态最大回撤。</span>
+        </label>}
+      </fieldset>}
     {!embedded && baseOf(d)?.advantage && <FishQualityAdvantageSettings selection={d.advantageOptions?.structureTimeframe} rule={{...baseOf(d)!.advantage!,...d.advantageOptions}} onChange={readOnly?undefined:options=>patch(d.id,{advantageOptions:options})}/>}
     </div>;})}
     {!readOnly&&!embedded&&recoverablePlans&&<FishQualitySavedPlanRecovery plans={recoverablePlans.filter(p=>!drafts.some(d=>d.id===p.plan.id))} disabled={!ready} onRestore={restoreSavedPlan}/>}

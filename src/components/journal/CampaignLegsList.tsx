@@ -1267,7 +1267,7 @@ export function CampaignLegsList({
                       让各行高度趋于一致，同时一条委托都不丢。 */}
                   <div data-testid={`leg-orders-${leg.id}`} className="max-h-[152px] max-w-[300px] space-y-1 overflow-y-auto pr-1 font-sans">
                     {leg.leg_role === 'main_open' && limitedDrawdown !== '—' && <div data-testid="leg-limited-drawdown" className="rounded border border-border/50 px-2 py-1 text-[10px] leading-tight">
-                      <span className="font-medium">{STATIC_DRAWDOWN_SELL_LABEL}</span>
+                      <span className="font-medium">首仓委托记录 · {STATIC_DRAWDOWN_SELL_LABEL}</span>
                       <div className="font-mono tabular-nums text-muted-foreground">{limitedDrawdown}</div>
                     </div>}
                     {mirrorTpTiming && (

@@ -91,7 +91,7 @@ export function buildQualityCampaignData(
         ...(plan.vetoStages?.length?{initialStaticStopPct:activeHoldingVetoes(plan.holdingVetoes).filter(v=>v.kind==='static-drawdown').reduce<number|null>((n,v)=>n==null?v.threshold:Math.min(n,v.threshold),null)}:{}), formula: staticSell ? '静态最大回撤 =（首仓买入价 − 持仓最低价）÷ 首仓买入价 × 100%' : definition.formula,
         definitionKey: active.snapshot.definitionKey!, featureId: active.snapshot.featureId!,
         metric: staticSell ? STATIC_DRAWDOWN_SELL_LABEL : active.rule?.metric ?? active.metric,
-        version: staticSell ? active.rule?.version ?? '' : qualityFormulaVersion({ ...effective, snapshot: active.snapshot, rule: active.rule }), interval: active.snapshot.interval ?? '5m',
+        version: staticSell ? active.rule?.mirrorScopeVersion ?? active.rule?.version ?? '' : qualityFormulaVersion({ ...effective, snapshot: active.snapshot, rule: active.rule }), interval: active.snapshot.interval ?? '5m',
         halfLifeHours: definition.halfLifeHours!, avgHours: definition.avgHours!, source: effective.definitionSource === 'account' ? 'account' : 'historical',
         direction: active.rule?.direction, threshold: active.rule?.threshold, reading: r.exitReading ?? r.pendingExit?.reading,
         confirmedAt: closed ? r.endTime : r.pendingExit?.at,

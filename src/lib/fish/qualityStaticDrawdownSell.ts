@@ -6,6 +6,7 @@ import { FREE_STATIC_DRAWDOWN_LABEL, LIMITED_PAYOFF_RISK_VERSION, PAYOFF_STOP_KI
 export const STATIC_DRAWDOWN_SELL_VERSION = 'sell-static-drawdown-v1' as const;
 export const ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL = '静态最大回撤止损';
 export const STATIC_DRAWDOWN_SELL_LABEL = '限制静态最大回撤';
+export const PRE_MIRROR_STATIC_SELL_VERSION = 'sell-static-drawdown-pre-mirror-v3' as const;
 export const DEFAULT_STATIC_DRAWDOWN_SELL_PCT = 3;
 export const STATIC_DRAWDOWN_SELL_METRIC = 'staticDrawdown';
 export const STATIC_DRAWDOWN_SELL_CHOICE = STATIC_DRAWDOWN_SELL_VERSION + ':' + STATIC_DRAWDOWN_SELL_METRIC;
@@ -24,6 +25,7 @@ export type StaticDrawdownSellRule = {
   threshold: number;
   version: typeof STATIC_DRAWDOWN_SELL_VERSION | typeof TIMED_STATIC_DRAWDOWN_VERSION;
   bandThresholds?: number[];
+  mirrorScopeVersion?: typeof PRE_MIRROR_STATIC_SELL_VERSION;
 };
 export const isStaticDrawdownSell = (rule?: QualityExitRule): rule is StaticDrawdownSellRule =>
   rule?.version === STATIC_DRAWDOWN_SELL_VERSION || rule?.version === TIMED_STATIC_DRAWDOWN_VERSION;
@@ -46,6 +48,9 @@ export function validateQualityExitRule(snapshot: FishSnapshot, rule?: QualityEx
       || rule.metric !== STATIC_DRAWDOWN_SELL_METRIC || rule.direction !== '>=' || snapshot.interval !== '1m'
       || !Number.isFinite(rule.threshold) || rule.threshold <= 0 || rule.threshold >= 100) {
       throw Error(`${STATIC_DRAWDOWN_SELL_LABEL}须填写大于 0、低于 100% 的阈值`);
+    }
+    if (rule.mirrorScopeVersion != null && rule.mirrorScopeVersion !== PRE_MIRROR_STATIC_SELL_VERSION) {
+      throw Error('未知的镜像前限制回撤版本');
     }
     if (rule.version === TIMED_STATIC_DRAWDOWN_VERSION
       ? !Array.isArray(rule.bandThresholds) || rule.bandThresholds.length !== 5 ||

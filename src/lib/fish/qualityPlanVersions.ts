@@ -148,6 +148,9 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     `${plan.rule.version} · 参数 #${shortFishHash(JSON.stringify(plan.rule))}`, '按首仓买入价计算止损线，按分钟行情触价或跳空开盘价成交。');
   else if (plan.rule || plan.combo) add('sell', '卖出算法', `${s.featureShort ?? plan.label} ${plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : ''}`.trim(), formulaFingerprint(s),
     `${plan.definitionSource === 'account' ? '账号公式（保存时冻结全文）' : '历史公式'} · ${s.interval ?? '5m'}`);
+  const mirrorScoped = [plan.rule, plan.combo?.after.rule].filter(rule => isStaticDrawdownSell(rule) && rule.mirrorScopeVersion);
+  if (mirrorScoped.length) add('sell-mirror-scope', '限制静态最大回撤生效范围', '镜像平衡减仓成交前',
+    mirrorScoped[0]!.mirrorScopeVersion!, '以实际镜像成交为界。镜像成交后按方案配置的镜像后硬性终止和其他卖出条件执行。');
   if (plan.combo) {
     const a = plan.combo.after;
     add('combo', '组合切换', `涨 ${plan.combo.switchPct}% 后改用 ${a.snapshot.featureShort ?? a.label} ${qualityExitThresholdText(a.rule)}`,

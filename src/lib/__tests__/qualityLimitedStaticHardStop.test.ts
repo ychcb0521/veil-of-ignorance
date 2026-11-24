@@ -3,9 +3,10 @@ import {definitionKey} from '@/lib/deepDig/features';
 import {evaluateQualitySample,type QualityGroup,type QualitySample} from '@/lib/fish/quality';
 import {makeQualityHoldingVeto,holdingVetoDraft,parseHoldingVetoDraft} from '@/lib/fish/qualityFilters';
 import {LIMITED_STATIC_DRAWDOWN_CHOICE,LIMITED_STATIC_DRAWDOWN_VETO_VERSION,LIMITED_PAYOFF_RISK_VERSION,holdingVetoIdentity,holdingVetoName,validateHoldingVeto,payoffStopL0Pct} from '@/lib/fish/qualityVeto';
-import {initialLimitedDrawdownPct,initialPayoffRiskThreshold,withLimitedPayoffRisk,qualityStaticDrawdownReason} from '@/lib/fish/qualityStaticDrawdownSell';
+import {PRE_MIRROR_STATIC_SELL_VERSION,STATIC_DRAWDOWN_SELL_CHOICE,initialLimitedDrawdownPct,initialPayoffRiskThreshold,withLimitedPayoffRisk,qualityStaticDrawdownReason} from '@/lib/fish/qualityStaticDrawdownSell';
 import {freezeQualityPlan,planVersionChanges} from '@/lib/fish/qualityPlanVersions';
 import {mirrorHardStopStage} from '@/lib/fish/qualityMirrorHardStopStages';
+import {makeQualitySellPlan} from '@/lib/fish/qualitySellPlans';
 import {defaultQualityAddition} from '@/lib/fish/qualityAddition';
 import {qualityPayoffRatio} from '@/lib/fish/qualityPresentation';
 import type {ResearchBar} from '@/lib/deepRsa/window';
@@ -52,4 +53,28 @@ it('保存恢复区分两类静态回撤，显式冻结新版本，旧参数和�
 });
 it('限制阈值拒绝空值、非有限值、0、100%及未知版本',()=>{
  for(const threshold of [NaN,Infinity,0,-1,100])expect(()=>limited(threshold)).toThrow();expect(()=>validateHoldingVeto({...limited(3),limitedStaticVersion:'wrong'} as never)).toThrow();expect(()=>limited(3.123456789012345)).not.toThrow();
+});
+
+it.each([false, true])('the configured free stop takes over after mirror, with a price-stage switch=%s', async combo => {
+ const base = makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE,'>=',3,[]);
+ if (combo) base.combo={switchPct:2,beforeLabel:base.label,
+   after:{label:base.label,metric:base.metric,snapshot:base.snapshot,rule:base.rule!}};
+ const legacy = freezeQualityPlan({...base,mirrorTakeProfit:{enabled:true,gainPct:10,sellPct:50},
+   holdingVetoes:[{...free(5),mirrorStage:mirrorHardStopStage('after')}]});
+ const saved = JSON.stringify(legacy);
+ const scoped = (rule: NonNullable<QualityGroup['rule']>) => ({...rule,mirrorScopeVersion:PRE_MIRROR_STATIC_SELL_VERSION});
+ const updated = freezeQualityPlan({...legacy,rule:scoped(legacy.rule!),
+   ...(legacy.combo ? {combo:{...legacy.combo,after:{...legacy.combo.after,rule:scoped(legacy.combo.after.rule)}}} : {})});
+ const afterMirror = loader(t=>t===T?bar(t,100,111,99,110):t===T+M?bar(t,110,110,96,100):bar(t,100,100,94,94));
+ const previous = await run(updated,afterMirror,T+M);
+ expect(previous.mirrorFill?.at).toBe(T);
+ expect(await run(legacy,afterMirror)).toMatchObject({endTime:T+M,endPrice:97,exitSnapshot:{cause:{kind:'sell-static-drawdown'}}});
+ for (const result of [await run(updated,afterMirror),await run(updated,afterMirror,T+4*M,previous)]) {
+   expect(result).toMatchObject({endTime:T+2*M,endPrice:95,exitSnapshot:{cause:{kind:'static-drawdown',mirrorStage:{stage:'after'}}}});
+ }
+ const beforeMirror = loader(t=>t===T?bar(t,100,100,96,99):bar(t,99));
+ expect(await run(updated,beforeMirror)).toMatchObject({endTime:T,endPrice:97,exitSnapshot:{cause:{kind:'sell-static-drawdown'}}});
+ expect(planVersionChanges(updated)).toEqual([]);
+ expect(planVersionChanges(legacy)).toEqual([]);
+ expect(JSON.stringify(legacy)).toBe(saved);
 });

@@ -131,6 +131,8 @@ export async function findQualityIntrabarExit(o: {
     // current minute's high can switch stages only when that minute closes.
     const after = switched(), rule = after ? o.afterStaticSell : o.staticSell;
     if (!rule) return;
+    const mirrorBoundary = rule.mirrorScopeVersion ? postMirrorProtectionAt(mirrorFill) : undefined;
+    if (mirrorBoundary != null && minute.openTime >= mirrorBoundary) return;
     const threshold = staticDrawdownThresholdAt(rule, (minute.openTime - (o.holdingStartedAt ?? o.entry)) / MINUTE);
     const level = holding.entry * (1 - threshold / 100);
     const observed = atOpen ? minute.open : minute.low;
