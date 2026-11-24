@@ -1,79 +1,21 @@
 import { HoldingMonitorSettings } from './FishHoldingMonitorSettings';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { useEffect, useRef, useState } from 'react';
-import { Activity, ChevronDown, Database, Filter, Pause, RotateCcw, Settings2 } from 'lucide-react';
+import { Activity, ChevronDown, Filter, Pause, RotateCcw, Settings2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { newQualityStudy, qualityEntryIdentity, qualityRunSamples, type FishQualityStudy, type QualityGroup, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
-import { qualityAdditionFills } from '@/lib/fish/qualityAddition';
-import { qualityAdditionStopOrder } from '@/lib/fish/qualityAdditionStopOrder';
 import { DEFAULT_SIGNAL_ADDITION_COUNT, validSignalAdditionCount } from '@/lib/fish/parallelUniverse';
-import { loadParallelSettings, loadRegretDirectory, loadRegretHistory, saveParallelAttempt, saveParallelSettings, type RegretCandidate } from '@/lib/fish/parallelUniverseStore';
+import { loadParallelSettings, saveParallelAttempt, saveParallelSettings } from '@/lib/fish/parallelUniverseStore';
 import { FishQualityInfo, FishQualityModule, qualitySettingsAction, qualitySplitMenuAction, qualitySplitPauseAction, qualitySplitPrimaryAction } from './FishQualityModule';
 import { FishConditionDialogContent, FishConditionSettings } from './FishConditionSettings';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { FishPopoverContent as PopoverContent } from './FishPopoverContent';
 import { FishQualityProgress } from './FishQualityProgress';
-import { libraryDirectoryAction } from './FishLibraryTimeDirectory';
+import { FishRegretLibrary } from './FishRegretLibrary';
 
 const date = (at?: number | null) => at ? formatUTC8(at) : '—';
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
-
-function RegretBrowser({ owner }: { owner?: string }) {
-  const [candidate, selectCandidate] = useState<RegretCandidate>();
-  return candidate ? <>
-    <button type="button" className={qualitySettingsAction} onClick={() => selectCandidate(undefined)}>返回目录</button>
-    <h3>{candidate.symbol} · {date(candidate.entryTime)}</h3>
-    {candidate.signal && <p>平行宇宙 · 第 {candidate.signal.additionCount} 次加仓 · {date(candidate.signal.time)} · 买入 {candidate.signal.buyPrice} · 委托止损 {candidate.signal.stopPrice}</p>}
-    <RegretPage key={candidate.id} read={before => loadRegretHistory(owner, candidate.id, before)} empty="暂无推演记录" render={attempt =>
-      <details key={attempt.id} className="border-b border-border/50 py-2">
-        <summary>{date(attempt.baseline.evaluatedAt)} · {attempt.plan.label} · N={attempt.additionCount} · {attempt.emitted ? '已生成信号' : attempt.proposedSignal ? '候选已有信号' : '未生成信号'}</summary>
-        <p>镜像前终止标记：{attempt.marker ? `${attempt.marker.cause?.label} · ${date(attempt.marker.observedAt)} · ${attempt.baseline.reason}` : '未触发'}</p>
-        <p>模拟状态：{attempt.simulation.reason} · {date(attempt.simulation.endTime)}</p>
-        <ol className="list-decimal pl-5">
-          {qualityAdditionFills(attempt.simulation).map((fill, index) => <li key={index}>
-            {date(fill.at)} · {fill.label} · 加仓价 {fill.price} · 委托止损 {qualityAdditionStopOrder({ quality_addition_fill: fill })?.price ?? '未记录'} · 读数 {fill.reading} {fill.direction} {fill.threshold}
-          </li>)}
-        </ol>
-      </details>}/>
-  </> : <RegretPage read={before => loadRegretDirectory(owner, before)} empty="暂无候选"
-    render={item => <button type="button" key={item.id} className="block w-full border-b border-border/50 py-2 text-left" onClick={() => selectCandidate(item)}>
-      {item.symbol} · {date(item.entryTime)} · {item.signal ? '已生成信号' : '未生成信号'}
-    </button>}/>;
-}
-
-function RegretPage<T>({ read, render, empty }: {
-  read: (before?: IDBValidKey) => Promise<{ rows: T[]; next?: IDBValidKey }>;
-  render: (row: T) => React.ReactNode;
-  empty: string;
-}) {
-  const [rows, setRows] = useState<T[]>([]), [next, setNext] = useState<IDBValidKey>();
-  const [loading, setLoading] = useState(true), [error, setError] = useState('');
-  const [revision, retry] = useState(0);
-  const readRef = useRef(read);
-  readRef.current = read;
-  const cursor = useRef<IDBValidKey>(undefined);
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError('');
-    void readRef.current(cursor.current).then(page => {
-      if (!active) return;
-      setRows(previous => [...previous, ...page.rows]);
-      setNext(page.next);
-    }, cause => { if (active) setError(errorText(cause)); }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [revision]);
-  const more = () => { cursor.current = next; retry(value => value + 1); };
-  return <div className="max-h-[55vh] overflow-y-auto text-sm" onScroll={event => {
-    const list = event.currentTarget;
-    if (!loading && !error && next && list.scrollHeight - list.clientHeight - list.scrollTop < 120) more();
-  }}>
-    {rows.map(render)}
-    {loading ? <p role="status">读取中…</p> : error ? <p role="alert">{error} <button type="button" onClick={() => retry(value => value + 1)}>重试</button></p>
-      : next ? <button type="button" className={qualitySettingsAction} onClick={more}>继续读取</button> : !rows.length ? <p>{empty}</p> : null}
-  </div>;
-}
 
 export function FishParallelUniverse({ owner, study, plans, selectedIds, run, state, onTableResult, onRunningChange, trailing }: {
   onTableResult?: (result: import('@/lib/fish/parallelUniverseStore').ParallelTableResult) => void;
@@ -95,6 +37,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
   const [saving, setSaving] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [roundOpen, setRoundOpen] = useState(false);
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [roundRows, setRoundRows] = useState<(import('@/lib/fish/parallelUniverseStore').ParallelTableResult & {symbol:string})[]>([]);
   const [settingsReady, setSettingsReady] = useState(false);
   const [running, setRunning] = useState(false), [error, setError] = useState('');
@@ -146,6 +89,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
     const conditions = settings();
     return {
       conditions,
+      round: { id: crypto.randomUUID(), startedAt: Date.now(), total: selected.length },
       study: { ...newQualityStudy(), samples: structuredClone(samples), selectedRowIds: selected.map(row => row.id),
         sellPlans: [structuredClone(plan!)], observeHours: conditions.observeHours, independentFilters: true } satisfies FishQualityStudy,
       completed: new Set<string>(),
@@ -182,7 +126,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
           onProgress: next => setProgress({ ...next, done: offset + next.done, total: ids.length }),
           onResult: () => {},
           parallelUniverse: { additionCount: batch.conditions.additionCount, onAttempt: async attempt => {
-            const result = await saveParallelAttempt(owner, attempt);
+            const result = await saveParallelAttempt(owner, attempt, batch.round);
             if (result) {
               onTableResult?.(result);
               const roundResult = { ...result, symbol: attempt.candidate.source.symbol, signal: attempt.proposedSignal };
@@ -199,6 +143,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
       }
     }
     controller.current = null;
+    setHistoryRevision(value => value + 1);
     setRunning(false);
     onRunningChange?.(false);
   };
@@ -266,17 +211,8 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
         {!state && <button type="button" disabled={saving} className={qualitySettingsAction} onClick={() => void saveSettings()}>保存条件</button>}
       </FishConditionSettings></FishConditionDialogContent>
     </Dialog>
-    <Dialog>
-      <DialogTrigger asChild><button type="button" className={libraryDirectoryAction} aria-label="打开后悔库"><Database aria-hidden className="h-3 w-3"/>后悔库</button></DialogTrigger>
-      <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-hidden p-4 sm:p-5">
-        <DialogHeader className="flex-row items-center gap-1.5 space-y-0 text-left">
-          <DialogTitle className="text-sm">后悔库</DialogTitle>
-          <DialogDescription className="sr-only">查看候选和对应的推演历史</DialogDescription>
-          <FishQualityInfo label="后悔库说明"><p>点选候选查看信号、终止标记和模拟加仓记录。重新推演会保留历史，同一候选只生成一次信号。</p></FishQualityInfo>
-        </DialogHeader>
-        <RegretBrowser owner={owner}/>
-      </DialogContent>
-    </Dialog>
+    <FishRegretLibrary key={owner ?? 'anonymous'} owner={owner} revision={historyRevision}
+      templates={state?.monitorSettings?.study.planTemplates ?? study.planTemplates}/>
     {running && <FishQualityProgress testId="parallel-universe-progress" progressLabel="平行宇宙处理进度"
       label={progress?.waitingUntil ? '等待续跑' : '推演进行中'} done={progress?.done ?? 0} total={progress?.total ?? 0}
       waitingUntil={progress?.waitingUntil} hitCount={{value:roundRows.filter(row => row.signal).length,title:'本轮满足信号条件的候选数'}}

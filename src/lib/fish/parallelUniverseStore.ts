@@ -1,11 +1,13 @@
 import type { ParallelAttempt, ParallelSignal } from './parallelUniverse';
 import { qualityEntryIdentity } from './quality';
+import { renameLibraryDirectoryEdit, type LibraryDirectoryEdits } from './libraryDirectoryEdits';
 
 export interface RegretCandidate {
   id: string;
   symbol: string;
   entryTime: number | null;
   signal?: ParallelSignal;
+  legacy?: boolean;
 }
 
 const CANDIDATES = 'candidates';
@@ -85,7 +87,21 @@ export function saveParallelSettings(owner: string | undefined, settings: Parall
   });
 }
 
-export function saveParallelAttempt(owner: string | undefined, attempt: ParallelAttempt) {
+export interface RegretRoundIdentity { id: string; startedAt: number; total: number }
+export interface RegretRound extends RegretRoundIdentity {
+  plan: ParallelAttempt['plan'];
+  additionCount: number;
+  observeHours: number;
+  done: number;
+  emitted: number;
+}
+export type RegretAttempt = ParallelAttempt & { emitted: boolean; roundId?: string };
+const roundPrefix = (owner?: string) => ['regret-round', key(owner)];
+const roundRowsPrefix = (owner: string | undefined, id: string) => ['regret-round-rows', key(owner), id];
+const regretEditsKey = (owner?: string) => ['regret-directory-edits', key(owner)];
+const prefixRange = (prefix: IDBValidKey[]) => IDBKeyRange.bound(prefix, [...prefix, []], true, true);
+
+export function saveParallelAttempt(owner: string | undefined, attempt: ParallelAttempt, round?: RegretRoundIdentity) {
   const { candidate, proposedSignal } = attempt;
   const id = candidate.signalId ?? candidate.id;
   const ownerKey = key(owner);
@@ -100,8 +116,24 @@ export function saveParallelAttempt(owner: string | undefined, attempt: Parallel
       request.onsuccess = () => {
         const previous: RegretCandidate | undefined = request.result;
         const signal = previous?.signal ?? proposedSignal;
-        store.put({ id, symbol: candidate.source.symbol, entryTime: candidate.enteredAt, signal }, [ownerKey, id]);
-        history.add({ ...attempt, emitted: !previous?.signal && !!proposedSignal }, historyKey);
+        const emitted = !previous?.signal && !!proposedSignal;
+        const legacy = !round || !!previous && (previous.legacy ?? true);
+        store.put({ id, symbol: candidate.source.symbol, entryTime: candidate.enteredAt, signal, legacy }, [ownerKey, id]);
+        history.add({ ...attempt, emitted, ...(round ? { roundId: round.id } : {}) }, historyKey);
+        if (round) {
+          const settings = tx.objectStore(SETTINGS);
+          const roundKey = [...roundPrefix(owner), round.startedAt, round.id];
+          const getRound = settings.get(roundKey);
+          getRound.onsuccess = () => {
+            const previousRound: RegretRound | undefined = getRound.result;
+            const summary = previousRound ?? {
+              ...round, plan: attempt.plan, additionCount: attempt.additionCount, observeHours: attempt.observeHours,
+              done: 0, emitted: 0,
+            };
+            settings.put({ ...summary, done: summary.done + 1, emitted: summary.emitted + Number(emitted) }, roundKey);
+          };
+          settings.add(historyKey, [...roundRowsPrefix(owner, round.id), attempt.baseline.evaluatedAt, attempt.id]);
+        }
         const entryKey = qualityEntryIdentity(candidate.source, candidate.enteredAt);
         const tableResult: ParallelTableResult = {
           entryKey, evaluatedAt: attempt.baseline.evaluatedAt, planLabel: attempt.plan.label,
@@ -115,7 +147,7 @@ export function saveParallelAttempt(owner: string | undefined, attempt: Parallel
 }
 
 const PAGE_SIZE = 40;
-function page<T>(store: string, prefix: string[], before?: IDBValidKey) {
+function page<T>(store: string, prefix: string[], before?: IDBValidKey, include?: (value: T) => boolean) {
   return transaction<{ rows: T[]; next?: IDBValidKey }>(store, 'readonly', (tx, result) => {
     const request = tx.objectStore(store).openCursor(
       IDBKeyRange.bound(prefix, before ?? [...prefix, []], true, true), 'prev',
@@ -128,7 +160,7 @@ function page<T>(store: string, prefix: string[], before?: IDBValidKey) {
         result({ rows, next: cursor ? last : undefined });
         return;
       }
-      rows.push(cursor.value);
+      if (!include || include(cursor.value)) rows.push(cursor.value);
       last = cursor.key;
       cursor.continue();
     };
@@ -140,3 +172,69 @@ export const loadRegretDirectory = (owner?: string, before?: IDBValidKey) =>
 
 export const loadRegretHistory = (owner: string | undefined, id: string, before?: IDBValidKey) =>
   page<ParallelAttempt & { emitted: boolean }>(HISTORY, [key(owner), id], before);
+
+
+export function loadRegretCatalog(owner?: string) {
+  return transaction<{ rounds: RegretRound[]; legacy: boolean; edits: LibraryDirectoryEdits }>(
+    [SETTINGS, CANDIDATES], 'readonly', (tx, result) => {
+      const settings = tx.objectStore(SETTINGS);
+      const catalog = { rounds: [] as RegretRound[], legacy: false, edits: {} as LibraryDirectoryEdits };
+      result(catalog);
+      const rounds = settings.getAll(prefixRange(roundPrefix(owner)));
+      rounds.onsuccess = () => { catalog.rounds = rounds.result; };
+      const edits = settings.get(regretEditsKey(owner));
+      edits.onsuccess = () => { catalog.edits = edits.result ?? {}; };
+      const candidates = tx.objectStore(CANDIDATES).openCursor(prefixRange([key(owner)]));
+      candidates.onsuccess = () => {
+        const cursor = candidates.result;
+        if (!cursor) return;
+        if ((cursor.value as RegretCandidate).legacy !== false) catalog.legacy = true;
+        else cursor.continue();
+      };
+    },
+  );
+}
+
+export function editRegretDirectory(owner: string | undefined, id: string, change: { name: string } | { hidden: boolean }) {
+  return transaction<LibraryDirectoryEdits>(SETTINGS, 'readwrite', (tx, result) => {
+    const store = tx.objectStore(SETTINGS), storageKey = regretEditsKey(owner);
+    const request = store.get(storageKey);
+    request.onsuccess = () => {
+      const previous: LibraryDirectoryEdits = request.result ?? {};
+      const existing = previous[id];
+      const next = 'name' in change ? renameLibraryDirectoryEdit(previous, id, change.name) ?? previous
+        : { ...previous, [id]: { ...existing, hidden: change.hidden, at: Math.max(Date.now(), (existing?.at ?? 0) + 1) } };
+      store.put(next, storageKey);
+      result(next);
+    };
+  });
+}
+
+export const loadLegacyRegretAttempts = (owner?: string, before?: IDBValidKey) =>
+  page<RegretAttempt>(HISTORY, [key(owner)], before, item => !item.roundId);
+
+export const loadRegretAttempts = (owner?: string, before?: IDBValidKey) =>
+  page<RegretAttempt>(HISTORY, [key(owner)], before);
+
+export function loadRegretRound(owner: string | undefined, id: string, before?: IDBValidKey) {
+  const prefix = roundRowsPrefix(owner, id);
+  return transaction<{ rows: RegretAttempt[]; next?: IDBValidKey }>([SETTINGS, HISTORY], 'readonly', (tx, result) => {
+    const cursor = tx.objectStore(SETTINGS).openCursor(IDBKeyRange.bound(prefix, before ?? [...prefix, []], true, true), 'prev');
+    const history = tx.objectStore(HISTORY);
+    const rows: RegretAttempt[] = [];
+    let last: IDBValidKey | undefined;
+    cursor.onsuccess = () => {
+      const item = cursor.result;
+      if (!item || rows.length === PAGE_SIZE) {
+        result({ rows, next: item ? last : undefined });
+        return;
+      }
+      const record = history.get(item.value);
+      record.onsuccess = () => {
+        if (record.result) rows.push(record.result);
+        last = item.key;
+        item.continue();
+      };
+    };
+  });
+}
