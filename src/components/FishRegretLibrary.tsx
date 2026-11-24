@@ -7,7 +7,7 @@ import {createQualityTemplateDirectory} from '@/lib/fish/qualityTemplateDirector
 import type {FishQualityStudy} from '@/lib/fish/quality';
 import {FishContinuousTable} from './FishContinuousTable';
 import {FishScrollBoundary} from './FishScrollBoundary';
-import {FishLibraryTimeDirectory, type FishDirectoryItem} from './FishLibraryTimeDirectory';
+import {FishLibraryTimeDirectory, type FishDirectoryItem, type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import {libraryCell} from './FishLibraryDialog';
 import {FishQualityMonitorSettingsView} from './FishQualityMonitorSettingsView';
 
@@ -106,8 +106,8 @@ async function downloadHistory(owner?: string) {
   }
 }
 
-export function FishRegretLibrary({owner, revision, templates}: {
-  owner?: string; revision: number; templates?: FishQualityStudy['planTemplates'];
+export function FishRegretLibrary({owner, revision, templates, openRequest}: {
+  owner?: string; revision: number; templates?: FishQualityStudy['planTemplates']; openRequest?: FishDirectoryRequest;
 }) {
   const [open, setOpen] = useState(false);
   const [catalog, setCatalog] = useState<Awaited<ReturnType<typeof loadRegretCatalog>>>();
@@ -172,7 +172,7 @@ export function FishRegretLibrary({owner, revision, templates}: {
         {receipt.alreadyImported ? '该归档已导入，本次新增 0 条。' : '归档导入成功。'}轮次 {receipt.round.id} · 已核验 {receipt.round.done} / {receipt.round.total} 条 ·
         模拟命中 {receipt.proposed} 条 · 本轮去重后新增 {receipt.round.emitted} 条
       </p> : undefined}
-    onOpenChange={setOpen} items={items} edits={catalog?.edits} onRename={(id, name) => edit(id, {name})}
+    openRequest={openRequest} onOpenChange={setOpen} items={items} edits={catalog?.edits} onRename={(id, name) => edit(id, {name})}
     onSetHidden={(id, hidden) => edit(id, {hidden})}
     description={visible => `${visible.filter(item => !catalog?.edits[item.id]?.hidden && item.id !== LEGACY_ID).length} 轮推演${catalog?.legacy && !catalog.edits[LEGACY_ID]?.hidden ? ' · 含历史推演' : ''}`}
     loading={open && !catalog && !error} loadError={error} onRetry={() => setRetry(value => value + 1)}

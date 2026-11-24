@@ -1533,3 +1533,21 @@ it('locks only checked rows in the current scope and keeps new signals outside u
   fireEvent.change(screen.getByLabelText('筛选鱼质量信号'), { target: { value: '' } });
   expect(screen.getByText('CCCUSDT')).toBeVisible();
 });
+
+it('opens the existing regret library from workspace sources even when buy filters are collapsed', async () => {
+  const s = state();
+  s.workspace = {informationReady:true,importInformation:vi.fn(),importRows:vi.fn(),removeRows:vi.fn(),saveMonitoring:vi.fn(),saveFiltering:vi.fn(),sources:undefined};
+  s.runParallelUniverse = vi.fn(async () => {});
+  render(<FishQuality state={s}/>);
+  const filters = screen.getByRole('button', {name:'买前过滤'});
+  if (filters.getAttribute('aria-expanded') === 'true') fireEvent.click(filters);
+  const sources = within(screen.getByTestId('quality-workspace-sources'));
+  const openRegret = sources.getByRole('button', {name:'后悔库'});
+  fireEvent.click(openRegret);
+  const dialog = await screen.findByRole('dialog', {name:'后悔库'});
+  fireEvent.keyDown(dialog, {key:'Escape'});
+  await waitFor(() => expect(screen.queryByRole('dialog', {name:'后悔库'})).toBeNull());
+  fireEvent.click(openRegret);
+  expect(await screen.findByRole('dialog', {name:'后悔库'})).toBeVisible();
+  expect(s.runParallelUniverse).not.toHaveBeenCalled();
+});

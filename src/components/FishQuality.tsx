@@ -437,7 +437,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   const [open, setOpen] = useState(ui?.open ?? (archiveView || FISH_PANEL_DEFAULTS.quality)), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithmChoice, setAlgorithmsState] = useState<string[]>(() => ui?.algorithms ?? (ui?.algorithm ? [ui.algorithm] : [])), [origin, setOrigin] = useState<QualityReturnUi['origin']>(workspace ? '' : ui?.origin ?? '');
   const [directoryChoice,setDirectoryChoice]=useState<QualitySourceDirectory|undefined>(workspace ? undefined : ui?.directory);
   const [screeningRunId,setScreeningRunId]=useState<string|undefined>(ui?.screeningRunId ?? lockedBatch?.workingRoundId);
-  const [directoryRequests,setDirectoryRequests]=useState<Partial<Record<QualitySourceDirectory['kind']|'monitor',FishDirectoryRequest>>>({});
+  const [directoryRequests,setDirectoryRequests]=useState<Partial<Record<QualitySourceDirectory['kind']|'monitor'|'regret',FishDirectoryRequest>>>({});
   const sourceDefaulted=useRef(!!ui),sourceAccount=useRef(state.account);
   const latestEntry=latestEntryDirectory(state.preEntry?.library,study.monitorLibrary?.directoryEdits),latestEntryId=latestEntry?.id;
   useEffect(()=>{
@@ -798,8 +798,8 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
     }
     setDirectoryChoice(undefined);setOrigin(value);if(value === 'fish')setDetectorExpanded(false);resetScroll();
   };
-  const openWorkspaceLibrary = (kind: QualitySourceDirectory['kind']|'monitor') =>
-    setDirectoryRequests(requests=>({...requests,[kind]:{key:(requests[kind]?.key??0)+1,importSelection:true}}));
+  const openWorkspaceLibrary = (kind: QualitySourceDirectory['kind']|'monitor'|'regret') =>
+    setDirectoryRequests(requests=>({...requests,[kind]:{key:(requests[kind]?.key??0)+1,importSelection:kind!=='regret'}}));
   const importWorkspace = (snapshot: FishQualityStudy, ids: readonly string[]) => {
     if (!workspace?.importRows(snapshot,ids)) return false;
     setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();
@@ -1080,6 +1080,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             onTableResult={result => setParallelBoard(board => board && board.owner === state.account
               ? { ...board, results: new Map(board.results).set(result.entryKey, result) }
               : { owner: state.account, results: new Map([[result.entryKey, result]]) })}
+            regretOpenRequest={directoryRequests.regret}
             onRunningChange={setParallelRunning}
             trailing={<QualityResultTools kind="parallel" hidden={parallelHidden} onToggle={()=>toggleHidden('parallel')}
               count={parallelResults?.size ?? 0} disabled={parallelRunning}
@@ -1168,6 +1169,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
           <FishWorkspaceSource name="捕捞库" loadSnapshot={workspace.sources?.mined} onImport={importWorkspace}/>}
         <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('filter')}><Database aria-hidden className="h-3 w-3"/>过滤库</button>
         <button type="button" className={fishSourceButton} disabled={!state.preEntry} onClick={()=>openWorkspaceLibrary('pre-entry')}><Database aria-hidden className="h-3 w-3"/>筛选库</button>
+        {state.runParallelUniverse && <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('regret')}><Database aria-hidden className="h-3 w-3"/>后悔库</button>}
         <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('monitor')}><Database aria-hidden className="h-3 w-3"/>监测库</button>
       </FishQualityModule>}
       {!lockedBatch && <div className="flex flex-wrap items-center gap-1.5">

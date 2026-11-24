@@ -12,14 +12,16 @@ import { FishConditionDialogContent, FishConditionSettings } from './FishConditi
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { FishPopoverContent as PopoverContent } from './FishPopoverContent';
 import { FishQualityProgress } from './FishQualityProgress';
+import type { FishDirectoryRequest } from './FishLibraryTimeDirectory';
 import { FishRegretLibrary } from './FishRegretLibrary';
 
 const date = (at?: number | null) => at ? formatUTC8(at) : '—';
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 
-export function FishParallelUniverse({ owner, study, plans, selectedIds, run, state, onTableResult, onRunningChange, trailing }: {
+export function FishParallelUniverse({ owner, study, plans, selectedIds, run, state, onTableResult, onRunningChange, regretOpenRequest, trailing }: {
   onTableResult?: (result: import('@/lib/fish/parallelUniverseStore').ParallelTableResult) => void;
   onRunningChange?: (running: boolean) => void;
+  regretOpenRequest?: FishDirectoryRequest;
   trailing?: React.ReactNode;
   state?: FishQualityState;
   owner?: string;
@@ -217,7 +219,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
         {!state && <button type="button" disabled={saving} className={qualitySettingsAction} onClick={() => void saveSettings()}>保存条件</button>}
       </FishConditionSettings></FishConditionDialogContent>
     </Dialog>
-    <FishRegretLibrary key={owner ?? 'anonymous'} owner={owner} revision={historyRevision}
+    <FishRegretLibrary key={owner ?? 'anonymous'} owner={owner} revision={historyRevision} openRequest={regretOpenRequest}
       templates={state?.monitorSettings?.study.planTemplates ?? study.planTemplates}/>
     {running && <FishQualityProgress testId="parallel-universe-progress" progressLabel="平行宇宙处理进度"
       label={progress?.waitingUntil ? '等待续跑' : '推演进行中'} done={progress?.done ?? 0} total={progress?.total ?? 0}
