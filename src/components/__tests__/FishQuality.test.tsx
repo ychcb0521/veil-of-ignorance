@@ -26,7 +26,22 @@ it('shows directly imported frozen readings and allows table selection before lo
   expect(screen.getByText('0.13')).toBeInTheDocument();
   expect(screen.getByText('90.45%')).toBeInTheDocument();
   expect(screen.getByRole('checkbox',{name:'全选当前筛选信号'})).toBeEnabled();
-  expect(screen.getByRole('button',{name:'删除所选行'})).toBeEnabled();
+  const sourceRow = within(screen.getByTestId('quality-workspace-source-row'));
+  const more = sourceRow.getByRole('button',{name:'组合表更多操作'});
+  expect(screen.queryByRole('button',{name:'删除所选行'})).toBeNull();
+  fireEvent.click(more);
+  const actions = () => within(screen.getByRole('dialog',{name:'组合表操作'}));
+  expect(actions().getByRole('button',{name:'导出已选组合表数据'})).toBeEnabled();
+  fireEvent.click(actions().getByRole('button',{name:'纵向最大化'}));
+  expect(screen.getByRole('region',{name:'纵向最大化的组合表'})).toBeVisible();
+  fireEvent.click(more);
+  fireEvent.click(actions().getByRole('button',{name:'还原'}));
+  expect(screen.queryByRole('region',{name:'纵向最大化的组合表'})).toBeNull();
+  fireEvent.click(more);
+  fireEvent.click(actions().getByRole('button',{name:'删除所选行'}));
+  expect(removeRows).not.toHaveBeenCalled();
+  fireEvent.click(actions().getByRole('button',{name:'确认删除所选行'}));
+  expect(removeRows).toHaveBeenCalledOnce();
 });
 
 it('enables filtering and holding actions for a prepared imported workspace while its historical library stays unopened',async()=>{

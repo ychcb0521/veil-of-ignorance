@@ -49,7 +49,7 @@ import { qualityExitAlgorithmLabel, qualityStaticDrawdownReason } from '@/lib/fi
 import { activeHoldingVetoes, holdingVetoIdentity } from '@/lib/fish/qualityVeto';
 import { qualityCampaignPath } from '@/lib/campaignSections';
 import { hasQualityCampaign } from '@/lib/fish/qualityCampaignArchive';
-import { Activity, ArrowRightCircle, CheckCircle2, ChevronDown, CircleHelp, Download, Eraser, Eye, EyeOff, Filter, Gauge, Lock, Maximize, Minimize, Pause, Plus, RefreshCw, RotateCcw, Settings2, Star, X } from 'lucide-react';
+import { Activity, ArrowRightCircle, CheckCircle2, ChevronDown, CircleHelp, Download, Eraser, Eye, EyeOff, Filter, Gauge, Lock, Maximize, Minimize, MoreHorizontal, Pause, Plus, RefreshCw, RotateCcw, Settings2, Star, X } from 'lucide-react';
 import type {FishQualityStudy} from '@/lib/fish/quality';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import type { FishMiningApi } from '@/hooks/useFishMining';
@@ -849,6 +849,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   const completeFiltering = study.workspaceFilterDraft?.rounds.some(round=>round.state==='complete');
   const completeMonitoring = study.workspaceMonitorDraft?.rounds.filter(round=>round.state==='complete').length ?? 0;
   const [confirmRemove,setConfirmRemove] = useState(false);
+  const [tableActionsOpen,setTableActionsOpen] = useState(false);
   const expandDetectors = (expanded: boolean) => { setDetectorExpanded(expanded); selectAnchor.current = null; resetScroll(); };
   // 返回时把表格与外面各层滚回原处：数据是陆续载入的，逐帧重试到位置稳住（最多 8 秒）；用户一动滚轮 / 触屏 / 按键就停手
   const readyRef = useRef(tableReady); readyRef.current = tableReady;
@@ -1009,6 +1010,30 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
     return()=>window.clearTimeout(timer);
   },[tableExport,exportOwner]);
 
+  const actionButton = workspace ? button + ' w-full justify-start text-left' : button;
+  const tableActions = <>
+    {workspace && completeFiltering && <button type="button" className={actionButton} disabled={staticRunning||!!state.archiving} onClick={()=>void workspace.saveFiltering().then(ok=>{if(ok)toast.success('过滤结果已保存到过滤库');})}><Save aria-hidden className="h-3 w-3"/>保存到过滤库</button>}
+    {workspace && completeScreening > 0 && <button type="button" className={actionButton} disabled={!!state.preEntry?.savingWorkspaceDraft} onClick={()=>void state.preEntry?.saveWorkspaceScreening?.().then(ok=>{if(ok)toast.success('筛选结果已保存到筛选库');})}><Save aria-hidden className="h-3 w-3"/>保存到筛选库</button>}
+    {workspace && completeMonitoring > 0 && <button type="button" className={actionButton} disabled={running||!!state.archiving} onClick={()=>void workspace.saveMonitoring().then(ok=>{if(ok)toast.success('监测结果已保存到监测库');})}><Save aria-hidden className="h-3 w-3"/>保存到监测库</button>}
+    {workspace && (confirmRemove ? <div className="space-y-1 px-2 py-1 text-[11px]">
+      <p>从组合表移除 {selectedRowCount} 行？原库记录会保留。</p>
+      <div className="flex flex-wrap gap-1">
+        <button type="button" className={button} onClick={()=>setConfirmRemove(false)}>取消</button>
+        <button type="button" className={button+' text-destructive'} disabled={!tableReady||!selectedRowCount} onClick={()=>{
+          workspace.removeRows(rows.filter(rowSelected).flatMap(qualityTableMembers).map(row=>row.id));
+          setConfirmRemove(false);setTableActionsOpen(false);resetScroll();
+        }}>确认删除所选行</button>
+      </div>
+    </div> : <button type="button" className={actionButton} disabled={!tableReady||!selectedRowCount} onClick={()=>setConfirmRemove(true)}>
+      <Trash2 aria-hidden className="h-3 w-3"/>删除所选行
+    </button>)}
+    {(!archiveView||!registerLibraryExport)&&<button type="button" className={actionButton} disabled={!selectedRowCount||!!tableExport} onClick={exportRows} aria-label="导出已选组合表数据" title={selectedRowCount?'只导出当前组合表中已勾选的 '+selectedRowCount+' 行':'请先勾选组合表中要导出的行'}><Download className="h-3 w-3"/>{tableExport?'正在导出 '+tableExport.offset+'/'+tableExport.entries.length:'导出数据'}</button>}
+    {!archiveView && <button type="button" className={actionButton} onClick={()=>{setTableActionsOpen(false);toggleTableHeight();}}
+      aria-pressed={tableMaximized} title={tableMaximized ? '还原组合表（Esc）' : '纵向最大化组合表'}>
+      {tableMaximized ? <Minimize aria-hidden className="h-3 w-3"/> : <Maximize aria-hidden className="h-3 w-3"/>}
+      {tableMaximized ? '还原' : '纵向最大化'}
+    </button>}
+  </>;
   const body=<section ref={rootRef} className="min-w-0 border-t border-border/50 px-4 py-3" aria-labelledby={titleId} data-testid={archiveView?"quality-archive-board":"fish-quality"}>
     {!archiveKind&&<><div className="flex items-center justify-between gap-2">
       <div className="flex items-center gap-0.5"><h3><button id={titleId} type="button" className={fishSectionHeading} aria-expanded={open} aria-controls={contentId} onClick={() => setOpen(!open)}><Gauge aria-hidden className="h-3 w-3 text-muted-foreground"/><span>{archiveView?'归档运行结果':'鱼质量'}</span>{archiveView&&<FishCount n={countSignals(allRows)}/>}<ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`}/></button></h3>
@@ -1157,27 +1182,11 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             title="固定当前筛选内已勾选的记录，单独查看和处理这一批" onClick={lockSelection}>
             <Lock aria-hidden className="h-3 w-3"/>锁定所选
           </button>}
-          {workspace && completeFiltering && <button type="button" className={button} disabled={staticRunning||!!state.archiving} onClick={()=>void workspace.saveFiltering().then(ok=>{if(ok)toast.success('过滤结果已保存到过滤库');})}><Save aria-hidden className="h-3 w-3"/>保存到过滤库</button>}
-          {workspace && completeScreening > 0 && <button type="button" className={button} disabled={!!state.preEntry?.savingWorkspaceDraft} onClick={()=>void state.preEntry?.saveWorkspaceScreening?.().then(ok=>{if(ok)toast.success('筛选结果已保存到筛选库');})}><Save aria-hidden className="h-3 w-3"/>保存到筛选库</button>}
-          {workspace && completeMonitoring > 0 && <button type="button" className={button} disabled={running||!!state.archiving} onClick={()=>void workspace.saveMonitoring().then(ok=>{if(ok)toast.success('监测结果已保存到监测库');})}><Save aria-hidden className="h-3 w-3"/>保存到监测库</button>}
-          {workspace && <Popover open={confirmRemove} onOpenChange={setConfirmRemove}><PopoverTrigger asChild>
-            <button type="button" className={button} disabled={!tableReady||!selectedRowCount}><Trash2 aria-hidden className="h-3 w-3"/>删除所选行</button>
-          </PopoverTrigger><PopoverContent align="end" className="w-60 space-y-2 p-3 text-[11px]">
-            <p>从组合表移除 {selectedRowCount} 行？原库记录会保留。</p>
-            <button type="button" className={button+' text-destructive'} onClick={()=>{
-              workspace.removeRows(rows.filter(rowSelected).flatMap(qualityTableMembers).map(row=>row.id));
-              setConfirmRemove(false);resetScroll();
-            }}>确认删除所选行</button>
-          </PopoverContent></Popover>}
-          {(!archiveView||!registerLibraryExport)&&<button type="button" className={button} disabled={!selectedRowCount||!!tableExport} onClick={exportRows} aria-label="导出已选组合表数据" title={selectedRowCount?'只导出当前组合表中已勾选的 '+selectedRowCount+' 行':'请先勾选组合表中要导出的行'}><Download className="h-3 w-3"/>{tableExport?'正在导出 '+tableExport.offset+'/'+tableExport.entries.length:'导出数据'}</button>}
-          {!archiveView && <button type="button" className={button} onClick={toggleTableHeight}
-            aria-pressed={tableMaximized} title={tableMaximized ? '还原组合表（Esc）' : '纵向最大化组合表'}>
-            {tableMaximized ? <Minimize aria-hidden className="h-3 w-3"/> : <Maximize aria-hidden className="h-3 w-3"/>}
-            {tableMaximized ? '还原' : '纵向最大化'}
-          </button>}
+          {!workspace && tableActions}
         </div>
       </div>
-      {workspace && <FishQualityModule title="来源" icon={Database} testId="quality-workspace-sources">
+      {workspace && <div className="flex items-start gap-2" data-testid="quality-workspace-source-row">
+        <div className="min-w-0 flex-1"><FishQualityModule title="来源" icon={Database} testId="quality-workspace-sources">
         <FishWorkspaceSource name="信号库" loadSnapshot={workspace.sources?.library} onImport={importWorkspace} prepareImport={prepareSourceImport}/>
         <FishWorkspaceSource name="图灵杯" loadSnapshot={workspace.sources?.turing} onImport={importWorkspace} prepareImport={prepareSourceImport} {...state.workspaceTuringSource}/>
         <FishWorkspaceSource name="鱼舱" loadSnapshot={workspace.sources?.fish} onImport={importWorkspace} prepareImport={prepareSourceImport}/>
@@ -1187,7 +1196,18 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
         <button type="button" className={fishSourceButton} disabled={!state.preEntry} onClick={()=>openWorkspaceLibrary('pre-entry')}><Database aria-hidden className="h-3 w-3"/>筛选库</button>
         {state.runParallelUniverse && <button type="button" className={fishSourceButton} disabled={!!lockedBatch} onClick={()=>openWorkspaceLibrary('regret')}><Database aria-hidden className="h-3 w-3"/>后悔库</button>}
         <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('monitor')}><Database aria-hidden className="h-3 w-3"/>监测库</button>
-      </FishQualityModule>}
+        </FishQualityModule></div>
+        <Popover open={tableActionsOpen} onOpenChange={value=>{setTableActionsOpen(value);if(!value)setConfirmRemove(false);}}>
+          <PopoverTrigger asChild>
+            <button type="button" className={button+' mt-1.5 shrink-0'} aria-label="组合表更多操作" title="组合表更多操作">
+              <MoreHorizontal aria-hidden className="h-4 w-4"/>
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="end" aria-label="组合表操作" className="w-52 space-y-0.5 p-1">
+            {tableActions}
+          </PopoverContent>
+        </Popover>
+      </div>}
       {!lockedBatch && <div className="flex flex-wrap items-center gap-1.5">
         {!workspace && <FishQualitySourcePicker value={origin} onSelect={selectSource} options={[
           {value:'',label:'全部来源',count:countSignals(batch)},
