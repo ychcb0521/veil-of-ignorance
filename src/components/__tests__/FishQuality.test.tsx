@@ -1620,9 +1620,27 @@ it('shows the configured DBL-5 percentage in the working table even when the old
     filterReadings:[{key:qualityFilterReadingKey(row, filter), value:2.8}],
     signalReadings:[{key:signalReadingKey(row, metric), value:-1.25}]};
   view.rerender(<FishQuality state={s}/>);
-  expect(screen.getByTestId('quality-filter-column')).toHaveTextContent('< 3% · 冗余 0.5 ATR · v2');
-  expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveTextContent('2.8%满足');
+  expect(screen.getByTestId('quality-filter-column')).toHaveTextContent('安全回撤（%）');
+  expect(screen.getByTestId('quality-filter-column')).toHaveTextContent('冗余 0.5 ATR · v2');
+  expect(screen.getByRole('columnheader', {name:/是否满足/})).toHaveTextContent('< 3%');
+  expect(screen.getAllByTestId('quality-filter-cell')[0].textContent).toBe('2.8%');
+  expect(screen.getAllByTestId('quality-drawdown-status')[0].textContent).toBe('满足');
+  expect(screen.queryByTestId('quality-signal-reading-column')).toBeNull();
   expect(screen.queryByText('-1.25 ATR')).toBeNull();
+
+  // The screenshot combines a frozen v1 nearest-line filter with an unrelated unbuffered guard preview.
+  const {makeStaticDblDistance, staticDblDistanceChoice} = await import('@/lib/fish/qualityStaticDblDistance');
+  const legacy = makeStaticDblDistance(staticDblDistanceChoice('static-dbl5-distance-v1:nearest')!, '<', 3, true, .8);
+  s.study = {...s.study, buyFilters:[legacy], filterReadings:[]};
+  view.rerender(<FishQuality state={s}/>);
+  expect(screen.queryByTestId('quality-signal-reading-column')).toBeNull();
+  expect(screen.getByTestId('quality-filter-column')).toHaveTextContent('冗余 0.8 ATR · v1');
+  expect(screen.getAllByTestId('quality-filter-cell')[0].textContent).toBe('—');
+  expect(screen.getAllByTestId('quality-drawdown-status')[0].textContent).toBe('待计算');
+  s.study = {...s.study, filterReadings:[{key:qualityFilterReadingKey(row,legacy), value:3}]};
+  view.rerender(<FishQuality state={s}/>);
+  expect(screen.getAllByTestId('quality-filter-cell')[0].textContent).toBe('3%');
+  expect(screen.getAllByTestId('quality-drawdown-status')[0].textContent).toBe('不满足');
 });
 
 it('configures a same-signal percentage threshold from the legacy combination-table column', async () => {
@@ -1639,6 +1657,7 @@ it('configures a same-signal percentage threshold from the legacy combination-ta
   const view = render(<FishQuality state={s}/>);
   expect(screen.getAllByTestId('quality-signal-reading-cell')[0]).toHaveTextContent('待计算');
   expect(screen.queryByText(/2.88589/)).toBeNull();
+  expect(screen.getAllByText('未设门槛').length).toBeGreaterThan(0);
   const pct = signalGuardPercentMetric(metric);
   s.study = {...s.study,signalReadings:[raw,{key:signalReadingKey(row,pct),value:2.35}]};
   view.rerender(<FishQuality state={s}/>);
@@ -1654,6 +1673,7 @@ it('configures a same-signal percentage threshold from the legacy combination-ta
   expect(filter).toMatchObject({signalGuardAtr:.5,threshold:3,direction:'<',snapshot:{unit:'%'}});
   s.study = {...s.study,buyFilters:[filter],signalMetrics:[],filterReadings:[{key:qualityFilterReadingKey(row,filter),value:3}]};
   view.rerender(<FishQuality state={s}/>);
-  expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveTextContent('3%不满足');
+  expect(screen.getAllByTestId('quality-filter-cell')[0].textContent).toBe('3%');
+  expect(screen.getAllByTestId('quality-drawdown-status')[0].textContent).toBe('不满足');
   expect(s.study.signalReadings![0]).toEqual(raw);
 });

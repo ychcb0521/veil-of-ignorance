@@ -128,6 +128,10 @@ const resultText = (r?: QualityResult) => r?.status === 'closed' ? '已卖出' :
 type FilterDraft = { atr?: string; choice: string; direction: '<' | '>'; threshold: string; enabled: boolean; saved?: QualityBuyFilter; time?: AdditionMetricTime };
 type SignalMetricDraft = { key: string; saved?: QualitySignalMetric; time?: AdditionMetricTime };
 
+const isDrawdownFilter = (filter: QualityBuyFilter) => !!filter.staticDblDistance || filter.signalGuardAtr !== undefined;
+const isDrawdownPreview = (metric: QualitySignalMetric) => metric.metric.startsWith(SIGNAL_GUARD_PCT);
+const filterTracks = (filter: QualityBuyFilter) => isDrawdownFilter(filter) ? 2 : 1;
+
 const staticFilterDraft = (filters: readonly QualityBuyFilter[]): FilterDraft[] => filters.map(saved => ({
   choice: qualityFilterChoiceKey(saved), direction: saved.direction, threshold: String(saved.threshold),
   enabled: saved.enabled, saved, atr:(saved.signalGuardAtr ?? saved.staticDblDistance?.atr)?.toString(), time:additionMetricTime(saved.snapshot),
@@ -730,18 +734,18 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   const shownFilters = showStaticResults ? filterColumns.filter(({filter}) =>
     archiveKind==='filter' || filterReadings?.length || filter.signalGuardAtr !== undefined || filter.staticDblDistance) : [];
   const shownSignalMetrics = showStaticResults ? tableSignalMetrics.filter(metric => {
-    if (!metric.metric.startsWith(SIGNAL_GUARD_PCT)) return true;
+    if (!isDrawdownPreview(metric)) return true;
     return !shownFilters.some(({filter}) => filter.signalGuardAtr !== undefined &&
       filter.metric === metric.metric && filter.snapshot.definitionKey === metric.snapshot.definitionKey ||
-      metric.metric === SIGNAL_GUARD_PCT+'guard-distance-atr-v1' && metric.snapshot.interval === '5m' &&
-      filter.staticDblDistance?.version === 'static-dbl5-distance-v2' && ['guard','nearest'].includes(filter.metric));
+      (!archiveView && !templateTable && !!filter.staticDblDistance));
   }) : [];
   const shownPlans = !hideMonitor && (!archiveKind || archiveKind==='monitor') ? plans : [];
   const showDetectorColumns = !workspace && !hideFilter && !archiveKind && !directoryReadings;
   const showCabinAlgorithms = archiveKind==='filter';
   const showCabinProcess = showCabinAlgorithms || !!archiveKind && batch.some(row=>!!row.source.fish||!!row.source.fishArchive);
   const showClassicProcess = !archiveKind && !hideFilter;
-  const filterSpan = (showDetectorColumns?2:0) + Number(showClassicProcess) + shownFilters.length + shownSignalMetrics.length;
+  const signalSpan = shownSignalMetrics.reduce((total, metric) => total + (isDrawdownPreview(metric) ? 2 : 1), 0);
+  const filterSpan = (showDetectorColumns?2:0) + Number(showClassicProcess) + shownFilters.reduce((total, c) => total + filterTracks(c.filter), 0) + signalSpan;
   const detectorChoices = useMemo(() => qualityDetectorChoices(groups), [groups]), chosenChoices = detectorChoices.filter(c => c.ids.some(id => activeAlgorithms.includes(id)));
   const requestPostExit=state.postExit?.request;
   const postExitPlanIds = !archiveView && open && ready && !hideMonitor && sortedRows.length && requestPostExit
@@ -827,7 +831,8 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
     stretch(152), stretch(146), ...(directoryReadings?[stretch(132),88,100]:[]), ...(showCaptureTime ? [stretch(146)] : []),
     ...(showCabinAlgorithms ? [60, stretch(118,2)] : []), 52, 88, ...(showCabinProcess ? [72] : []),
     ...(showDetectorColumns ? [detectorExpanded ? 145 : 102, stretch(detectorExpanded ? 174 : 146)] : []),
-    ...(showClassicProcess ? [84] : []), ...shownFilters.map(() => stretch(138)), ...shownSignalMetrics.map(() => stretch(124)),
+    ...(showClassicProcess ? [84] : []), ...shownFilters.flatMap(({filter}) => isDrawdownFilter(filter) ? [stretch(138), stretch(96)] : [stretch(138)]),
+    ...shownSignalMetrics.flatMap(metric => isDrawdownPreview(metric) ? [stretch(124), stretch(96)] : [stretch(124)]),
     ...(showScreening ? [stretch(144, 4), 90, stretch(138), 68] : []),
     ...(showParallel ? [stretch(144, 4), 90, stretch(138), 68] : []),
     ...shownPlans.flatMap(p => [stretch(320, 2), 96, 88, 88, 96, 88, 88, ...(postExitOpen.has(p.id) ? [132, ...Array(9).fill(116)] : [118])]),
@@ -1020,8 +1025,18 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
           {showDetectorColumns && <><td className={`${cell} ${wrapCell} border-l border-t border-border/40`} data-testid="quality-detector-value-cell">{!detectorExpanded ? (() => { const count = members.filter(member => member.detectorId).length; return count ? <button type="button" className="text-primary hover:underline" title="展开每个探测算法在发现此信号时保存的读数" onClick={() => expandDetectors(true)}>{count} 项 · 展开</button> : <span className="text-muted-foreground/60" title="信号库的信号没有探测读数">—</span>; })() : (() => { const reading = qualityDetectorReading(row); return <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5" title={reading.detail}><span className="font-mono tabular-nums">{reading.text}</span>{row.detectorId && <span className="text-[9px] text-muted-foreground/65">{reading.label}</span>}</span>; })()}</td>
           <td className={`${cell} ${wrapCell} border-t border-border/40 text-muted-foreground`} data-testid="quality-detector-cell" data-detector-id={row.detectorId ?? ''} title={row.detectorId ? `${detectorMap.get(row.detectorId)?.metric} · ${detectorMap.get(row.detectorId)?.snapshot.interval ?? '5m'} · 公式版本 ${row.detectorId}` : '导入的信号不归属探测算法'}>{!detectorExpanded && row.groups.length > 0 ? <button type="button" className="text-primary hover:underline" onClick={() => expandDetectors(true)} title="展开此列表的探测算法与各次买入记录">{row.groups.length} 个算法 · 展开</button> : row.detectorId ? <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5"><span>{detectorMap.get(row.detectorId)?.label ?? '探测算法'}</span><span className="font-mono text-muted-foreground/70">{detectorMap.has(row.detectorId)?captureLimitText(detectorMap.get(row.detectorId)!.snapshot.direction??'>',detectorMap.get(row.detectorId)!.snapshot.threshold,detectorMap.get(row.detectorId)!.snapshot.range):'—'}</span></span> : '—'}</td></>}
           {showClassicProcess && <td className={`${cell} border-t border-border/40`}>{isLibrary(row) ? <span className="text-muted-foreground/60">—</span> : <FishProcessButton signal={row.source} captures={mergeCabinSignals ? [...new Map(members.map(member => [member.source.id, member.source])).values()] : undefined}/>}</td>}
-          {shownFilters.map(column => { const reading = qualityFilterCell(row, column.filter, filterReadingMap); return <td key={column.id} className={`${cell} ${wrapCell} border-l border-t border-border/40`} data-testid="quality-filter-cell" data-filter-state={reading.state} title={reading.detail}><span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5"><span className="font-mono tabular-nums">{reading.value}</span><span className={`text-[9px] ${reading.state === 'pass' ? 'text-emerald-600 dark:text-emerald-400' : reading.state === 'fail' ? 'text-destructive' : 'text-muted-foreground'}`}>{reading.status}</span></span></td>; })}
-          {shownSignalMetrics.map(metric=>{const reading=signalReadingCell(row,metric,signalReadingMap,signalViewId(row));return <td key={metric.id} className={`${cell} ${wrapCell} border-l border-t border-border/40 font-mono tabular-nums`} data-testid="quality-signal-reading-cell" data-signal-reading-value={reading.value ?? undefined} title={reading.detail}>{reading.value===null?<span className="font-sans text-muted-foreground">{reading.status}</span>:reading.text}</td>;})}
+          {shownFilters.map(column => {
+            const reading = qualityFilterCell(row, column.filter, filterReadingMap);
+            const split = isDrawdownFilter(column.filter);
+            const status = <span className={reading.state === 'pass' ? 'text-emerald-600 dark:text-emerald-400' : reading.state === 'fail' ? 'text-destructive' : 'text-muted-foreground'}>{reading.status}</span>;
+            return <Fragment key={column.id}>
+              <td className={`${cell} ${wrapCell} border-l border-t border-border/40`} data-testid="quality-filter-cell" data-filter-state={reading.state} title={reading.detail}>
+                <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5"><span className="font-mono tabular-nums">{reading.value}</span>{!split && <span className="text-[9px]">{status}</span>}</span>
+              </td>
+              {split && <td className={`${cell} border-l border-t border-border/40`} data-testid="quality-drawdown-status" title={reading.detail}>{status}</td>}
+            </Fragment>;
+          })}
+          {shownSignalMetrics.map(metric=>{const reading=signalReadingCell(row,metric,signalReadingMap,signalViewId(row));return <Fragment key={metric.id}><td className={`${cell} ${wrapCell} border-l border-t border-border/40 font-mono tabular-nums`} data-testid="quality-signal-reading-cell" data-signal-reading-value={reading.value ?? undefined} title={reading.detail}>{reading.value===null?<span className="font-sans text-muted-foreground">{reading.status}</span>:reading.text}</td>{isDrawdownPreview(metric) && <td className={`${cell} border-l border-t border-border/40 text-muted-foreground`}>未设门槛</td>}</Fragment>;})}
           {showScreening&&<ScreeningCells cell={cell} results={screeningFor(row)} planName={screenName}/>}
           {showParallel && (() => {
             const results = [...new Set(members.map(parallelFor))].filter(result => result !== undefined);
@@ -1335,8 +1350,8 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             <th className="relative px-2 py-1 font-normal text-muted-foreground/60" aria-label="探测变量数量">{detectorChoices.length ? `${detectorChoices.length} 个默认算法` : ''}</th>
             </>}
             {showClassicProcess && <th aria-hidden="true"/>}
-            {qualityVariables(shownFilters.map(c => c.filter)).map(v => <th key={v.id} colSpan={v.levels.length} className="relative border-l border-border/40 px-2 py-1.5 font-normal" aria-label={`过滤变量 ${v.label}`}>{v.label}{v.levels.length > 1 && <span className="ml-2 text-muted-foreground/50">{v.levels.length} 个水平</span>}</th>)}
-            {!!shownSignalMetrics.length && <th colSpan={shownSignalMetrics.length} className="border-l border-border/40 px-2 py-1 font-normal">原信号时点</th>}
+            {qualityVariables(shownFilters.map(c => c.filter)).map(v => <th key={v.id} colSpan={v.levels.reduce((total, filter) => total + filterTracks(filter), 0)} className="relative border-l border-border/40 px-2 py-1.5 font-normal" aria-label={`过滤变量 ${v.label}`}>{v.label}{v.levels.length > 1 && <span className="ml-2 text-muted-foreground/50">{v.levels.length} 个水平</span>}</th>)}
+            {!!shownSignalMetrics.length && <th colSpan={signalSpan} className="border-l border-border/40 px-2 py-1 font-normal">原信号时点</th>}
             {showScreening&&<th colSpan={4} className="relative border-l border-border/40 px-2 py-1 font-normal text-muted-foreground/60">冻结方案与首次满足结果</th>}
             {showParallel && <th colSpan={4} className="relative border-l border-border/40 px-2 py-1 font-normal text-muted-foreground/60">冻结方案与信号触发结果</th>}
             {shownPlans.length>0 && sellVariables.map(v => <th key={v.id} colSpan={qualitySellSpan(v.levels,postExitOpen)} className="relative border-l border-border/40 px-2 py-1.5 font-normal" aria-label={`卖出变量 ${v.label}`}>{v.label}{v.levels.length > 1 && <span className="ml-2 text-muted-foreground/50">{v.levels.length} 个水平</span>}</th>)}
@@ -1357,12 +1372,27 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
           {showDetectorColumns && <><th className={`${cell} border-l border-border/40 font-medium`} data-testid="quality-detector-value-column" aria-sort={ariaSort('detector-value')} title="当次探测快照的读数，按捕获时的倍率显示；展开后每个探测算法各占一行"><span className="inline-flex items-center gap-2">{sortButton('detector-value', '探测值')}<button type="button" aria-label="展开探测值明细" aria-expanded={detectorExpanded} onClick={() => expandDetectors(!detectorExpanded)} className="inline-flex items-center gap-1 text-primary hover:underline">{detectorExpanded ? '收起' : '展开'}<ChevronDown className={`h-3 w-3 ${detectorExpanded ? 'rotate-180' : ''}`}/></button></span></th>
           <th className={`${cell} relative font-medium`} data-testid="quality-detector-column" aria-sort={ariaSort('detector')}><span className="inline-flex items-center gap-2">{sortButton('detector', '探测算法')}{!lockedBatch && groups.length > 0 && <DetectorPicker choices={detectorChoices} signalsOf={signalsOf} selected={activeAlgorithms} onChange={setAlgorithms}><button type="button" aria-label="在表头选择探测算法" title={chosenChoices.length ? chosenChoices.map(choiceText).join('、') : '选择一个或多个探测算法'} className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 ${activeAlgorithms.length ? 'bg-primary/15 text-primary' : 'text-muted-foreground/70 hover:bg-muted hover:text-foreground'}`}><Filter className="h-3 w-3"/>{chosenChoices.length > 0 && <span className="font-mono text-[10px] tabular-nums">{chosenChoices.length}</span>}</button></DetectorPicker>}<button type="button" className="inline-flex items-center gap-1 text-primary hover:underline" aria-label="展开探测算法明细" aria-expanded={detectorExpanded} onClick={() => expandDetectors(!detectorExpanded)}>{detectorExpanded ? '收起' : '展开'}<ChevronDown className={`h-3 w-3 ${detectorExpanded ? 'rotate-180' : ''}`}/></button></span></th></>}
           {showClassicProcess && <th className={`${cell} font-medium`} aria-sort={ariaSort('process')} title="按捕捞时刻排序；信号库在最后">{sortButton('process', '捕捞过程')}</th>}
-          {shownFilters.map(column => <th key={column.id} className={`${cell} ${wrapCell} relative border-l border-border/40 font-medium`} data-testid="quality-filter-column" aria-sort={ariaSort(`filter:${column.id}`)} title="买入时刻之前最后一根已收盘 K 线的读数；独立过滤，不限制卖出监测。"><button type="button" className="block text-left hover:text-foreground" aria-label={`按过滤${column.filter.label} ${column.filter.direction} ${column.filter.threshold}读数排序`} onClick={() => changeSort(`filter:${column.id}`)}>过滤 · {column.filter.label}{arrow(`filter:${column.id}`)}</button><span className="mt-0.5 block font-mono text-primary">{column.filter.direction} {column.filter.threshold}{column.filter.signalGuardAtr !== undefined && `% · 原信号时点 · 冗余 ${column.filter.signalGuardAtr} ATR`}{column.filter.staticDblDistance && `% · 冗余 ${column.filter.staticDblDistance.atr} ATR · ${column.filter.staticDblDistance.version === LEGACY_STATIC_DBL_DISTANCE_VERSION ? 'v1' : 'v2'}`}</span></th>)}
-          {shownSignalMetrics.map(metric=><th key={metric.id} className={`${cell} ${wrapCell} border-l border-border/40 font-medium`} data-testid="quality-signal-reading-column" aria-sort={ariaSort(`signal-value:${metric.id}`)} title={`原信号时点读数 · 算法周期 ${metric.snapshot.interval}`}>{sortButton(`signal-value:${metric.id}`,metric.label)}
+          {shownFilters.map(({id, filter}) => {
+            const split = isDrawdownFilter(filter);
+            const distance = filter.staticDblDistance;
+            const sortKey = `filter:${id}` as const;
+            return <Fragment key={id}>
+              <th className={`${cell} ${wrapCell} relative border-l border-border/40 font-medium`} data-testid="quality-filter-column" aria-sort={ariaSort(sortKey)}>
+                <button type="button" className="block text-left hover:text-foreground" aria-label={`按${split ? '安全回撤' : '过滤'+filter.label} ${filter.direction} ${filter.threshold}读数排序`} onClick={() => changeSort(sortKey)}>
+                  {split ? '安全回撤（%）' : '过滤 · '+filter.label}{arrow(sortKey)}
+                </button>
+                <span className="mt-0.5 block font-mono text-primary">{split
+                  ? `冗余 ${distance?.atr ?? filter.signalGuardAtr} ATR · ${distance ? (distance.version === LEGACY_STATIC_DBL_DISTANCE_VERSION ? 'v1' : 'v2') : '原信号时点'}`
+                  : `${filter.direction} ${filter.threshold}`}</span>
+              </th>
+              {split && <th className={`${cell} border-l border-border/40 font-medium`}>是否满足<span className="mt-0.5 block font-mono text-primary">{filter.direction} {filter.threshold}%</span></th>}
+            </Fragment>;
+          })}
+          {shownSignalMetrics.map(metric=><Fragment key={metric.id}><th className={`${cell} ${wrapCell} border-l border-border/40 font-medium`} data-testid="quality-signal-reading-column" aria-sort={ariaSort(`signal-value:${metric.id}`)} title={`原信号时点读数 · 算法周期 ${metric.snapshot.interval}`}>{sortButton(`signal-value:${metric.id}`,isDrawdownPreview(metric) ? '安全回撤（%）' : metric.label)}
             {!archiveView && !templateTable && metric.metric.startsWith(SIGNAL_GUARD_PCT) && <div className="mt-1">
               <span>冗余 0 ATR</span> <button type="button" className="text-primary" disabled={!ready || staticRunning || !!lockedBatch}
                 onClick={()=>{setInitialGuard(metric);setFilterOpen(true);}}>设置百分比门槛</button>
-            </div>}</th>)}
+            </div>}</th>{isDrawdownPreview(metric) && <th className={`${cell} border-l border-border/40 font-medium`}>是否满足</th>}</Fragment>)}
           {showScreening&&<ScreeningHeaders cell={cell} sort={sort} ascending={ascending} onSort={changeSort}/>}
           {showParallel && parallelColumns.map(([key, label, title]) =>
             <th key={key} className={`${cell} border-l border-border/40 font-medium`} aria-sort={ariaSort(key)} title={title}>
