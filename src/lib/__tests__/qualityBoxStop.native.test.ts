@@ -1,4 +1,7 @@
 import { expect, it } from 'vitest';
+import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
+import { evaluateQualitySample, type QualitySample } from '@/lib/fish/quality';
+import { freezeQualityPlan, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { computeDbl5 } from '@/lib/dbl5m';
 import { computeSbs5m } from '@/lib/sbs5m';
 import { sample as dblSample, T } from './fixtures/dblBars';
@@ -21,4 +24,20 @@ for (const algorithm of ['dbl5','sbs5m'] as const) it(`uses the unchanged native
  const reader=createBoxStopReader({vetoes:[veto],row,entry,since:entry,load,signal:new AbortController().signal});
  const hit=await reader.read({openTime:entry,open:200,high:200,low:1,close:200,volume:10,takerBuyVolume:5});
  expect(hit?.fillPrice).toBe(native);expect(reader.states().v.line).toBe(native);
+});
+
+it('executes a buffered defence line as the primary holding seller',async()=>{
+ const entry=T+15*300000, bars=new Map(dblSample().map(b=>[b.openTime,b]));
+ const at=(t:number):ResearchBar=>({...bars.get(t)??{openTime:t,open:100,high:100,low:100,close:100,volume:10,takerBuyVolume:5,quoteVolume:1000,takerBuyQuoteVolume:500},DBL5_tick_size:1} as ResearchBar);
+ const load:FishReconstructionLoader=async(_r,a,b,p)=>Array.from({length:(b-a)/p.step},(_,i)=>p.step===60000
+  ? {...at(a+i*p.step),open:200,high:200,low:1,close:200} : at(a+i*p.step));
+ const source={id:'row',symbol:'TESTUSDT',timeMs:entry,timeLabel:'',fallbackZone:''};
+ const sample:QualitySample={id:'row',source,enteredAt:entry,basis:'signal',groups:[],importedAt:entry};
+ const plan=(atr:number)=>freezeQualityPlan(makeQualitySellPlan('sell-dbl5-guard:line','<',atr,[]));
+ const evaluate=(atr:number)=>evaluateQualitySample(sample,plan(atr),0,entry+60000,load,new AbortController().signal);
+ const unbuffered=await evaluate(0), buffered=await evaluate(.25);
+ expect(unbuffered).toMatchObject({status:'closed',exitSnapshot:{cause:{label:'DBL-5 防守线',boxStopEvidence:{confirmation:'touch'}}}});
+ expect(buffered).toMatchObject({status:'closed'});
+ expect(buffered.endPrice).toBeLessThan(unbuffered.endPrice!);
+ expect(planVersionChanges(plan(.25))).toEqual([]);
 });

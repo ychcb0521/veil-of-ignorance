@@ -42,6 +42,7 @@ import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVet
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
 
+import { DBL5_SELL_VERSION, isDbl5Sell, dbl5SellAsBox } from './qualityDbl5Sell';
 import { BOX_STOP_INVALID_DATA, qualityBoxMarketRepair, type BoxMarketRepairVersion } from './qualityBoxMarketRepair';
 
 import { QUALITY_NOTIONAL, qualityPositionIdentity, qualityPositionSize, type QualityPositionManagement } from './qualityPositionManagement';
@@ -49,7 +50,7 @@ import { QUALITY_NOTIONAL, qualityPositionIdentity, qualityPositionSize, type Qu
 export { QUALITY_NOTIONAL };
 export const QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
-export interface QualityExitRule { metric: string; direction: '<' | '>' | '>='; threshold: number; version?: typeof import('./qualityStaticDrawdownSell').STATIC_DRAWDOWN_SELL_VERSION | typeof import('./qualityStaticDrawdownSell').TIMED_STATIC_DRAWDOWN_VERSION; bandThresholds?: number[]; mirrorScopeVersion?: typeof import('./qualityStaticDrawdownSell').PRE_MIRROR_STATIC_SELL_VERSION }
+export interface QualityExitRule { metric: string; direction: '<' | '>' | '>='; threshold: number; version?: typeof import('./qualityStaticDrawdownSell').STATIC_DRAWDOWN_SELL_VERSION | typeof import('./qualityStaticDrawdownSell').TIMED_STATIC_DRAWDOWN_VERSION | typeof DBL5_SELL_VERSION; boxSell?: import('./qualityBoxStop').BoxStopRule; bandThresholds?: number[]; mirrorScopeVersion?: typeof import('./qualityStaticDrawdownSell').PRE_MIRROR_STATIC_SELL_VERSION }
 export interface QualityGroup {
   impulse1115Classification?:HoldingImpulse1115Rule;
   preEntryThreeStage?: import('./preEntryThreeStage').PreEntryThreeStage;
@@ -89,7 +90,7 @@ export interface QualityGroup {
 export interface QualitySellCombo { switchPct: number; beforeLabel: string; after: { label: string; metric: string; snapshot: FishSnapshot; rule: QualityExitRule } }
 /** 组合方案的身份（参与结果编号、监测库与存档的区分）；普通方案为 null，旧编号不变。 */
 export const qualityComboIdentity = (g: Pick<QualityGroup, 'combo'>) => g.combo ? ['combo-v1', g.combo.switchPct, g.combo.after.metric, g.combo.after.snapshot.featureId,
-  g.combo.after.snapshot.definitionKey, g.combo.after.snapshot.interval, g.combo.after.snapshot.scale, g.combo.after.rule.direction, g.combo.after.rule.threshold, ...(g.combo.after.rule.version ? [g.combo.after.rule.version] : []), ...(g.combo.after.rule.bandThresholds ? [g.combo.after.rule.bandThresholds] : []), ...(g.combo.after.rule.mirrorScopeVersion ? [g.combo.after.rule.mirrorScopeVersion] : [])] : null;
+  g.combo.after.snapshot.definitionKey, g.combo.after.snapshot.interval, g.combo.after.snapshot.scale, g.combo.after.rule.direction, g.combo.after.rule.threshold, ...(g.combo.after.rule.version ? [g.combo.after.rule.version] : []), ...(g.combo.after.rule.bandThresholds ? [g.combo.after.rule.bandThresholds] : []), ...(g.combo.after.rule.mirrorScopeVersion ? [g.combo.after.rule.mirrorScopeVersion] : []), ...(g.combo.after.rule.boxSell ? [g.combo.after.rule.boxSell] : [])] : null;
 /** 卖出条件的显示文字：普通方案「< 0.5」；组合方案「CDA < 0.5 → 涨 5.1% 后 状态 S < 0.5」。 */
 export function qualityRuleText(g: QualityGroup): string {
   const base = g.combo && g.rule ? `${qualityExitAlgorithmLabel(g.rule,g.combo.beforeLabel)} ${qualityExitThresholdText(g.rule)} → 涨 ${g.combo.switchPct}% 后 ${qualityExitAlgorithmLabel(g.combo.after.rule,g.combo.after.label)} ${qualityExitThresholdText(g.combo.after.rule)}` : g.rule ? qualityExitThresholdText(g.rule) : hasQualityExit(g) ? g.mirrorTakeProfit?.enabled ? '镜像止盈' : activeHoldingVetoes(g.holdingVetoes).length ? '仅一票否决' : '加仓与持仓估值' : '设置门槛';
@@ -797,7 +798,9 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       }
       const staticSell = isStaticDrawdownSell(rule) ? rule : undefined;
       const afterStaticSell = isStaticDrawdownSell(combo?.after.rule) ? combo.after.rule : undefined;
-      const indicatorRule = isStaticDrawdownSell(rule) ? undefined : rule;
+      const boxSell = isDbl5Sell(rule) ? dbl5SellAsBox(rule, 'ordinary-box-sell-before') : undefined;
+      const afterBoxSell = isDbl5Sell(combo?.after.rule) ? dbl5SellAsBox(combo.after.rule, 'ordinary-box-sell-after') : undefined;
+      const indicatorRule = staticSell || boxSell ? undefined : rule;
       const { plan, scale } = indicatorRule ? qualityMetricPlan(group.snapshot, indicatorRule.metric) : { plan: pp, scale: 1 };
       const vetoes=activeHoldingVetoes(group.holdingVetoes);
       vetoes.forEach(validateHoldingVeto);
@@ -811,8 +814,8 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
           holding=trackVetoPath&&prior?.vetoPath?{...prior.vetoPath}:{entry:entryPrice,peak:entryPrice*(1+(prior?.peakPct??0)/100),minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};
         }
         const conditions:QualityIntrabarCondition[]=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),...(v.activation?{activation:v.activation}:{}),...(v.mirrorStage?{mirrorStage:v.mirrorStage}:{}),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:holdingVetoName(v),kind:v.kind,direction:v.direction,threshold:v.threshold}}));
-        if (combo && !afterStaticSell) conditions.push({ ...qualityMetricPlan(combo.after.snapshot, combo.after.rule.metric), rule: { direction: combo.after.rule.direction, threshold: combo.after.rule.threshold }, stage: 'after' as const });
-        const replay = await findQualityIntrabarExit({ row,plan,scale,rule:indicatorRule,staticSell,afterStaticSell,entry,holdingStartedAt:sample.binanceEntry?sample.source.timeMs:sample.enteredAt,actualMirrorFillOnly:!!sample.binanceEntry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,boxStopStates,mirror:group.mirrorTakeProfit,mirrorFill,ordinaryUntil,conditionsUntil,confirmOrdinary,continueAfterMirrorMarker,sellerPeak:prior?.entryPrice?prior.entryPrice*(1+(prior.peakPct??0)/100):undefined,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
+        if (combo && !afterStaticSell && !afterBoxSell) conditions.push({ ...qualityMetricPlan(combo.after.snapshot, combo.after.rule.metric), rule: { direction: combo.after.rule.direction, threshold: combo.after.rule.threshold }, stage: 'after' as const });
+        const replay = await findQualityIntrabarExit({ row,plan,scale,rule:indicatorRule,staticSell,afterStaticSell,boxSell,afterBoxSell,entry,holdingStartedAt:sample.binanceEntry?sample.source.timeMs:sample.enteredAt,actualMirrorFillOnly:!!sample.binanceEntry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,boxStopStates,mirror:group.mirrorTakeProfit,mirrorFill,ordinaryUntil,conditionsUntil,confirmOrdinary,continueAfterMirrorMarker,sellerPeak:prior?.entryPrice?prior.entryPrice*(1+(prior.peakPct??0)/100):undefined,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
           ...(combo ? { ruleStage: 'before' as const, switchPct: combo.switchPct } : {}) });
         trigger = replay.trigger; boxStopStates = replay.boxStopStates; boxStopStateAt = replay.boxStopStateAt; replayedPrices = replay.prices; mirrorFill = replay.mirrorFill;
       } else if (indicatorRule) {

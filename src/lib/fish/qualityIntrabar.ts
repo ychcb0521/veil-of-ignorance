@@ -72,6 +72,7 @@ export async function findQualityIntrabarExit(o: {
   /** Only new entry rounds supply this gate; existing holding/entry rules are unchanged. */
   entryGate?: (at: number, minute?: ResearchBar) => Promise<{ blocked?: string; pending?: string }>;
   row: TradeSignal; plan: FishProgram; scale: number; rule?: { direction:QualityOperator;threshold:number };
+  boxSell?: QualityHoldingVeto; afterBoxSell?: QualityHoldingVeto;
   staticSell?: StaticDrawdownSellRule; afterStaticSell?: StaticDrawdownSellRule;
   entry: number; since: number; end: number; resumed: boolean; load: FishReconstructionLoader; signal: AbortSignal;
   holdingStartedAt?:number;
@@ -161,8 +162,17 @@ export async function findQualityIntrabarExit(o: {
   };
   const markOnly = (rule?: { mirrorStage?: MirrorHardStopStage }) =>
     !!o.continueAfterMirrorMarker && rule?.mirrorStage?.stage === 'before';
-  const boxReader=createBoxStopReader({vetoes:enabled,row:o.row,entry:o.entry,since:o.since,load:o.load,signal:o.signal,previous:o.boxStopStates,activationAt:()=>postMirrorProtectionAt(mirrorFill), ignoreExit: o.continueAfterMirrorMarker ? markOnly : undefined});
-  const boxState=()=>enabled.some(v=>v.kind==='box-stop')?{boxStopStates:boxReader.states(),boxStopStateAt:boxReader.statesAt}:{};
+  const ordinaryBoxSellers = [o.boxSell, o.afterBoxSell].filter(v => v !== undefined);
+  const boxSellerStarts = new Map<string,number>();
+  const activeBoxSellerFrom = (id: string, at: number) => {
+    if (!ordinaryBoxSellers.some(v => v.id === id)) return undefined;
+    if ((o.ordinaryUntil != null && at > o.ordinaryUntil) || (switched() ? o.afterBoxSell?.id : o.boxSell?.id) !== id) return null;
+    const start = boxSellerStarts.get(id) ?? at;
+    boxSellerStarts.set(id,start);
+    return start;
+  };
+  const boxReader=createBoxStopReader({vetoes:[...enabled,...ordinaryBoxSellers],activeFrom:activeBoxSellerFrom,row:o.row,entry:o.entry,since:o.since,load:o.load,signal:o.signal,previous:o.boxStopStates,activationAt:()=>postMirrorProtectionAt(mirrorFill), ignoreExit: o.continueAfterMirrorMarker ? markOnly : undefined});
+  const boxState=()=>ordinaryBoxSellers.length || enabled.some(v=>v.kind==='box-stop')?{boxStopStates:boxReader.states(),boxStopStateAt:boxReader.statesAt}:{};
   const risk=enabled.filter(v=>v.kind==='static-drawdown'||v.kind==='dynamic-drawdown').sort((a,b)=>a.id.localeCompare(b.id));
   const activeRisk=(at:number)=>risk.filter(v=>mirrorHardStopActive(v,mirrorFill,at) && !markOnly(v));
   const phaseCause=(v:QualityHoldingVeto)=>({...{id:v.id,label:v.mirrorStage?holdingVetoName(v):v.label,kind:v.kind,direction:v.direction,threshold:v.threshold},...(v.limitedStaticVersion?{limitedStaticVersion:v.limitedStaticVersion}:{}),...(v.mirrorStage?{mirrorStage:v.mirrorStage,...(postMirrorProtectionAt(mirrorFill)!=null?{mirrorStageBoundary:postMirrorProtectionAt(mirrorFill)}:{})}:{})});
@@ -282,6 +292,11 @@ export async function findQualityIntrabarExit(o: {
       const minute=minutes[i];
       if(minute.openTime>=o.since){const deadline=checkDeadline(minute.openTime);if(deadline){prices.push(minute);return {trigger:deadline,prices,mirrorFill,...boxState()};}}
       let boxTrigger=minute.openTime>=o.since?await boxReader.read(minute):undefined;
+      const seller = boxTrigger?.cause && ordinaryBoxSellers.find(v => v.id === boxTrigger?.cause?.id);
+      if (boxTrigger && seller) {
+        boxTrigger = {...boxTrigger, ...(o.switchPct != null ? {stage:switched() ? 'after' as const : 'before' as const} : {}),
+          cause:{...boxTrigger.cause!,label:seller.label}};
+      }
       if(o.mirror?.enabled && minute.openTime>=o.since && ![holding?.entry,minute.open,minute.high,minute.low,minute.close].every(n=>Number.isFinite(n)&&n!>0)) throw new Error('镜像止盈缺少有效的分钟价格，不能越过缺失行情模拟成交');
       if(holding&&minute.openTime>=o.since) {
         // The open is already observable. A gap through a price veto must not

@@ -14,6 +14,7 @@ import type { QualityGroup } from './quality';
 import { qualityPositionSize } from './qualityPositionManagement';
 import { hasQualityExit, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, qualityDrawdownPct, type FishQualityStudy } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
+import {isDbl5Sell} from './qualityDbl5Sell';
 import { isStaticDrawdownSell, qualityStaticDrawdownReason, STATIC_DRAWDOWN_SELL_LABEL } from './qualityStaticDrawdownSell';
 import { syncQualitySellDefinitions } from './qualityComparison';
 import { isMonitorCampaignId, monitorCampaignRecordId, qualityMonitorCampaignId, qualityMonitorCampaignRun } from './qualityMonitorCampaign';
@@ -55,8 +56,8 @@ export function buildQualityCampaignData(
   const detectorNote = detectorSummary.detectors.map(d => d.label).join('；') || (savedDetectors ? '未记录' : '无');
   const effective=effectiveQualitySellPlan(plan,r);
   const after = effective.combo?.after;
-  const active = r.exitSnapshot?.stage === 'after' && after && (isStaticDrawdownSell(after.rule) || isStaticDrawdownSell(effective.rule)) ? after : effective;
-  const definition = qualityDefinition(active.snapshot), staticSell = isStaticDrawdownSell(active.rule);
+  const active = r.exitSnapshot?.stage === 'after' && after && (isStaticDrawdownSell(after.rule) || isStaticDrawdownSell(effective.rule) || isDbl5Sell(after.rule) || isDbl5Sell(effective.rule)) ? after : effective;
+  const definition = qualityDefinition(active.snapshot), staticSell = isStaticDrawdownSell(active.rule), dbl5Sell = isDbl5Sell(active.rule);
   const opening: CampaignEvent = {
     id: `${id}-entry`, timestamp: iso(entry), event_type: 'main_opened', leg_role: 'main_open', journal_id: legId,
     trade_record_id: r.mirrorFill ? `${id}-position` : closed ? recordId : null, pending_order_id: null, price, size_usdt: notional,
@@ -88,10 +89,10 @@ export function buildQualityCampaignData(
       holdingDrawdowns: { staticDrawdown: qualityDrawdownPct(r, 'static'), drawdown: qualityDrawdownPct(r, 'dynamic') },
       holdingMetrics:{status:r.status,peakPct:qualityPeakPct(r),returnPct:Number.isFinite(r.returnPct)?r.returnPct!:null,entryPrice:r.entryPrice,initialNotional:r.initialNotional??notional,mirrorRealizedPnl:r.mirrorRealizedPnl,remainingPnl:r.remainingPnl},
       sellEvidence: { exitReason:closed?qualityStaticDrawdownReason(r):undefined,activeSellStage:r.activeSellStage,sellStageSwitches:r.sellStageSwitches,activeVetoStage:r.activeVetoStage,vetoStageSwitches:r.vetoStageSwitches,
-        ...(plan.vetoStages?.length?{initialStaticStopPct:activeHoldingVetoes(plan.holdingVetoes).filter(v=>v.kind==='static-drawdown').reduce<number|null>((n,v)=>n==null?v.threshold:Math.min(n,v.threshold),null)}:{}), formula: staticSell ? '静态最大回撤 =（首仓买入价 − 持仓最低价）÷ 首仓买入价 × 100%' : definition.formula,
+        ...(plan.vetoStages?.length?{initialStaticStopPct:activeHoldingVetoes(plan.holdingVetoes).filter(v=>v.kind==='static-drawdown').reduce<number|null>((n,v)=>n==null?v.threshold:Math.min(n,v.threshold),null)}:{}), formula: dbl5Sell ? '卖出线＝已确认 DBL-5 价线 − 冗余倍数 × ATR' : staticSell ? '静态最大回撤 =（首仓买入价 − 持仓最低价）÷ 首仓买入价 × 100%' : definition.formula,
         definitionKey: active.snapshot.definitionKey!, featureId: active.snapshot.featureId!,
-        metric: staticSell ? STATIC_DRAWDOWN_SELL_LABEL : active.rule?.metric ?? active.metric,
-        version: staticSell ? active.rule?.mirrorScopeVersion ?? active.rule?.version ?? '' : qualityFormulaVersion({ ...effective, snapshot: active.snapshot, rule: active.rule }), interval: active.snapshot.interval ?? '5m',
+        metric: dbl5Sell ? '冗余 ATR' : staticSell ? STATIC_DRAWDOWN_SELL_LABEL : active.rule?.metric ?? active.metric,
+        version: dbl5Sell ? active.rule!.version! : staticSell ? active.rule?.mirrorScopeVersion ?? active.rule?.version ?? '' : qualityFormulaVersion({ ...effective, snapshot: active.snapshot, rule: active.rule }), interval: active.snapshot.interval ?? '5m',
         halfLifeHours: definition.halfLifeHours!, avgHours: definition.avgHours!, source: effective.definitionSource === 'account' ? 'account' : 'historical',
         direction: active.rule?.direction, threshold: active.rule?.threshold, reading: r.exitReading ?? r.pendingExit?.reading,
         confirmedAt: closed ? r.endTime : r.pendingExit?.at,

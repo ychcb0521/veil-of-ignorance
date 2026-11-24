@@ -162,7 +162,7 @@ export function boxStopIdentity(r: BoxStopRule) {
 export const boxStopLabel = (r: BoxStopRule):string => r.channels?boxStopRuleEntries(r).map(c=>`${BOX_STOP_CHANNEL_LABELS[c.channel!]}${c.enabled?'：'+boxStopLabel(c.rule):'（未启用）'}`).join('；任一路触发退出；'):isBoxSecondBreakExitOnly(r)?`${boxStopAlgorithmLabel(r)} 持仓期间二次断裂终止；首次只计数，不因本条件停加仓；第二次断裂下一分钟开盘全仓卖出`:isBoxSecondBreak(r)?`${boxStopAlgorithmLabel(r)} 首次支撑断裂停止加仓，第二次断裂下一分钟开盘全仓卖出`:isBoxBreak(r)?`${boxStopAlgorithmLabel(r)} 支撑断裂（防守线红叉确认）；下一分钟开盘全仓卖出`:`${boxStopAlgorithmLabel(r)} ${r.reference?BOX_STOP_REFERENCE_LABELS[r.reference.kind]:r.structure.kSource==='guard' ? `防守线${r.guardRegime ? `（${BOX_STOP_GUARD_REGIMES[r.guardRegime]}）` : ''}` : r.structure.kBasis==='invalidation'?'失效线':'箱底'} − ${r.structure.buffer}${r.structure.bufferUnit==='atr'?'ATR':'%'}；${({fixed:'首次有效线固定','raise-only':'只升不降',follow:'跟随最新线'})[r.update]}；${r.confirmation==='touch'?'触碰 K 立即卖出':`${r.confirmation==='close-1m'?'1 分钟':DBL5_PROFILES[structureDbl5Timeframe(r.structure)].periodLabel}连续 ${r.closes} 根收盘 ≤ K`}`;
 
 /** Only already closed native structures can place a stop for the next minute. */
-export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>;activationAt?:()=>number|undefined;ignoreExit?:(cause:QualityTrigger["cause"])=>boolean}) {
+export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>;activationAt?:()=>number|undefined;ignoreExit?:(cause:QualityTrigger["cause"])=>boolean; activeFrom?:(id:string,at:number)=>number|null|undefined}) {
   const load = o.load.boxStopMarketLoad ?? o.load;
   let observationEntry=o.entry,observationSince=o.since;
   const rules=o.vetoes.filter(v=>v.enabled&&v.kind===BOX_STOP_KIND).flatMap(v=>{
@@ -186,12 +186,13 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
     const candidates:QualityTrigger[]=[];
     for(const r of rules){
       const after=!!r.v.activation||r.v.mirrorStage?.stage==='after',boundary=o.activationAt?.();
-      if(options?.onlyActivated&&!after)continue;
+      const activeFrom = o.activeFrom?.(r.parentId,minute.openTime);
+      if ((options?.onlyActivated&&!after) || activeFrom === null) continue;
       if(r.v.mirrorStage?.stage==='before'&&boundary!=null&&minute.openTime>=boundary)continue;
       const activationAt=after?boundary:undefined;
       if(after&&(activationAt==null||minute.openTime<activationAt))continue;
       const ruleEntry=activationAt==null?observationEntry:Math.max(observationEntry,activationAt-1);
-      const ruleSince=activationAt==null?observationSince:Math.max(observationSince,activationAt);
+      const ruleSince=Math.max(observationSince,activationAt ?? observationSince,activeFrom ?? observationSince);
       const activationEvidence={...(r.v.activation?{activation:r.v.activation,activationAt}:{}),...(r.v.mirrorStage?{mirrorStage:r.v.mirrorStage,...(boundary!=null?{mirrorStageBoundary:boundary}:{})}:{})};
       const label=(r.channel?BOX_STOP_CHANNEL_LABELS[r.channel]+'：':'')+boxStopLabel(r.rule)+(r.v.activation?'（'+POST_MIRROR_PROTECTION_LABEL+'）':'')+(r.v.mirrorStage?'（'+mirrorHardStopStageLabel(r.v.mirrorStage)+'）':'');
       let breakAt:number|undefined,brokenBar:number|undefined;

@@ -1,6 +1,7 @@
 import { definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { FishSnapshot } from './algorithm';
 import type { QualityExitRule, QualityGroup, QualityResult } from './quality';
+import {isDbl5Sell, isDbl5SellLine, validateDbl5Sell} from './qualityDbl5Sell';
 import { FREE_STATIC_DRAWDOWN_LABEL, LIMITED_PAYOFF_RISK_VERSION, PAYOFF_STOP_KIND, isLimitedStaticDrawdownVeto, payoffStopL0Pct } from './qualityVeto';
 
 export const STATIC_DRAWDOWN_SELL_VERSION = 'sell-static-drawdown-v1' as const;
@@ -43,6 +44,7 @@ export function staticDrawdownSellSnapshot(threshold: number): FishSnapshot {
 }
 
 export function validateQualityExitRule(snapshot: FishSnapshot, rule?: QualityExitRule) {
+  if (isDbl5SellLine(snapshot.featureId) || isDbl5Sell(rule)) { validateDbl5Sell(snapshot, rule); return; }
   if (isStaticDrawdownSellSnapshot(snapshot) || isStaticDrawdownSell(rule)) {
     if (!isStaticDrawdownSell(rule) || !isStaticDrawdownSellSnapshot(snapshot)
       || rule.metric !== STATIC_DRAWDOWN_SELL_METRIC || rule.direction !== '>=' || snapshot.interval !== '1m'
@@ -65,7 +67,7 @@ export function validateQualityExitRule(snapshot: FishSnapshot, rule?: QualityEx
 }
 
 export const qualityExitThresholdText = (rule: QualityExitRule) =>
-  isStaticDrawdownSell(rule) ? rule.bandThresholds ? rule.bandThresholds.map((value, i) => `${DRAWDOWN_BAND_LABELS[i]} 分钟 ≥ ${value}%`).join(' / ') : `≥ ${rule.threshold}%` : `${rule.direction} ${rule.threshold}`;
+  isDbl5Sell(rule) ? `冗余 ${rule.threshold} ATR` : isStaticDrawdownSell(rule) ? rule.bandThresholds ? rule.bandThresholds.map((value, i) => `${DRAWDOWN_BAND_LABELS[i]} 分钟 ≥ ${value}%`).join(' / ') : `≥ ${rule.threshold}%` : `${rule.direction} ${rule.threshold}`;
 
 export const qualityExitAlgorithmLabel = (rule: QualityExitRule | undefined, label: string) =>
   isStaticDrawdownSell(rule) && label === ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL ? STATIC_DRAWDOWN_SELL_LABEL : label;

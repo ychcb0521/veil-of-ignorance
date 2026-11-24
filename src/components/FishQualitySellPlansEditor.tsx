@@ -21,6 +21,7 @@ import { freezeSavedPlans,planVersionChanges } from '@/lib/fish/qualityPlanVersi
 import { PlanVersionList } from '@/components/FishQualityPlanVersions';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
+import {DBL5_SELL_LINES, dbl5SellChoice, dbl5SellChoiceLine, isDbl5SellLine} from '@/lib/fish/qualityDbl5Sell';
 import { DRAWDOWN_BAND_LABELS, PRE_MIRROR_STATIC_SELL_VERSION, isStaticDrawdownSell, TIMED_STATIC_DRAWDOWN_VERSION, validateQualityExitRule, DEFAULT_STATIC_DRAWDOWN_SELL_PCT, STATIC_DRAWDOWN_SELL_CHOICE, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
 import { qualityFilterDefinitions, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
 import { additionMetricTime, withMetricSnapshotTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
@@ -213,26 +214,28 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         };
         const threshold = d.choice === STATIC_DRAWDOWN_SELL_CHOICE && d.bands ? number(d.bands[0]) : number(d.threshold, true);
         const original = base && draftOf(base);
-        const plan = base && d.choice === original?.choice && d.choice !== STATIC_DRAWDOWN_SELL_CHOICE && d.direction !== '>='
+        const plan = base && d.choice === original?.choice && d.choice !== STATIC_DRAWDOWN_SELL_CHOICE && !dbl5SellChoiceLine(d.choice) && d.direction !== '>='
           ? { ...structuredClone(base), snapshot:{ ...structuredClone(base.snapshot), direction:d.direction, threshold:threshold ?? 0 },
               rule:threshold == null ? undefined : {metric:base.metric,direction:d.direction,threshold} }
           : makeQualitySellPlan(d.choice, d.direction, threshold, definitions, base, d.id);
         applyBands(plan, d.bands);
         if (d.preMirrorStatic && isStaticDrawdownSell(plan.rule)) plan.rule.mirrorScopeVersion = PRE_MIRROR_STATIC_SELL_VERSION;
-        const timed = d.choice === STATIC_DRAWDOWN_SELL_CHOICE ? plan : withMetricSnapshotTime(plan, d.time);
+        const timed = d.choice === STATIC_DRAWDOWN_SELL_CHOICE || dbl5SellChoiceLine(d.choice) ? plan : withMetricSnapshotTime(plan, d.time);
         plan.snapshot = timed.snapshot;
         plan.label = d.label.trim() || timed.label;
         if (d.combo) {
           const afterThreshold = number(d.afterChoice === STATIC_DRAWDOWN_SELL_CHOICE ? d.afterBands?.[0] ?? d.afterThreshold : d.afterThreshold)!;
-          const saved = d.afterChoice === original?.afterChoice && d.afterChoice !== STATIC_DRAWDOWN_SELL_CHOICE ? base?.combo?.after : undefined;
+          const boxAfter = dbl5SellChoiceLine(d.afterChoice);
+          const saved = d.afterChoice === original?.afterChoice && d.afterChoice !== STATIC_DRAWDOWN_SELL_CHOICE && !boxAfter ? base?.combo?.after : undefined;
           const afterDirection = d.afterDirection;
           const after = saved && afterDirection !== '>='
             ? { ...saved, snapshot:{ ...saved.snapshot,direction:afterDirection,threshold:afterThreshold },
                 rule:{metric:saved.metric,direction:afterDirection,threshold:afterThreshold} }
-            : makeQualitySellPlan(d.afterChoice, d.afterDirection, afterThreshold, definitions);
+            : makeQualitySellPlan(d.afterChoice, d.afterDirection, afterThreshold, definitions,
+                boxAfter && base?.combo ? {...base,...base.combo.after} : undefined);
           applyBands(after, d.afterBands);
           if (d.preMirrorStatic && isStaticDrawdownSell(after.rule)) after.rule.mirrorScopeVersion = PRE_MIRROR_STATIC_SELL_VERSION;
-          const timedAfter = d.afterChoice === STATIC_DRAWDOWN_SELL_CHOICE ? after : withMetricSnapshotTime(after,d.afterTime);
+          const timedAfter = d.afterChoice === STATIC_DRAWDOWN_SELL_CHOICE || boxAfter ? after : withMetricSnapshotTime(after,d.afterTime);
           const switchPct = number(d.switchPct)!;
           if (!(switchPct > 0)) throw new Error('分段切换涨幅须大于 0');
           plan.combo = { switchPct, beforeLabel: d.choice === STATIC_DRAWDOWN_SELL_CHOICE ? STATIC_DRAWDOWN_SELL_LABEL : choices.find(c => c.key === d.choice)?.label ?? plan.label,
@@ -271,15 +274,16 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     const staticChoice = value === STATIC_DRAWDOWN_SELL_CHOICE;
     const featureId = choices.find(c => c.key === value)?.featureId ?? value.split(':')[0];
     const features = [...new Map(choices.map(c => [c.featureId, c.group])).entries()];
-    if (purpose === 'sell') features.unshift([STATIC_DRAWDOWN_SELL_VERSION, STATIC_DRAWDOWN_SELL_LABEL]);
+    if (purpose === 'sell') features.unshift([STATIC_DRAWDOWN_SELL_VERSION, STATIC_DRAWDOWN_SELL_LABEL], ...Object.entries(DBL5_SELL_LINES));
     return <div className="grid min-w-0 gap-1.5 sm:grid-cols-2">
-      <select aria-label={label + ' 特征值'} className={field + ' w-full'} value={featureId} onChange={e => onChange(e.target.value === STATIC_DRAWDOWN_SELL_VERSION ? STATIC_DRAWDOWN_SELL_CHOICE : choices.find(c => c.featureId === e.target.value)!.key)}>
+      <select aria-label={label + ' 特征值'} className={field + ' w-full'} value={featureId} onChange={e => onChange(e.target.value === STATIC_DRAWDOWN_SELL_VERSION ? STATIC_DRAWDOWN_SELL_CHOICE : isDbl5SellLine(e.target.value) ? dbl5SellChoice(e.target.value) : choices.find(c => c.featureId === e.target.value)!.key)}>
         {!features.some(([id]) => id === featureId) && <option value={featureId}>原指标已变更</option>}
         {features.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
       </select>
       <select aria-label={label} className={field + ' w-full'} value={value} onChange={e => onChange(e.target.value)}>
         {staticChoice && <option value={STATIC_DRAWDOWN_SELL_CHOICE}>距首仓买入价的最大跌幅</option>}
-        {!staticChoice && !choices.some(c => c.key === value) && <option hidden disabled value={value}>已保存指标：{value}</option>}
+        {isDbl5SellLine(featureId) && <option value={dbl5SellChoice(featureId)}>触及卖出线</option>}
+        {!staticChoice && !isDbl5SellLine(featureId) && !choices.some(c => c.key === value) && <option hidden disabled value={value}>已保存指标：{value}</option>}
         {choices.filter(c => c.featureId === featureId).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
       </select>
     </div>;
@@ -287,21 +291,22 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   const sellerFields = (label: string, choice: string, direction: Draft['direction'], threshold: string, time: AdditionMetricTime | undefined,
     snapshot: QualityGroup['snapshot'] | undefined, set: (choice: string, direction: Draft['direction'], threshold: string, time?: AdditionMetricTime) => void, after = false, bands?: string[], setBands?: (values?: string[]) => void) => {
     const priceStop = choice === STATIC_DRAWDOWN_SELL_CHOICE;
+    const boxSell = !!dbl5SellChoiceLine(choice);
     const heading = label + (after ? ' 后段' : '');
     const fieldLabel = (name: string) => heading + (after ? '' : ' ') + name;
     return <>
       <div className={`fish-plan-condition grid gap-1.5 ${priceStop ? 'grid-cols-[minmax(0,1fr)_3rem_minmax(9rem,max-content)]' : 'grid-cols-[minmax(0,1fr)_3rem_5rem]'}`}>
-        {select(choice, fieldLabel('指标'), next => set(next, next === STATIC_DRAWDOWN_SELL_CHOICE ? '>=' : priceStop ? '<' : direction,
-          next === STATIC_DRAWDOWN_SELL_CHOICE && !priceStop ? String(DEFAULT_STATIC_DRAWDOWN_SELL_PCT) : priceStop && next !== STATIC_DRAWDOWN_SELL_CHOICE ? '' : threshold))}
-        <select aria-label={fieldLabel('方向')} className={field} disabled={priceStop} value={direction}
+        {select(choice, fieldLabel('指标'), next => set(next, next === STATIC_DRAWDOWN_SELL_CHOICE ? '>=' : priceStop || boxSell || dbl5SellChoiceLine(next) ? '<' : direction,
+          next === STATIC_DRAWDOWN_SELL_CHOICE && !priceStop ? String(DEFAULT_STATIC_DRAWDOWN_SELL_PCT) : dbl5SellChoiceLine(next) ? boxSell ? threshold : '0' : (priceStop && next !== STATIC_DRAWDOWN_SELL_CHOICE || boxSell) ? '' : threshold))}
+        <select aria-label={fieldLabel('方向')} className={field} disabled={priceStop || boxSell} value={direction}
           onChange={event => set(choice, event.target.value as Draft['direction'], threshold, time)}>
-          {priceStop ? <option value=">=">≥</option> : <><option value="<">&lt;</option><option value=">">&gt;</option></>}
+          {priceStop ? <option value=">=">≥</option> : boxSell ? <option value="<">≤</option> : <><option value="<">&lt;</option><option value=">">&gt;</option></>}
         </select>
         <div className="flex min-w-0 items-center gap-1">
-          {(!bands || !priceStop) && <><input aria-label={fieldLabel('门槛')} className={field + ' w-full'} type="number" step="any" min={priceStop ? 0 : undefined}
+          {(!bands || !priceStop) && <><input aria-label={fieldLabel(boxSell ? '冗余 ATR' : '门槛')} className={field + ' w-full'} type="number" step="any" min={priceStop || boxSell ? 0 : undefined}
             max={priceStop ? 100 : undefined} placeholder={priceStop ? '填百分比' : '未设置'} value={threshold}
             onChange={event => set(choice, direction, event.target.value, time)}/>
-          {priceStop && <span className="text-[10px]">%</span>}</>}
+          {priceStop && <span className="text-[10px]">%</span>}{boxSell && <span className="text-[10px] whitespace-nowrap">冗余 ATR</span>}</>}
         </div>
       </div>
       {priceStop && setBands && <div className="space-y-2">
@@ -316,6 +321,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         </div><p className="text-[10.5px] text-muted-foreground">从首仓计时，到达分界点立即使用下一段门槛。加仓及卖出算法切换不重置计时。</p></>}
       </div>}
       {priceStop ? <p className="text-[10.5px] text-muted-foreground">1 分钟行情模拟触价成交。止损线以首仓买入价计算，开盘跳空越线时按开盘价成交。</p>
+        : boxSell ? <p className="text-[10.5px] text-muted-foreground">卖出线为已确认价线减去所设 ATR 倍数，保护线只上移。分钟内触线按线价成交，跳空越线按开盘价成交。</p>
         : <FishMetricTimeFields label={heading} metric={choice.slice(choice.indexOf(':')+1)}
             definition={metricDefinitions.get(choice.split(':')[0])} snapshot={snapshot} time={time}
             onChange={value => set(choice, direction, threshold, value)}/>}

@@ -34,6 +34,7 @@ import { qualityPositionIdentity, validateQualityPositionManagement } from './qu
 import { shortFishHash } from './algorithm';
 import type { QualityGroup } from './quality';
 import { qualityComboIdentity, qualityVetoVersion } from './quality';
+import {isDbl5Sell} from './qualityDbl5Sell';
 import { isStaticDrawdownSell, qualityExitThresholdText, STATIC_DRAWDOWN_SELL_LABEL } from './qualityStaticDrawdownSell';
 import { activeHoldingVetoes, holdingVetoIdentity, holdingVetoLabel, validateHoldingVeto } from './qualityVeto';
 import { mirrorExecutionIdentity, mirrorIdentity } from './qualityMirror';
@@ -148,6 +149,10 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     `${plan.rule.version} · 参数 #${shortFishHash(JSON.stringify(plan.rule))}`, '按首仓买入价计算止损线，按分钟行情触价或跳空开盘价成交。');
   else if (plan.rule || plan.combo) add('sell', '卖出算法', `${s.featureShort ?? plan.label} ${plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : ''}`.trim(), formulaFingerprint(s),
     `${plan.definitionSource === 'account' ? '账号公式（保存时冻结全文）' : '历史公式'} · ${s.interval ?? '5m'}`);
+  for (const [key, configured] of [['sell-dbl5',plan.rule],['sell-after-dbl5',plan.combo?.after.rule]] as const) {
+    if (isDbl5Sell(configured)) add(key, 'DBL-5 价线卖出', qualityExitThresholdText(configured),
+      `${configured.version} · 参数 #${shortFishHash(JSON.stringify(configured))}`, '按已确认的原生价线减去所设 ATR 冗余，分钟触线退出。');
+  }
   const mirrorScoped = [plan.rule, plan.combo?.after.rule].filter(rule => isStaticDrawdownSell(rule) && rule.mirrorScopeVersion);
   if (mirrorScoped.length) add('sell-mirror-scope', '限制静态最大回撤生效范围', '镜像平衡减仓成交前',
     mirrorScoped[0]!.mirrorScopeVersion!, '以实际镜像成交为界。镜像成交后按方案配置的镜像后硬性终止和其他卖出条件执行。');

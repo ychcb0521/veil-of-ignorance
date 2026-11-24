@@ -36,7 +36,7 @@ export function QualitySellTiming({ evidence }: { evidence: SellEvidence }) {
     </aside>;
   }
   const box=evidence.triggerCause?.kind==='box-stop'&&evidence.triggerCause.boxStopEvidence;
-  if(box)return <aside className="mx-2 mb-2 space-y-1 rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px]" data-testid="quality-sell-timing"><b>箱体硬止损 · 冻结执行 K {Number(box.line.toPrecision(12))}</b><p>结构线确认 {formatUTC8(box.confirmedAt)} · {formatUTC8(evidence.confirmedAt)} {box.confirmation==='touch'?'触价分钟':'收盘确认'}</p><p>{box.confirmation==='touch'?(evidence.triggerAtOpen?'开盘已越过 K，按开盘价成交。':'分钟内触及 K，按止损价模拟成交；不等待 5 分钟收盘或防守线红叉。'):'按所选收盘条件确认，再按下一分钟开盘价模拟成交。'}盘面结构线与执行 K 不一定同价，执行 K 另含所设冗余与更新规则。</p></aside>;
+  if(box)return <aside className="mx-2 mb-2 space-y-1 rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px]" data-testid="quality-sell-timing"><b>{evidence.triggerCause?.id.startsWith('ordinary-box-sell-') ? evidence.triggerCause.label : '箱体硬止损'} · 冻结执行 K {Number(box.line.toPrecision(12))}</b><p>结构线确认 {formatUTC8(box.confirmedAt)} · {formatUTC8(evidence.confirmedAt)} {box.confirmation==='touch'?'触价分钟':'收盘确认'}</p><p>{box.confirmation==='touch'?(evidence.triggerAtOpen?'开盘已越过 K，按开盘价成交。':'分钟内触及 K，按止损价模拟成交；不等待 5 分钟收盘或防守线红叉。'):'按所选收盘条件确认，再按下一分钟开盘价模拟成交。'}盘面结构线与执行 K 不一定同价，执行 K 另含所设冗余与更新规则。</p></aside>;
   const shortDrop = evidence.triggerCause?.kind === 'drop-1m' || evidence.triggerCause?.kind === 'drop-5m';
   if (shortDrop) return <aside className="mx-2 mb-2 space-y-1 rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px]" data-testid="quality-sell-timing">
     <b className="font-medium">一票否决 · {evidence.triggerCause!.label} · 分钟收盘确认</b>

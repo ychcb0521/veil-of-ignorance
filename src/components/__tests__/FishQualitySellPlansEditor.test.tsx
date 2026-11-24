@@ -233,3 +233,22 @@ it('saves and restores independent holding-time drawdown thresholds', () => {
   render(<FishQualitySellPlansEditor plans={[saved]} ready onSave={save}/>);
   expect(screen.getByLabelText(late)).toHaveValue(2.25);
 });
+
+it('saves and restores independent DBL-5 ATR buffers for both sell stages', () => {
+  const save = vi.fn();
+  const view = render(<FishQualitySellPlansEditor plans={initial().slice(2,3)} ready onSave={save}/>);
+  const before = '卖出算法 1 冗余 ATR', after = '卖出算法 1 后段冗余 ATR';
+  fireEvent.change(screen.getByLabelText('卖出算法 1 指标 特征值'), {target:{value:'sell-dbl5-guard'}});
+  fireEvent.change(screen.getByLabelText('卖出算法 1 后段指标 特征值'), {target:{value:'sell-dbl5-impulse'}});
+  fireEvent.change(screen.getByLabelText(before), {target:{value:'0.125'}});
+  fireEvent.change(screen.getByLabelText(after), {target:{value:'1.25'}});
+  fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));
+  const [saved] = save.mock.calls[0][0];
+  expect(saved.rule.boxSell.structure.buffer).toBe(0.125);
+  expect(saved.combo.after.rule.boxSell.structure.buffer).toBe(1.25);
+  expect(saved.combo.after.rule.boxSell.reference.kind).toBe('impulse1115');
+  view.unmount();
+  render(<FishQualitySellPlansEditor plans={[saved]} ready onSave={save}/>);
+  expect(screen.getByLabelText(before)).toHaveValue(0.125);
+  expect(screen.getByLabelText(after)).toHaveValue(1.25);
+});

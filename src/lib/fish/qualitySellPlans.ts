@@ -9,9 +9,20 @@ import { freezeSavedPlans } from './qualityPlanVersions';
 import { validatePayoffStops } from './qualityVeto';
 import { STATIC_DRAWDOWN_SELL_CHOICE, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_METRIC, STATIC_DRAWDOWN_SELL_VERSION, initialLimitedDrawdownPct, staticDrawdownSellSnapshot, validateQualityExitRule, withLimitedPayoffRisk, type StaticDrawdownSellRule } from './qualityStaticDrawdownSell';
 
+import {DBL5_SELL_LINES, dbl5SellChoiceLine, isDbl5Sell, makeDbl5Sell} from './qualityDbl5Sell';
+
 export const newQualitySellPlanId = () => 'sell-' + (globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
 
 export function makeQualitySellPlan(choice: string, direction: '<' | '>' | '>=', threshold: number | undefined, definitions: readonly DeepDigFeatureDef[], original?: QualityGroup, id = newQualitySellPlanId()): QualityGroup {
+  const line = dbl5SellChoiceLine(choice);
+  if (line) {
+    const prior = original?.snapshot.featureId === line && isDbl5Sell(original.rule) ? original.rule : undefined;
+    const {rule,snapshot} = makeDbl5Sell(line, threshold ?? NaN, definitions, prior);
+    const plan: QualityGroup = {...original,id:original?.id ?? id,label:DBL5_SELL_LINES[line],
+      metric:rule.metric,rule,snapshot,execution:'intrabar-1m',vetoFill:'stop'};
+    delete plan.definitionSource;
+    return plan;
+  }
   if (choice === STATIC_DRAWDOWN_SELL_CHOICE) {
     const snapshot = staticDrawdownSellSnapshot(threshold ?? 0);
     const rule: StaticDrawdownSellRule = { metric: STATIC_DRAWDOWN_SELL_METRIC, version: STATIC_DRAWDOWN_SELL_VERSION, direction: '>=', threshold: threshold ?? NaN };
