@@ -2,15 +2,22 @@ import {act,cleanup,renderHook,waitFor} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
 import {useFishQuality} from '../useFishQuality';
 import {firstMatchFixture,SIGNAL_AT,MATCHED_AT} from '@/lib/fish/__tests__/qualityFirstMatch.fixture';
-import {qualityDisplayRows,qualityMonitorRunSamples,qualityRunSamples,qualityResultKey,type QualityRunOptions} from '@/lib/fish/quality';
+import {importQualityLibrary,qualityDisplayRows,qualityEntryIdentity,qualityMonitorRunSamples,qualityRunSamples,qualityResultKey,type QualityRunOptions} from '@/lib/fish/quality';
 import {qualityMonitorEntryAt} from '@/lib/fish/qualityAdmissionTime';
 import {qualityRowResult} from '@/lib/fish/qualityComparison';
 
 const fixture=firstMatchFixture();
+const loadParallelResults = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/fish/parallelUniverseStore', () => ({ loadParallelTableResults: loadParallelResults }));
 let screeningReady=true;
-vi.mock('@/lib/fish/qualityStore',()=>({loadQualityStudy:async()=>({study:structuredClone(fixture.study)}),saveQualityStudy:vi.fn(async()=>true)}));
+vi.mock('@/lib/fish/qualityStore',()=>({loadQualityStudy:async(owner:string)=>{
+  const study = structuredClone(fixture.study);
+  return { study: owner === 'counterfactual-owner' ? importQualityLibrary(study, [
+    { ...study.samples[0].source, id: 'same-symbol-other-signal', timeMs: SIGNAL_AT + 120000 },
+  ]) : study };
+},saveQualityStudy:vi.fn(async()=>true)}));
 vi.mock('../usePreEntryMonitor',()=>({usePreEntryMonitor:()=>({ready:screeningReady,library:fixture.library})}));
-afterEach(()=>{cleanup();localStorage.clear();screeningReady=true;});
+afterEach(()=>{cleanup();localStorage.clear();screeningReady=true;loadParallelResults.mockReset();});
 
 it('runs a selected original signal from its first match and records the corrected campaign without changing its selection or saved plan',async()=>{
  const tasks:QualityRunOptions[]=[],empty:never[]=[];
@@ -73,4 +80,49 @@ it('can start from the original signal while screening is loading, then use the 
   expect(result.current.study.monitorLibrary!.rounds.map(round => round.timeBasis)).toEqual(['signal', 'screening']);
   expect(result.current.study.monitorLibrary!.records.map(record => record.enteredAt).sort()).toEqual([SIGNAL_AT, MATCHED_AT]);
   expect(result.current.study.campaignRuns!.map(run => run.sample.enteredAt)).toEqual([SIGNAL_AT, MATCHED_AT]);
+});
+
+it('uses only the current counterfactual match for each selected originating row', async () => {
+  screeningReady = false;
+  const empty: never[] = [];
+  const run = vi.fn(async (options: QualityRunOptions) => {
+    const sample = qualityMonitorRunSamples(options.study)[0], plan = options.study.sellPlans![0];
+    options.onResult({
+      key: qualityResultKey(sample, plan, options.study.observeHours), sampleId: sample.id, groupId: plan.id,
+      status: 'open', entryTime: sample.enteredAt!, entryPrice: 104, endTime: sample.enteredAt! + 60000,
+      endPrice: 104, returnPct: 0, pnl: 0, evaluatedAt: sample.enteredAt! + 60000,
+    });
+  });
+  const { result } = renderHook(() => useFishQuality('counterfactual-owner', empty, run));
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  const picked = qualityDisplayRows(result.current.study);
+  expect(picked).toHaveLength(2);
+  const original = picked.find(row => row.enteredAt === SIGNAL_AT)!;
+  const key = qualityEntryIdentity(original.source, original.enteredAt);
+  const counterfactualAt = MATCHED_AT + 600000;
+  loadParallelResults.mockResolvedValue([
+    { entryKey: key, markerAt: SIGNAL_AT + 60000, signal: { time: counterfactualAt } },
+  ]);
+  act(() => result.current.setSelectedRows(picked.map(row => row.id)));
+  const plans = structuredClone(result.current.study.sellPlans);
+  await act(() => result.current.start(false, undefined, false, 'counterfactual'));
+  expect(loadParallelResults).toHaveBeenCalledWith('counterfactual-owner');
+  expect(run).toHaveBeenCalledOnce();
+  expect(result.current.error).toContain('1 条缺少有效的平行宇宙信号首次满足时间');
+  expect(qualityMonitorRunSamples(run.mock.calls[0][0].study).map(row => row.enteredAt)).toEqual([counterfactualAt]);
+  const current = qualityDisplayRows(result.current.study).find(row => row.id === original.id)!;
+  expect(current.enteredAt).toBe(SIGNAL_AT);
+  expect(qualityRowResult(result.current.study, current, result.current.study.sellPlans![0])?.entryTime).toBe(counterfactualAt);
+  expect(result.current.study.sellPlans).toEqual(plans);
+  expect(result.current.study.monitorLibrary!.records[0].enteredAt).toBe(counterfactualAt);
+  loadParallelResults.mockResolvedValue([{ entryKey: key, markerAt: SIGNAL_AT + 60000 }]);
+  await act(() => result.current.restart('counterfactual'));
+  expect(run).toHaveBeenCalledOnce();
+  expect(result.current.error).toContain('缺少有效的平行宇宙信号首次满足时间');
+  expect(result.current.study.monitorLibrary!.records[0].enteredAt).toBe(counterfactualAt);
+  const updatedTime = counterfactualAt + 60000;
+  loadParallelResults.mockResolvedValue([{ entryKey: key, signal: { time: updatedTime } }]);
+  await act(() => result.current.restart('counterfactual'));
+  await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+  expect(qualityMonitorRunSamples(run.mock.calls[1][0].study).map(row => row.enteredAt)).toEqual([updatedTime]);
 });

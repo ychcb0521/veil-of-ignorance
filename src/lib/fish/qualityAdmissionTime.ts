@@ -7,10 +7,11 @@ export interface QualityMonitorEntry {
   records: string[];
   error?: string;
 }
-export type QualityMonitorTimeBasis = 'signal' | 'screening';
+export type QualityMonitorTimeBasis = 'signal' | 'screening' | 'counterfactual';
 export const qualityMonitorTimeLabels: Record<QualityMonitorTimeBasis, string> = {
   signal: '信号时间',
   screening: '筛选时间',
+  counterfactual: '反事实时间',
 };
 
 export function qualityRowMonitorTimeBasis(study: Pick<FishQualityStudy, 'monitorTimeBasis' | 'monitorTimeBasisByRow'>, sample: QualitySample): QualityMonitorTimeBasis | undefined {
@@ -22,6 +23,7 @@ const validEntryTime = (at: unknown): number | null =>
   typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : null;
 
 export function qualityMonitorEntryAt(sample: QualitySample, timeBasis?: QualityMonitorTimeBasis): number | null {
+  if (timeBasis === 'counterfactual') return validEntryTime(sample.counterfactualAt);
   if (timeBasis === 'signal') return validEntryTime(qualitySignalTime(sample.source));
   if (timeBasis === 'screening') {
     if (sample.source.preEntryMonitor) return qualityLibraryEntryAt(sample.source);

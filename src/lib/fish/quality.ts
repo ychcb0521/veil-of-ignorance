@@ -106,6 +106,7 @@ export interface QualitySample {
   binanceEntry?: { version: 'binance-manual-monitor-v1'; orderId: string; price: number; quantity: number };
   /** First-match admission for holding only; never changes the original scan/capture input. */
   monitorEntry?: QualityMonitorEntry;
+  counterfactualAt?: number;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;
   /** Independent upstream memberships; identical signal and entry times share one display row. */
   origin?: QualityOrigin; origins?:QualityOrigin[];

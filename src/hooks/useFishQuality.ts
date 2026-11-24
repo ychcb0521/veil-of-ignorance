@@ -1,3 +1,4 @@
+import { loadParallelTableResults } from '@/lib/fish/parallelUniverseStore';
 import type { FishCdaTracking } from './useFishCdaTracking';
 import { useQualityWorkspaceInformation } from './useQualityWorkspaceInformation';
 import { preserveQualityWorkspace } from '@/lib/fish/qualitySignalReadingsStore';
@@ -69,11 +70,33 @@ function checkMonitorTimes(study: FishQualityStudy, timeBasis: QualityMonitorTim
   const missing = rows.filter(row => qualityMonitorEntryAt(row, timeBasis) == null);
   const detail = timeBasis === 'screening' && missing.some(row => row.monitorEntry?.error)
     ? '请在筛选库核对入选记录及其时点。' : '';
-  const reason = timeBasis === 'screening' ? '没有唯一的筛选入选时点' : '缺少有效信号时间';
+  const reason = timeBasis === 'counterfactual' ? '缺少有效的平行宇宙信号首次满足时间'
+    : timeBasis === 'screening' ? '没有唯一的筛选入选时点' : '缺少有效信号时间';
   return {
     eligible: rows.length - missing.length,
     message: missing.length ? `${missing.length} 条${reason}${missing.length === rows.length ? '，无法开始监测。' : '，本轮已跳过。'}${detail}` : '',
   };
+}
+
+type CounterfactualTimes = ReadonlyMap<string, number | undefined>;
+
+async function readCounterfactualTimes(owner?: string): Promise<CounterfactualTimes> {
+  const results = await loadParallelTableResults(owner);
+  return new Map(results.map(result => [result.entryKey, result.signal?.time]));
+}
+
+function withCounterfactualTimes(study: FishQualityStudy, times: CounterfactualTimes, preserveMissing = false): FishQualityStudy {
+  const selected = new Set(qualityRunSamples(study).map(row => qualityEntryIdentity(row.source, row.enteredAt)));
+  const samples = study.samples.map(row => {
+    const key = qualityEntryIdentity(row.source, row.enteredAt);
+    if (!selected.has(key)) return row;
+    const at = times.get(key);
+    const valid = typeof at === 'number' && Number.isFinite(at) && at > 0;
+    if (!valid && preserveMissing) return row;
+    const counterfactualAt = valid ? at : undefined;
+    return counterfactualAt === row.counterfactualAt ? row : { ...row, counterfactualAt };
+  });
+  return samples.every((row, i) => row === study.samples[i]) ? study : { ...study, samples };
 }
 
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
@@ -139,7 +162,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     return reason;
   };
   const readyRef = useRef(false), latestRun = useRef(run); latestRun.current = run;
-  const rerun = useRef<false | { mode?: QualityRunOptions['mode']; timeBasis?: QualityMonitorTimeBasis }>(false);
+  const rerun = useRef<false | { mode?: QualityRunOptions['mode']; timeBasis?: QualityMonitorTimeBasis; counterfactualTimes?: CounterfactualTimes }>(false);
   const selectionApproved = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastObservedStudy = useRef<{epoch:number; study:FishQualityStudy}>();
@@ -329,21 +352,36 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     };
     schedule();
   }, [study, ready, owner]);
-  const start = useCallback(async (automatic = false, mode?: QualityRunOptions['mode'], resume = false, requestedBasis?: QualityMonitorTimeBasis) => {
+  const start = useCallback(async (automatic = false, mode?: QualityRunOptions['mode'], resume = false, requestedBasis?: QualityMonitorTimeBasis, counterfactualTimes?: CounterfactualTimes) => {
     if (!readyRef.current || archiveLock.current && mode !== 'restart') return;
     const paused = resume && monitorBatch.current?.paused ? monitorBatch.current : null;
     if (resume && (!paused || !canResumeBatch(paused.frozen) || controller.current || !(workspaceMode ? current.current.workspaceMonitorDraft : current.current.monitorLibrary)?.rounds.some(round => round.id === paused.capture.roundId && round.state === 'paused'))) return;
     const timeBasis = paused ? paused.frozen.monitorTimeBasis : requestedBasis ?? current.current.monitorTimeBasis;
-    if (!paused && timeBasis !== 'signal' && !screeningReady.current) {
+    const usesScreening = timeBasis === 'screening' || timeBasis === undefined;
+    if (!paused && timeBasis === 'counterfactual' && !automatic && !counterfactualTimes) {
+      const epoch = generation.current, revision = intentRevision.current;
+      try {
+        counterfactualTimes = await readCounterfactualTimes(account.current);
+      } catch {
+        if (epoch === generation.current && revision === intentRevision.current) setError('平行宇宙结果读取失败，请重试。');
+        return;
+      }
+      if (epoch !== generation.current || revision !== intentRevision.current || !readyRef.current || archiveLock.current) return;
+    }
+    if (!paused && usesScreening && !screeningReady.current) {
       if (!automatic) setError('筛选记录尚未恢复，暂不能确定买入时间，请稍后开始监测。');
       return;
     }
     if (!paused) {
-      if (timeBasis !== 'signal') change(s => withQualityScreeningEntries(s, screeningLibrary.current, screeningScope.current));
+      if (usesScreening) change(s => withQualityScreeningEntries(s, screeningLibrary.current, screeningScope.current));
       if (!qualityRunSamples(scoped(current.current)).length || automatic && !selectionApproved.current && !mode) return;
       if (current.current.sellPlans && !current.current.sellPlans.length) return;
     }
-    const runInput = { ...scoped(current.current), monitorTimeBasis: timeBasis, monitorTimeBasisByRow: undefined };
+    const monitorInput = (study: FishQualityStudy) => {
+      const input = { ...scoped(study), monitorTimeBasis: timeBasis, monitorTimeBasisByRow: undefined };
+      return counterfactualTimes ? withCounterfactualTimes(input, counterfactualTimes) : input;
+    };
+    const runInput = monitorInput(current.current);
     const timeCheck = !paused && timeBasis ? checkMonitorTimes(runInput, timeBasis) : undefined;
     if (timeCheck && !timeCheck.eligible) { if (!automatic) setError(timeCheck.message); return; }
     if (!automatic && !paused) selectionApproved.current = true;
@@ -351,7 +389,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       // A manual start can queue one follow-up; periodic ticks never prolong an active batch.
       if (!automatic || mode || controller.current.signal.aborted) {
         const queued = rerun.current;
-        rerun.current = { mode: queued && !queued.mode ? undefined : mode, timeBasis: requestedBasis ?? (queued ? queued.timeBasis : undefined) };
+        rerun.current = { mode: queued && !queued.mode ? undefined : mode, timeBasis: requestedBasis ?? (queued ? queued.timeBasis : undefined),
+          counterfactualTimes: requestedBasis ? counterfactualTimes : queued ? queued.counterfactualTimes : undefined };
       }
       return;
     }
@@ -362,7 +401,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const epoch = generation.current, revision = intentRevision.current, aborter = new AbortController(); controller.current = aborter;
     const frozen = paused
       ? { ...paused.frozen, results: [...paused.capture.results.values()], filterReadings: [...paused.capture.readings.values()] }
-      : qualityExecutionSnapshot({ ...scoped(current.current), monitorTimeBasis: timeBasis, monitorTimeBasisByRow: undefined });
+      : qualityExecutionSnapshot(monitorInput(current.current));
     const frozenSamples = new Map(qualityMonitorRunSamples(frozen).map(s => [s.id, s]));
     const frozenGroups = new Map(qualityRunGroups(frozen).map(g => [g.id, g]));
     const readingKeys = new Set([...frozenSamples.values()].flatMap(row => [...frozenGroups.values()].flatMap(plan => activeBuyFilters(frozen, plan).map(f => qualityFilterReadingKey(row, f)))));
@@ -376,7 +415,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       if (!timeBasis) return next;
       const byRow = { ...s.monitorTimeBasisByRow };
       for (const row of frozenSamples.values()) byRow[row.signalId ?? row.id] = timeBasis;
-      return { ...next, monitorTimeBasis: timeBasis, monitorTimeBasisByRow: byRow };
+      const withTimes = counterfactualTimes
+        ? withCounterfactualTimes({ ...next, selectedRowIds: frozen.selectedRowIds }, counterfactualTimes, true)
+        : next;
+      return { ...next, samples: withTimes.samples, monitorTimeBasis: timeBasis, monitorTimeBasisByRow: byRow };
     });
     else change(s => editWorkspaceMonitor(s,draft => draft.monitorLibrary ? {...draft,monitorLibrary:{...draft.monitorLibrary,rounds:resumeLibraryRound(draft.monitorLibrary.rounds,capture.roundId,Date.now())}} : draft));
     const savedOwner = account.current; let finalized = false,finishTask:Promise<void>|undefined;
@@ -432,7 +474,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       reportQualityRunTimings(timings, performance.now() - startedAt);
       aborter.signal.removeEventListener('abort', savePartial);
       aborter.signal.removeEventListener('abort', releaseNotifications); releaseNotifications();
-      if (controller.current === aborter) { controller.current = null; if (epoch === generation.current) { setRunning(false); if (rerun.current) { const queued = rerun.current; rerun.current = false; defer(() => void start(true, queued.mode, false, queued.timeBasis), 0); } } }
+      if (controller.current === aborter) { controller.current = null; if (epoch === generation.current) { setRunning(false); if (rerun.current) { const queued = rerun.current; rerun.current = false; defer(() => void start(true, queued.mode, false, queued.timeBasis, queued.counterfactualTimes), 0); } } }
     }
   }, [change, defer, acceptReading, workspaceMode]);
   /** Separate lifetime and cancellation: filtering never submits sell outcomes or controls monitoring. */
@@ -665,13 +707,25 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const restart = useCallback(async (requestedBasis?: QualityMonitorTimeBasis) => {
     if(!readyRef.current||archiveLock.current)return;
     const timeBasis = requestedBasis ?? current.current.monitorTimeBasis;
+    let counterfactualTimes: CounterfactualTimes | undefined;
+    if (timeBasis === 'counterfactual') {
+      const epoch = generation.current, revision = intentRevision.current;
+      try {
+        counterfactualTimes = await readCounterfactualTimes(account.current);
+      } catch {
+        if (epoch === generation.current && revision === intentRevision.current) setError('平行宇宙结果读取失败，请重试。');
+        return;
+      }
+      if (epoch !== generation.current || revision !== intentRevision.current || !readyRef.current || archiveLock.current) return;
+    }
     if (timeBasis) {
       if (timeBasis === 'screening' && !screeningReady.current) {
         setError('筛选记录尚未恢复，暂不能确定买入时间，请稍后开始监测。');
         return;
       }
       const study = scoped(current.current);
-      const input = timeBasis === 'screening' ? withQualityScreeningEntries(study, screeningLibrary.current, screeningScope.current) : study;
+      const input = counterfactualTimes ? withCounterfactualTimes(study, counterfactualTimes)
+        : timeBasis === 'screening' ? withQualityScreeningEntries(study, screeningLibrary.current, screeningScope.current) : study;
       const check = checkMonitorTimes(input, timeBasis);
       if (!check.eligible) { setError(check.message || '请先勾选要监测的信号。'); return; }
     }
@@ -687,7 +741,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
         // 正文已存进归档库，内存里只留目录（不然每 15 秒的保存都要多复制 40 MB）。
         change(s=>({...s,monitorLibrary:stripStoredQualityArchiveBodies(savedOwner,archived).monitorLibrary}));
       }
-      if(account.current===savedOwner&&generation.current===epoch){setArchiving(false);void start(false, 'restart', false, timeBasis);}
+      if(account.current===savedOwner&&generation.current===epoch){setArchiving(false);void start(false, 'restart', false, timeBasis, counterfactualTimes);}
     }catch(e){if(account.current===savedOwner&&generation.current===epoch)setError(e instanceof Error?e.message:'归档失败，未开始重算');}
     finally{if(account.current===savedOwner&&generation.current===epoch){archiveLock.current=false;setArchiving(false);}}
   }, [start,change,workspaceMode]);
@@ -851,7 +905,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(s => { const next = selectMinedRows(s); picked = next !== s; return next; });
     if (!picked) return;
     if (!selectionApproved.current) return;
-    if (controller.current) { const queued = rerun.current; rerun.current = { timeBasis: queued ? queued.timeBasis : undefined }; return; }
+    if (controller.current) { const queued = rerun.current; rerun.current = { timeBasis: queued ? queued.timeBasis : undefined, counterfactualTimes: queued ? queued.counterfactualTimes : undefined }; return; }
     defer(() => void start(true));
   }, [study.samples, ready, change, start, defer, workspaceMode]);
   // 界面告诉评估先算哪些行（看得见的在前）；只存引用，不触发重渲染

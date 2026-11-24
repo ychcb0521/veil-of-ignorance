@@ -88,7 +88,7 @@ export function createQualityTemplateTable(importSelection=false) {
       const matched=row.source.preEntryMonitor?.recordId;
       const exactMatch=matched?screeningById.get(matched):undefined;
       const screened=exactMatch?[exactMatch]:screeningRowResults(row,screeningIndex);
-      const key=signature([qualityEntryIdentity(row.source,row.enteredAt),row.basis,basis,row.source.quality,qualitySignalTime(row.source),row.minedAt,row.monitorEntry?.at,row.monitorEntry?.error,
+      const key=signature([qualityEntryIdentity(row.source,row.enteredAt),row.basis,basis,row.source.quality,qualitySignalTime(row.source),row.minedAt,row.monitorEntry?.at,row.monitorEntry?.error,row.counterfactualAt,
         row.origins,row.readings,sources.map(([,group])=>group.id),row.source.preEntryMonitor?.matchedAt,
         filtered.map(([f,r])=>[f.id,r&&withoutKey(r)]),signal.map(([m,r])=>[m.id,r&&withoutKey(r)]),
         sell.map(({plan,result,path,status,exit})=>[plan.id,result&&resultEvidence(result),path??result?.key,status,exit&&withoutKey(exit)]),

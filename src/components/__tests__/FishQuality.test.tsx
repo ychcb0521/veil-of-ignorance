@@ -752,6 +752,17 @@ it('folds restart into the start button menu, during a run too, and requires a s
   expect(screen.getByRole('button', { name: '开始监测的其他方式' })).toBeDisabled();
   expect(screen.getByRole('button', { name: '开始监测' })).toBeDisabled();
 });
+it('offers counterfactual time for both starting and restarting holding monitoring', () => {
+  const s = state();
+  render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button', { name: '开始监测' }));
+  fireEvent.click(screen.getByRole('button', { name: '基于反事实时间' }));
+  expect(s.start).toHaveBeenCalledExactlyOnceWith(false, undefined, false, 'counterfactual');
+  fireEvent.click(screen.getByRole('button', { name: '开始监测的其他方式' }));
+  fireEvent.click(screen.getByRole('button', { name: '基于反事实时间' }));
+  expect(s.restart).toHaveBeenCalledExactlyOnceWith('counterfactual');
+});
+
 // 【用户要求】2026-10-27「持仓一票否决卖出其实是隶属于持仓监测模块」
 it('keeps holding vetoes under 持仓监测, per sell plan', async () => {
   const { makeQualityHoldingVeto } = await import('@/lib/fish/qualityFilters');
