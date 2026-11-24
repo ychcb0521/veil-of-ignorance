@@ -1,5 +1,5 @@
 import {afterEach,expect,it,vi} from 'vitest';
-import {newQualityStudy,qualityComparisonRows} from '../quality';
+import {newQualityStudy,qualityComparisonRows,activeBuyFilters,activeStandaloneBuyFilters,qualityFilterStatus} from '../quality';
 import {browseInformationStudy} from '../browseInformationStudy';
 import {loadQualityWorkspaceExecution,saveExecutableQualityStudy,mergeQualityWorkspaceExecution} from '../qualityWorkspaceExecutionStore';
 import {workspaceCampaignFixture} from './workspaceCampaign.fixture';
@@ -57,4 +57,16 @@ it('commits the working snapshot before letting the campaign reader enter the ar
   expect(await save).toBe(true);expect(await observed).toMatchObject({workspaceExecution:1});
   expect(listener).toHaveBeenCalledOnce();expect(listener.mock.calls[0][0].detail).toEqual({owner:'alice'});
  }finally{window.removeEventListener('fish-quality-saved',listener);}
+});
+
+it('keeps a working static condition out of monitoring after reopening an older workspace',async()=>{
+ const f=fixture(),study=workspaceCampaignFixture(),plan=study.sellPlans[0];
+ const condition={id:'distance',enabled:true,metric:'distance',direction:'<' as const,threshold:3,label:'distance',snapshot:plan.snapshot};
+ f.rows.set('fish-quality:alice:workspace-execution-v1',{...study,buyFilters:[condition]});
+ const settings={...study,sellPlans:[{...plan,buyFilters:[condition]}]};
+ const working=await loadQualityWorkspaceExecution('alice',study,settings);
+ expect(activeStandaloneBuyFilters(working)).toEqual([condition]);
+ expect(activeBuyFilters(working,working.sellPlans![0])).toEqual([]);
+ expect(qualityFilterStatus(working,study.samples[0],working.sellPlans![0]).state).toBe('none');
+ expect(settings.sellPlans[0].buyFilters).toEqual([condition]);
 });

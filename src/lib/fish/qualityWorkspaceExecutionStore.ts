@@ -1,9 +1,12 @@
-import {newQualityStudy,type FishQualityStudy} from './quality';
+import {newQualityStudy,standaloneBuyFilters,type FishQualityStudy} from './quality';
 import {qualityWorkspaceData,preserveQualityWorkspace,preserveQualitySignalReadings,preserveQualityFilterDraft} from './qualitySignalReadingsStore';
 import {saveQualityStudy as saveHistoricalStudy} from './qualityStore';
 import {serializeArchiveWork} from '../serializeArchiveWork';
 export {mergeQualityWorkspaceExecution} from './qualityWorkspaceExecutionMerge';
 
+export function independentWorkspaceFilters(study:FishQualityStudy):FishQualityStudy {
+ return study.independentFilters ? study : {...study,independentFilters:true,buyFilters:standaloneBuyFilters(study)};
+}
 const key=(owner?:string)=>'fish-quality:'+(owner??'anonymous');
 const executionKey=(owner?:string)=>key(owner)+':workspace-execution-v1';
 async function open(){return new Promise<IDBDatabase>((resolve,reject)=>{
@@ -23,7 +26,7 @@ export async function loadQualityWorkspaceExecution(owner:string|undefined,infor
    const base=preserveQualityFilterDraft(filter.result,preserveQualitySignalReadings(readings.result,{...newQualityStudy(),...settings,...saved,workspaceExecution:1 as const}));
    const study=preserveQualityWorkspace(information,base);
    // The small settings catalog owns plans and templates; captured records own their detector groups.
-   resolve({...study,workspaceExecution:1,sellPlans:settings.sellPlans,planTemplates:settings.planTemplates});
+   resolve(independentWorkspaceFilters({...study,workspaceExecution:1,sellPlans:settings.sellPlans,planTemplates:settings.planTemplates}));
   };
   tx.onerror=tx.onabort=()=>reject(tx.error??Error('组合表运行读取失败，请重试'));
  });}finally{db.close();}

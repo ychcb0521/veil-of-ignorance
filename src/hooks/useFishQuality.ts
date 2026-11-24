@@ -39,7 +39,7 @@ import { activeStandaloneBuyFilters, separateQualityFilters, activeBuyFilters, q
 import { enableQualityComparison, ensureQualitySellCombo, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import {retireFilterDirectory} from '@/lib/fish/qualityFilterDeletion';
 import { loadQualityStudy, qualityAccountBlob } from '@/lib/fish/qualityStore';
-import {mergeQualityWorkspaceExecution,loadQualityWorkspaceExecution,saveExecutableQualityStudy as saveQualityStudy} from '@/lib/fish/qualityWorkspaceExecutionStore';
+import { independentWorkspaceFilters,mergeQualityWorkspaceExecution,loadQualityWorkspaceExecution,saveExecutableQualityStudy as saveQualityStudy} from '@/lib/fish/qualityWorkspaceExecutionStore';
 import { createQualityTemplateDirectory } from '@/lib/fish/qualityTemplateDirectory';
 import { archiveDeletionGuard, isPermanentlyDeletedMonitorEntry, markMonitorEntriesDeleted } from '@/lib/fish/qualityMonitorDeletion';
 import { loadQualityMonitorArchive, readQualityArchiveForPurge, purgeCloudQualityArchives, purgeLocalQualityArchives, stripStoredQualityArchiveBodies } from '@/lib/fish/qualityArchiveStore';
@@ -289,6 +289,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       // An explicit settings save may have completed during the archive read.
       // Overlay only catalog IDs; retain every unknown historical plan/result.
       restored = applySavedQualityPlans(restored, readSavedQualityPlans(owner));
+      if (workspaceMode) restored = independentWorkspaceFilters(restored);
       if(restored.sellPlansConfigured){
         const entries=readSavedQualityPlans(owner),updated=editSavedQualityPlans(entries,value.study.sellPlans??[],restored.sellPlans??[]);
         if(JSON.stringify(updated)!==JSON.stringify(entries))savedPlansWriter.current(updated);
