@@ -1,5 +1,5 @@
 import { formatUTC8 } from '@/lib/timeFormat';
-import { activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualitySample } from './quality';
+import { staticDblDistanceKeyParts, activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualitySample } from './quality';
 import { qualityTableMembers, qualityTableRange, type QualityTableRow } from './qualityTableRows';
 
 export interface QualityFilterColumn { id: string; filter: QualityBuyFilter; plans: string[] }
@@ -8,7 +8,7 @@ export function qualityFilterColumns(study: FishQualityStudy): QualityFilterColu
   const columns = new Map<string, QualityFilterColumn>();
   const sources = study.independentFilters ? [{label:'',filters:activeStandaloneBuyFilters(study)}] : (study.sellPlans ?? []).map(plan=>({label:plan.label,filters:activeBuyFilters(study,plan)}));
   for (const plan of sources) for (const filter of plan.filters) {
-    const id = JSON.stringify([filter.snapshot.definitionKey, filter.metric, filter.snapshot.interval, filter.direction, filter.threshold, ...(filter.initialization ? [filter.initialization] : [])]);
+    const id = JSON.stringify([filter.snapshot.definitionKey, filter.metric, filter.snapshot.interval, filter.direction, filter.threshold, ...(filter.initialization ? [filter.initialization] : []), ...staticDblDistanceKeyParts(filter)]);
     const previous = columns.get(id);
     if (previous) { if (plan.label && !previous.plans.includes(plan.label)) previous.plans.push(plan.label); }
     else columns.set(id, { id, filter, plans: plan.label ? [plan.label] : [] });
@@ -41,5 +41,5 @@ export function qualityFilterCell(row: QualityTableRow, filter: QualityBuyFilter
   const status = errors ? `缺数据${entries.length > 1 ? ` ${errors}/${entries.length}` : ''}`
     : pending ? `待计算${entries.length > 1 ? ` ${pending}/${entries.length}` : ''}`
     : state === 'mixed' ? `满足 ${passed}/${entries.length}` : passed ? '满足' : '不满足';
-  return { value: qualityTableRange(values, qualityFilterValueText), state, status, detail: details.join('\n') };
+  return { value: qualityTableRange(values, value => filter.staticDblDistance ? value + '%' : qualityFilterValueText(value)), state, status, detail: details.join('\n') };
 }

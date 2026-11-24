@@ -54,16 +54,16 @@ it('reads buffered static distances from closed bars only and keys cached values
  };
  const source={id:'row',symbol:'TESTUSDT',timeMs:enteredAt,timeLabel:'',fallbackZone:''};
  const sample:QualitySample={id:'row',source,enteredAt,basis:'signal',groups:[],importedAt:enteredAt};
- const {makeStaticDblDistance,staticDblDistanceChoices}=await import('@/lib/fish/qualityStaticDblDistance');
+ const {makeStaticDblDistance,staticDblDistanceChoice}=await import('@/lib/fish/qualityStaticDblDistance');
  const {evaluateQualityFilter}=await import('@/lib/fish/quality');
- const guard=staticDblDistanceChoices.find(choice=>choice.metric==='guard')!;
- const nearest=staticDblDistanceChoices.find(choice=>choice.metric==='nearest')!;
+ const guard=staticDblDistanceChoice('static-dbl5-distance-v1:guard')!;
+ const nearest=staticDblDistanceChoice('static-dbl5-distance-v1:nearest')!;
  const read=(choice:typeof guard,atr:number)=>evaluateQualityFilter(sample,makeStaticDblDistance(choice,'<',10,true,atr),enteredAt,load,new AbortController().signal);
  const raw=await read(guard,0), buffered=await read(guard,.25), selected=await read(nearest,.25);
  expect(raw).toMatchObject({at:cut,value:expect.any(Number)});
  expect(buffered).toMatchObject({at:cut,value:expect.any(Number)});
  expect(buffered.key).not.toBe(raw.key);
- expect(buffered.value).not.toBe(raw.value);
+ expect(buffered.value).toBe(4.257400995640091); // Last verified v1 output on this fixture.
  expect(selected.value).toBeLessThanOrEqual(buffered.value!);
 });
 

@@ -11,7 +11,7 @@
 import {mergeFilterRemovals,pruneFilterDirectories,type FilterDirectoryRemoval} from './qualityFilterDeletion';
 import { shortFishHash } from './algorithm';
 import {qualityMonitoringSample} from './qualityAdmissionTime';
-import { activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, qualityFilterStatus, qualityRunSamples, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityFilterStatus, type QualitySample } from './quality';
+import { staticDblDistanceKeyParts, activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, qualityFilterStatus, qualityRunSamples, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityFilterStatus, type QualitySample } from './quality';
 import { finishLibraryRound, librarySignalIdentity, mergeLibraryRecords, mergeLibraryRounds, newLibraryRound, recoverLibraryRounds, type LibraryRecordBase, type LibraryRound } from './libraryRounds';
 import { activeSignalMetrics, signalReadingKey, type QualitySignalMetric } from './qualitySignalReadings';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -40,7 +40,7 @@ export interface QualityFilterCapture {
 }
 
 const empty = (): QualityFilterLibrary => ({ version: 1, settings: [], records: [], rounds: [] });
-const conditionKey = (f: QualityBuyFilter) => [f.snapshot.featureId, f.metric, f.snapshot.definitionKey, f.snapshot.interval, f.direction, f.threshold, ...(f.initialization ? [f.initialization] : [])];
+const conditionKey = (f: QualityBuyFilter) => [f.snapshot.featureId, f.metric, f.snapshot.definitionKey, f.snapshot.interval, f.direction, f.threshold, ...(f.initialization ? [f.initialization] : []), ...(f.staticDblDistance?.version === 'static-dbl5-distance-v2' ? staticDblDistanceKeyParts(f) : [])];
 export const qualityFilterSettingSignature = (filters: readonly QualityBuyFilter[]) =>
   JSON.stringify(filters.map(conditionKey).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
 

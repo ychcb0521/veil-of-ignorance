@@ -1,3 +1,4 @@
+import {stableEntryJson} from './preEntryThreeStage';
 import { encodeFishRange } from '@/lib/fish/thresholdRange';
 import {
   readHoldingImpulse1115Classification,HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION,
@@ -167,7 +168,7 @@ export function qualityDrawdownPct(result: QualityResult | undefined, kind: 'sta
  * 【用户要求】2026-10-26「在比较卖出的时候，再增加一些买入的过滤机制，比如只有符合状态S大于0.7才买入（选择权给我）」
  * 买入过滤：全部启用的条件都满足才买入；读数取买入时刻之前最后一根已收盘的 K 线（不看买入之后）。
  */
-export interface QualityBuyFilter { staticDblDistance?: {version:typeof import("./qualityStaticDblDistance").STATIC_DBL_DISTANCE_VERSION;atr:number;rules:import("./qualityDbl5Sell").Dbl5SellRule[]}; id: string; label: string; metric: string; direction: '<' | '>'; threshold: number; enabled: boolean; snapshot: FishSnapshot; initialization?: QualityGroup['initialization'] }
+export interface QualityBuyFilter { staticDblDistance?: {version:import("./qualityStaticDblDistance").StaticDblDistanceVersion;atr:number;rules:import("./qualityDbl5Sell").Dbl5SellRule[]}; id: string; label: string; metric: string; direction: '<' | '>'; threshold: number; enabled: boolean; snapshot: FishSnapshot; initialization?: QualityGroup['initialization'] }
 /** 买入时刻的读数缓存：与门槛无关，改门槛不必重新取数。 */
 export interface QualityFilterReading { key: string; value?: number; at?: number; error?: string }
 export interface FishQualityStudy {
@@ -561,7 +562,13 @@ export function qualityExitSuggestions(group: QualityGroup): { label: string; ru
   ].map(v => ({ ...v, label: `${v.label}（${v.rule.direction} ${v.rule.threshold}）` }));
 }
 
-export const qualityFilterReadingKey = (row: QualitySample, f: QualityBuyFilter) => shortFishHash(JSON.stringify(['buy-filter', row.signalId ?? row.id, row.enteredAt, f.snapshot.definitionKey, f.metric, f.snapshot.interval, ...(f.initialization ? [f.initialization] : []), ...(f.staticDblDistance ? [f.staticDblDistance] : [])]));
+// Preserve the original v1 cache key. For v2, JSON storage may reorder frozen rule fields.
+export function staticDblDistanceKeyParts(filter: QualityBuyFilter) {
+  const config = filter.staticDblDistance;
+  if (!config) return [];
+  return [config.version === 'static-dbl5-distance-v2' ? stableEntryJson(config) : config];
+}
+export const qualityFilterReadingKey = (row: QualitySample, f: QualityBuyFilter) => shortFishHash(JSON.stringify(['buy-filter', row.signalId ?? row.id, row.enteredAt, f.snapshot.definitionKey, f.metric, f.snapshot.interval, ...(f.initialization ? [f.initialization] : []), ...staticDblDistanceKeyParts(f)]));
 /** 某套卖出方案的买入过滤（含停用的）；方案没单独设过时沿用旧版本的全局过滤。 */
 export const planBuyFilters = (study: FishQualityStudy, plan: QualityGroup | undefined): QualityBuyFilter[] => study.independentFilters ? [] : plan ? plan.buyFilters ?? study.buyFilters ?? [] : [];
 /** 某套卖出方案启用中的买入过滤。 */
@@ -573,7 +580,7 @@ export function standaloneBuyFilters(study: FishQualityStudy): QualityBuyFilter[
   if (study.independentFilters) return study.buyFilters ?? [];
   const filters = new Map<string, QualityBuyFilter>();
   for (const f of [...(study.buyFilters ?? []), ...(study.sellPlans ?? []).flatMap(p => p.buyFilters ?? [])]) {
-    const key = JSON.stringify([f.snapshot.definitionKey,f.snapshot.interval,f.metric,f.direction,f.threshold]);
+    const key = JSON.stringify([f.snapshot.definitionKey,f.snapshot.interval,f.metric,f.direction,f.threshold,...staticDblDistanceKeyParts(f)]);
     const prior = filters.get(key);
     if (!prior || !prior.enabled && f.enabled) filters.set(key, f);
   }
@@ -625,9 +632,11 @@ export async function evaluateQualityFilter(row: QualitySample, f: QualityBuyFil
   const key = qualityFilterReadingKey(row, f);
   if (!row.enteredAt) return { key, error: '缺少有效买入时间' };
   try {
-    if (f.staticDblDistance || f.snapshot.featureId==='static-dbl5-distance-v1') {
+    if (f.staticDblDistance || f.snapshot.featureId==='static-dbl5-distance-v1' || f.snapshot.featureId==='static-dbl5-distance-v2') {
       const {readStaticDblDistance}=await import('./qualityStaticDblDistance');
-      return {key,...await readStaticDblDistance(row,f,load,signal)};
+      const initialized = f.staticDblDistance?.version === 'static-dbl5-distance-v2' && f.initialization
+        ? withTuringInitialization(load, row.source.symbol, await marketStart?.(row.source.symbol) ?? NaN) : load;
+      return {key,...await readStaticDblDistance(row,f,initialized,signal)};
     }
     if (f.initialization) {
       const initialized = withTuringInitialization(load, row.source.symbol, await marketStart?.(row.source.symbol) ?? NaN);

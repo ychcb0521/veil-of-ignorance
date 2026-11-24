@@ -1596,3 +1596,31 @@ it('displays the archived plan, result, match time and evidence on the imported 
     archive.mockRestore();
   }
 });
+
+it('shows the saved buy-filter percentage beside the independent signal-time ATR reading', async () => {
+  const {qualityFilterReadingKey} = await import('@/lib/fish/quality');
+  const {makeQualitySignalMetrics} = await import('@/lib/fish/qualityFilters');
+  const {guardDistanceSignalChoices} = await import('@/lib/fish/qualityGuardDistance');
+  const {signalReadingKey} = await import('@/lib/fish/qualitySignalReadings');
+  const s = state();
+  s.study.independentFilters = true;
+  const view = render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button', {name:'买入过滤条件'}));
+  fireEvent.click(screen.getByRole('button', {name:'添加条件'}));
+  fireEvent.change(screen.getByLabelText('买入条件 1 指标'), {target:{value:'static-dbl5-distance-v2:nearest'}});
+  fireEvent.change(screen.getByLabelText('买入条件 1 方向'), {target:{value:'<'}});
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), {target:{value:'3'}});
+  fireEvent.change(screen.getByLabelText('买入条件 1 冗余 ATR'), {target:{value:'.5'}});
+  fireEvent.click(screen.getByRole('button', {name:'保存设置'}));
+  const [filter] = vi.mocked(s.setFilters).mock.calls[0][0];
+  expect(filter).toMatchObject({metric:'nearest', direction:'<', threshold:3, staticDblDistance:{version:'static-dbl5-distance-v2', atr:.5}});
+  const [metric] = makeQualitySignalMetrics([guardDistanceSignalChoices[0].key], []);
+  const row = qualityComparisonRows(s.study)[0];
+  s.study = {...s.study, buyFilters:[filter], signalMetrics:[metric],
+    filterReadings:[{key:qualityFilterReadingKey(row, filter), value:2.8}],
+    signalReadings:[{key:signalReadingKey(row, metric), value:-1.25}]};
+  view.rerender(<FishQuality state={s}/>);
+  expect(screen.getByTestId('quality-filter-column')).toHaveTextContent('< 3% · 冗余 0.5 ATR · v2');
+  expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveTextContent('2.8%满足');
+  expect(screen.getAllByTestId('quality-signal-reading-cell')[0]).toHaveTextContent('-1.25 ATR');
+});
