@@ -238,3 +238,73 @@ export function loadRegretRound(owner: string | undefined, id: string, before?: 
     };
   });
 }
+
+
+export interface RegretImportReceipt {
+  round: RegretRound;
+  proposed: number;
+  alreadyImported: boolean;
+}
+
+/** Import is atomic and leaves the current combination-table results untouched. */
+export async function importRegretArchive(owner: string, archive: import('./regretArchive').RegretArchive): Promise<RegretImportReceipt> {
+  if (!owner) throw Error('请登录后导入后悔库');
+  const {round, attempts, digest} = archive;
+  const ownerKey = key(owner);
+  const receiptKey = ['regret-import', ownerKey, round.id];
+  const roundKey = [...roundPrefix(owner), round.startedAt, round.id];
+  const rowsRange = prefixRange(roundRowsPrefix(owner, round.id));
+  const receipt = await transaction<RegretImportReceipt | undefined>([SETTINGS, HISTORY, CANDIDATES], 'readwrite', (tx, result) => {
+    const settings = tx.objectStore(SETTINGS), history = tx.objectStore(HISTORY), candidates = tx.objectStore(CANDIDATES);
+    const request = settings.get(receiptKey);
+    request.onsuccess = () => {
+      const previous = request.result as {digest: string; receipt: RegretImportReceipt} | undefined;
+      if (previous) {
+        if (previous.digest === digest) result({...previous.receipt, alreadyImported: true});
+        return;
+      }
+      const occupied = settings.count(rowsRange);
+      occupied.onsuccess = () => {
+        if (occupied.result) return;
+        const summary: RegretRound = {...round, plan: attempts[0].plan, additionCount: attempts[0].additionCount, observeHours: attempts[0].observeHours, done: 0, emitted: 0};
+        let proposed = 0;
+        const insert = () => {
+          const attempt = attempts[summary.done];
+          if (!attempt) {
+            const receipt = {round: summary, proposed, alreadyImported: false};
+            settings.add(summary, roundKey);
+            settings.add({digest, receipt}, receiptKey);
+            result(receipt);
+            return;
+          }
+          const {candidate, proposedSignal} = attempt;
+          const id = candidate.signalId ?? candidate.id;
+          const existing = candidates.get([ownerKey, id]);
+          existing.onsuccess = () => {
+            const saved: RegretCandidate | undefined = existing.result;
+            const emitted = !saved?.signal && !!proposedSignal;
+            proposed += Number(!!proposedSignal);
+            summary.emitted += Number(emitted);
+            if (!saved || emitted) candidates.put({
+              id, symbol: candidate.source.symbol, entryTime: candidate.enteredAt,
+              signal: saved?.signal ?? proposedSignal, legacy: saved ? saved.legacy ?? true : false,
+            }, [ownerKey, id]);
+            const historyKey = [ownerKey, id, attempt.baseline.evaluatedAt, attempt.id];
+            history.add({...attempt, emitted, roundId: round.id}, historyKey);
+            settings.add(historyKey, [...roundRowsPrefix(owner, round.id), attempt.baseline.evaluatedAt, attempt.id]);
+            summary.done++;
+            insert();
+          };
+        };
+        insert();
+      };
+    };
+  });
+  if (!receipt) throw Error('已有同编号的不同归档，无法导入');
+  const count = await transaction<number>(SETTINGS, 'readonly', (tx, result) => {
+    const read = tx.objectStore(SETTINGS).count(rowsRange);
+    read.onsuccess = () => result(read.result);
+  });
+  if (count !== round.total || count !== receipt.round.done) throw Error('导入后读取的记录数不符');
+  return receipt;
+}

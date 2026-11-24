@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from 'react';
 import {formatUTC8} from '@/lib/timeFormat';
-import {editRegretDirectory, loadLegacyRegretAttempts, loadRegretAttempts, loadRegretCatalog, loadRegretRound, type RegretAttempt} from '@/lib/fish/parallelUniverseStore';
+import {editRegretDirectory, importRegretArchive, loadLegacyRegretAttempts, loadRegretAttempts, loadRegretCatalog, loadRegretRound, type RegretAttempt, type RegretImportReceipt} from '@/lib/fish/parallelUniverseStore';
 import {qualityAdditionFills} from '@/lib/fish/qualityAddition';
 import {qualityAdditionStopOrder} from '@/lib/fish/qualityAdditionStopOrder';
 import {createQualityTemplateDirectory} from '@/lib/fish/qualityTemplateDirectory';
@@ -113,6 +113,21 @@ export function FishRegretLibrary({owner, revision, templates}: {
   const [catalog, setCatalog] = useState<Awaited<ReturnType<typeof loadRegretCatalog>>>();
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState('');
+  const [receipt, setReceipt] = useState<RegretImportReceipt>();
+  const importFile = async (file: File) => {
+    if (!owner || importing) return;
+    setImporting(true);
+    setImportError('');
+    setReceipt(undefined);
+    try {
+      const {readRegretArchive} = await import('@/lib/fish/regretArchive');
+      setReceipt(await importRegretArchive(owner, await readRegretArchive(file)));
+      setRetry(n => n + 1);
+    } catch (cause) { setImportError(errorText(cause)); }
+    finally { setImporting(false); }
+  };
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -146,6 +161,17 @@ export function FishRegretLibrary({owner, revision, templates}: {
     return true;
   };
   return <FishLibraryTimeDirectory name="后悔库" prefix="regret" kind="template" browseRounds selectBeforeLoad
+    dataActions={owner && <label className="inline-flex items-center gap-2 text-xs">
+      导入推演归档
+      <input type="file" aria-label="导入推演归档" accept=".zip,application/zip" className="max-w-56 text-xs" disabled={importing}
+        onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void importFile(file); }}/>
+    </label>}
+    notice={importing ? <p role="status" className="text-xs">正在校验并导入推演归档…</p>
+      : importError ? <p role="alert" className="text-xs text-destructive">{importError}</p>
+      : receipt ? <p role="status" data-testid="regret-import-receipt" className="text-xs">
+        {receipt.alreadyImported ? '该归档已导入，本次新增 0 条。' : '归档导入成功。'}轮次 {receipt.round.id} · 已核验 {receipt.round.done} / {receipt.round.total} 条 ·
+        模拟命中 {receipt.proposed} 条 · 本轮去重后新增 {receipt.round.emitted} 条
+      </p> : undefined}
     onOpenChange={setOpen} items={items} edits={catalog?.edits} onRename={(id, name) => edit(id, {name})}
     onSetHidden={(id, hidden) => edit(id, {hidden})}
     description={visible => `${visible.filter(item => !catalog?.edits[item.id]?.hidden && item.id !== LEGACY_ID).length} 轮推演${catalog?.legacy && !catalog.edits[LEGACY_ID]?.hidden ? ' · 含历史推演' : ''}`}

@@ -7,7 +7,8 @@ type ZipEntry = {
 
 const MAX_XML_BYTES = 32 * 1024 * 1024;
 
-export function openWorkbookZip(buffer: ArrayBuffer) {
+export function openZipBytes(buffer: ArrayBuffer, maxEntryBytes: number) {
+  if (buffer.byteLength < 22) throw Error('ZIP 文件不完整');
   const view = new DataView(buffer);
   const u16 = (at: number) => view.getUint16(at, true);
   const u32 = (at: number) => view.getUint32(at, true);
@@ -22,14 +23,15 @@ export function openWorkbookZip(buffer: ArrayBuffer) {
     if (at + 46 > end || u32(at) !== 0x02014b50) throw new Error('Excel 文件目录损坏');
     const nameLength = u16(at + 28);
     const name = decoder.decode(new Uint8Array(buffer, at + 46, nameLength));
+    if (at + 46 + nameLength > end || entries.has(name)) throw Error('ZIP 文件目录损坏');
     entries.set(name, { method: u16(at + 10), packed: u32(at + 20), size: u32(at + 24), local: u32(at + 42) });
     at += 46 + nameLength + u16(at + 30) + u16(at + 32);
   }
 
-  return async (name: string): Promise<Document | undefined> => {
+  return async (name: string): Promise<Uint8Array<ArrayBuffer> | undefined> => {
     const entry = entries.get(name);
     if (!entry) return undefined;
-    if (entry.size > MAX_XML_BYTES || entry.packed > MAX_XML_BYTES) throw new Error('工作表过大，请拆成多份 Excel');
+    if (entry.size > maxEntryBytes || entry.packed > maxEntryBytes) throw new Error('ZIP 条目超过大小限制');
     const { local, method } = entry;
     if (u32(local) !== 0x04034b50 || (method !== 0 && method !== 8)) throw new Error('Excel 文件压缩格式不受支持');
     const start = local + 30 + u16(local + 26) + u16(local + 28);
@@ -54,6 +56,16 @@ export function openWorkbookZip(buffer: ArrayBuffer) {
       bytes = output.subarray(0, offset);
     }
     if (bytes.length !== entry.size) throw new Error('Excel 文件数据不完整');
+    return bytes;
+  };
+}
+
+export function openWorkbookZip(buffer: ArrayBuffer) {
+  const read = openZipBytes(buffer, MAX_XML_BYTES);
+  return async (name: string): Promise<Document | undefined> => {
+    const bytes = await read(name);
+    if (!bytes) return undefined;
+    const decoder = new TextDecoder();
     const xml = new DOMParser().parseFromString(decoder.decode(bytes), 'application/xml');
     if (xml.getElementsByTagName('parsererror').length) throw new Error('Excel 工作表内容损坏');
     return xml;
