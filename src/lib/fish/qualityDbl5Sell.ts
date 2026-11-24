@@ -1,6 +1,6 @@
 import {definitionKey, type DeepDigFeatureDef} from '@/lib/deepDig/features';
 import type {FishSnapshot} from './algorithm';
-import type {QualityExitRule} from './quality';
+import type {QualityExitRule,QualityGroup} from './quality';
 import {boxStopLabel, defaultBoxStop, freezeBoxStop, selectBoxStopReference, selectBoxStopGuardRegime, selectBoxStopChannels, validateBoxStop, type BoxStopRule} from './qualityBoxStop';
 import type {QualityHoldingVeto} from './qualityVeto';
 
@@ -84,6 +84,13 @@ export function validateDbl5Sell(snapshot: FishSnapshot, rule?: QualityExitRule)
   if (!valid || box.structure.buffer !== rule.threshold ||
       (rule.version===DBL5_SELL_VERSION && line!=='sell-dbl5-guard' && line!=='sell-dbl5-impulse'))
     throw Error('DBL-5 卖出线与冻结的执行参数不一致');
+}
+
+export function initialDbl5RiskVetoes(plan:Pick<QualityGroup,'rule'|'holdingVetoes'>):QualityHoldingVeto[] {
+  const initial = isDbl5Sell(plan.rule) ? [dbl5SellAsBox(plan.rule,'initial-dbl5-seller')] : [];
+  return [...initial,...(plan.holdingVetoes ?? []).filter(v=>v.enabled && v.kind==='box-stop' &&
+    !v.activation && v.mirrorStage?.stage!=='after' && v.boxStop?.confirmation==='touch' &&
+    v.boxStop.structure.algorithm==='dbl5' && (v.boxStop.structure.kSource==='guard' || !!v.boxStop.reference))];
 }
 
 export function dbl5SellAsBox(rule: Dbl5SellRule, id: string): QualityHoldingVeto {

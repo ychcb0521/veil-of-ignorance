@@ -168,8 +168,8 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     plan.execution === 'intrabar-1m' ? (periodSnapshots.length || hourlyCda.length ? '用 1 分钟线复原所选周期指标，盘中达标即卖' : '用 1 分钟线复原 5 分钟指标，盘中达标即卖') : '只认 '+(closePeriod??'5 分钟')+'收盘读数');
   const mirror = [...versionTags(mirrorIdentity(plan.mirrorTakeProfit)), ...versionTags(mirrorExecutionIdentity(plan))];
   if (plan.mirrorTakeProfit?.enabled) add('mirror', '镜像平衡减仓', `涨 ${plan.mirrorTakeProfit.gainPct}% 卖 ${plan.mirrorTakeProfit.sellPct}%`, join(mirror), '限价镜像止盈，只卖一次');
-  if (plan.payoffRiskVersion) add('payoff-initial-risk', '盈亏比止盈', '沿用首仓限制静态最大回撤', plan.payoffRiskVersion,
-    '以首仓限制回撤阈值计算 L₀，分段切换后仍沿用开仓阈值。');
+  if (plan.payoffRiskVersion) add('payoff-initial-risk', '盈亏比止盈', plan.payoffRiskVersion==='payoff-stop-dbl5-initial-risk-v3'?'首仓 DBL-5 执行线距离':'沿用首仓限制静态最大回撤', plan.payoffRiskVersion,
+    plan.payoffRiskVersion==='payoff-stop-dbl5-initial-risk-v3'?'按开仓时已确认且低于买入价的执行线计算，取最小正距离作为 L₀ 比例。':'以首仓限制回撤阈值计算 L₀，分段切换后仍沿用开仓阈值。');
   const vetoes = activeHoldingVetoes(plan.holdingVetoes);
   const lossReviews=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(v=>v.kind===MIRROR_LOSS_REVIEW_KIND);
   lossReviews.forEach(validateHoldingVeto);

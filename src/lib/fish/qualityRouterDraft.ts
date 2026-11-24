@@ -4,7 +4,7 @@ import { freezeQualityPlan } from './qualityPlanVersions';
 import { additionExitForRound, additionExitKeys, buildRoundExits, type QualityAdditionExitRule, qualityAdditionPrerequisites, validateQualityAddition } from './qualityAddition';
 import { validateQualityMirror } from './qualityMirror';
 import { initialLimitedDrawdownPct, withLimitedPayoffRisk } from './qualityStaticDrawdownSell';
-import { validatePayoffStops } from './qualityVeto';
+import { DBL5_PAYOFF_RISK_VERSION, validatePayoffStops } from './qualityVeto';
 
 const sharedKeys = ['snapshot', 'metric', 'rule', 'combo', 'definitionSource', 'execution', 'vetoFill', 'holdingVetoes', 'mirrorTakeProfit', 'vetoStageMode', 'vetoPeakBasis'] as const;
 const sharedLabels = ['初始卖出公式', '初始卖出变量', '初始卖出门槛', '初始分段卖出', '公式来源', '卖出确认方式', '止损成交方式', '初始止损', '镜像止盈', '否决切换方式', '否决峰值基准'];
@@ -75,7 +75,7 @@ export function prepareQualityRouterDraft(original: QualityPlanRouter, structure
     if (!same([branch.rule, branch.holdingVetoes, branch.vetoStages, !!branch.addition?.enabled], [old.rule, old.holdingVetoes, old.vetoStages, !!old.addition?.enabled])) {
       branches[i] = withLimitedPayoffRisk(branch);
     }
-    validateQualityAddition(branch.addition); validateQualityMirror(branch.mirrorTakeProfit); validatePayoffStops(branch.holdingVetoes, branches[i].payoffRiskVersion ? initialLimitedDrawdownPct(branch) : undefined);
+    validateQualityAddition(branch.addition); validateQualityMirror(branch.mirrorTakeProfit); validatePayoffStops(branch.holdingVetoes, branches[i].payoffRiskVersion ? initialLimitedDrawdownPct(branch) : undefined, branches[i].payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION);
     if (race) { if (!branch.addition?.enabled || !branch.addition.rounds?.length) throw Error('每轮分流的两条分支都须有逐轮加仓条件'); continue; }
     if (!branch.addition?.enabled || (branch.addition.maxRounds ?? branch.addition.rounds?.length ?? 0) < n) throw Error(n === 1 ? '条件分支需要至少一次结构加仓，才能在第一次成交时选择分支' : '条件分支需要至少两次结构加仓，才能在第二次成交时选择分支');
     if (!qualityAdditionPrerequisites(branch.addition.rounds![n - 1]).some(c => c.metric === 'state')) throw Error(`第${routerOrdinal(original)}次结构加仓须保留状态 S 方向条件，以取得分支选择时的已收盘读数`);

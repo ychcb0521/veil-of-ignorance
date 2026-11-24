@@ -1,8 +1,8 @@
 import { definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { FishSnapshot } from './algorithm';
 import type { QualityExitRule, QualityGroup, QualityResult } from './quality';
-import {isDbl5Sell, isDbl5SellLine, validateDbl5Sell} from './qualityDbl5Sell';
-import { FREE_STATIC_DRAWDOWN_LABEL, LIMITED_PAYOFF_RISK_VERSION, PAYOFF_STOP_KIND, isLimitedStaticDrawdownVeto, payoffStopL0Pct } from './qualityVeto';
+import {initialDbl5RiskVetoes,isDbl5Sell, isDbl5SellLine, validateDbl5Sell} from './qualityDbl5Sell';
+import { FREE_STATIC_DRAWDOWN_LABEL, LIMITED_PAYOFF_RISK_VERSION, DBL5_PAYOFF_RISK_VERSION, PAYOFF_STOP_KIND, isLimitedStaticDrawdownVeto, payoffStopL0Pct } from './qualityVeto';
 
 export const STATIC_DRAWDOWN_SELL_VERSION = 'sell-static-drawdown-v1' as const;
 export const ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL = '静态最大回撤止损';
@@ -114,7 +114,7 @@ export function withLimitedPayoffRisk(plan: QualityGroup): QualityGroup {
     || plan.vetoStages?.some(stage => stage.conditions.some(v => v.enabled && v.kind === PAYOFF_STOP_KIND));
   const marked=[...(plan.holdingVetoes??[]),...(plan.vetoStages??[]).flatMap(s=>s.conditions)].some(v=>v.enabled&&isLimitedStaticDrawdownVeto(v));
   const initialRisk=initialLimitedDrawdownPct(plan)??(marked?payoffStopL0Pct(plan.holdingVetoes):undefined);
-  const version = plan.addition?.enabled && initialRisk != null && hasPayoff ? LIMITED_PAYOFF_RISK_VERSION : undefined;
+  const version = hasPayoff && initialDbl5RiskVetoes(plan).length ? DBL5_PAYOFF_RISK_VERSION : plan.addition?.enabled && initialRisk != null && hasPayoff ? LIMITED_PAYOFF_RISK_VERSION : undefined;
   if (version === plan.payoffRiskVersion) return plan;
   const { payoffRiskVersion: _, ...base } = plan;
   return version ? { ...base, payoffRiskVersion: version } : base;

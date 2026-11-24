@@ -6,7 +6,7 @@ import { makeQualityBuyFilter } from './qualityFilters';
 import { archiveQualityStudy } from './qualityCampaignArchive';
 import { materializePlanBuyFilters, type FishQualityStudy, type QualityGroup } from './quality';
 import { freezeSavedPlans } from './qualityPlanVersions';
-import { validatePayoffStops } from './qualityVeto';
+import { DBL5_PAYOFF_RISK_VERSION, validatePayoffStops } from './qualityVeto';
 import { STATIC_DRAWDOWN_SELL_CHOICE, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_METRIC, STATIC_DRAWDOWN_SELL_VERSION, initialLimitedDrawdownPct, staticDrawdownSellSnapshot, validateQualityExitRule, withLimitedPayoffRisk, type StaticDrawdownSellRule } from './qualityStaticDrawdownSell';
 
 import {DBL5_SELL_LINES, dbl5SellChoiceLine, isDbl5Sell, makeDbl5Sell} from './qualityDbl5Sell';
@@ -57,7 +57,7 @@ export function replaceQualitySellPlans(study: FishQualityStudy, incoming: reado
   for (const plan of prepared) {
     if (!plan.id || ids.has(plan.id)) throw new Error('卖出算法编号重复');
     ids.add(plan.id);
-    validateQualitySellStages(plan);validateQualityVetoStages(plan);validatePayoffStops(plan.holdingVetoes, plan.payoffRiskVersion ? initialLimitedDrawdownPct(plan) : undefined);
+    validateQualitySellStages(plan);validateQualityVetoStages(plan);validatePayoffStops(plan.holdingVetoes, plan.payoffRiskVersion ? initialLimitedDrawdownPct(plan) : undefined, plan.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION);
     if(plan.impulse1115Classification)validateHoldingImpulse1115Rule(plan.impulse1115Classification);
     if (!plan.label.trim()) throw new Error('请填写卖出算法名称');
     validateQualityExitRule(plan.snapshot, plan.rule);

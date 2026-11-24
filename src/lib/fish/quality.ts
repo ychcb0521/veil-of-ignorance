@@ -38,11 +38,11 @@ import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTri
 import { initialPayoffRiskThreshold, isStaticDrawdownSell, qualityExitAlgorithmLabel, qualityExitThresholdText, validateQualityExitRule } from './qualityStaticDrawdownSell';
 import {MIRROR_DEADLINE_KIND,mirrorDeadlineAt,mirrorCompletedBy} from './qualityMirrorDeadline';
 import {MIRROR_LOSS_REVIEW_KIND,reviewMirrorLoss,type MirrorLossReviewStates,type MirrorLossReviewCheck} from './qualityMirrorLossReview';
-import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVetoIdentity, LIMITED_PAYOFF_RISK_VERSION, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
+import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVetoIdentity, DBL5_PAYOFF_RISK_VERSION, LIMITED_PAYOFF_RISK_VERSION, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
 
-import { DBL5_SELL_VERSION, isDbl5Sell, dbl5SellAsBox } from './qualityDbl5Sell';
+import { DBL5_SELL_VERSION, isDbl5Sell, dbl5SellAsBox, initialDbl5RiskVetoes } from './qualityDbl5Sell';
 import { BOX_STOP_INVALID_DATA, qualityBoxMarketRepair, type BoxMarketRepairVersion } from './qualityBoxMarketRepair';
 
 import { QUALITY_NOTIONAL, qualityPositionIdentity, qualityPositionSize, type QualityPositionManagement } from './qualityPositionManagement';
@@ -65,7 +65,7 @@ export interface QualityGroup {
   definitionSource?: 'account';
   router?: import('./qualityPlanRouter').QualityPlanRouter;
   holdingVetoes?: QualityHoldingVeto[];
-  payoffRiskVersion?: typeof LIMITED_PAYOFF_RISK_VERSION;
+  payoffRiskVersion?: typeof LIMITED_PAYOFF_RISK_VERSION | typeof DBL5_PAYOFF_RISK_VERSION;
   positionManagement?: QualityPositionManagement;
   mirrorTakeProfit?: QualityMirrorTakeProfit;
   addition?: QualityAdditionRule;
@@ -130,6 +130,7 @@ export interface QualityResult {
   key: string; sampleId: string; groupId: string; evaluatedAt: number;
   routeDecision?: import('./qualityPlanRouter').QualityRouteDecision;
   status: 'open' | 'closed' | 'waiting' | 'error'; reason?: string;
+  initialDbl5RiskPct?: number | null;
   entryTime?: number; entryPrice?: number; endTime?: number; endPrice?: number;
   returnPct?: number; pnl?: number; peakPct?: number; adversePct?: number;
   drawdownPct?: number; uncapturedPct?: number; heldHours?: number; complete?: boolean;
@@ -681,7 +682,28 @@ async function evaluateQualitySampleCore(sample:QualitySample,group:QualityGroup
   catch(error){abort(signal);return {key,sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:error instanceof Error?error.message:'条件分支计算失败'};}
  }
 
- const initialPayoffRiskPct = group.payoffRiskVersion === LIMITED_PAYOFF_RISK_VERSION ? initialPayoffRiskThreshold(group) : undefined;
+ let initialPayoffRiskPct: number | null | undefined = group.payoffRiskVersion===LIMITED_PAYOFF_RISK_VERSION ? initialPayoffRiskThreshold(group) : undefined;
+ if (group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION && sample.enteredAt) {
+  const key=qualityResultKey(sample,group,observeHours);
+  if (previous?.key===key && previous.initialDbl5RiskPct!==undefined) initialPayoffRiskPct=previous.initialDbl5RiskPct;
+  else {
+   const entry=Math.ceil(sample.enteredAt/QUALITY_MINUTE)*QUALITY_MINUTE;
+   if (Math.floor(now/QUALITY_MINUTE)*QUALITY_MINUTE>entry) try {
+    const at=sample.binanceEntry ? sample.source.timeMs : entry;
+    const [bar]=sample.binanceEntry ? [] : await load(sample.source,entry,entry+QUALITY_MINUTE,pricePlan(),signal);
+    const price=sample.binanceEntry?.price??bar?.open;
+    if (!(price>0) || !Number.isFinite(price)) throw Error('缺少首仓买入价');
+    const {createBoxStopReader}=await import('./qualityBoxStop');
+    const reader=createBoxStopReader({vetoes:initialDbl5RiskVetoes(group),row:sample.source,entry:at,since:at,load,signal});
+    await reader.read({openTime:at,open:price,high:price,low:price,close:price,volume:0,takerBuyVolume:0});
+    const distances=reader.latestLines().filter(line=>line<price).map(line=>(price-line)/price*100);
+    initialPayoffRiskPct=distances.length?Math.min(...distances):null;
+   } catch(error) {
+    abort(signal);
+    return {key,sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:error instanceof Error?error.message:'首仓 DBL-5 风险读取失败'};
+   }
+  }
+ }
  if(!group.sellStages?.length&&!group.vetoStages?.length&&!group.advantage)return evaluateQualityPhase(sample,group,observeHours,now,load,signal,previous,{initialNotional,initialPayoffRiskPct,liveAt,continueAfterMirrorMarker});
  const key=qualityResultKey(sample,group,observeHours),base={key,sampleId:sample.id,groupId:group.id,evaluatedAt:now};
  try{
@@ -720,7 +742,7 @@ async function evaluateQualitySampleCore(sample:QualitySample,group:QualityGroup
   throw Error('卖出算法阶段切换未完成');
  }catch(error){abort(signal);return {...base,status:'error',reason:error instanceof Error?error.message:'卖出阶段计算失败'};}
 }
-async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult,runtime:{initialNotional?:number;pauseAfterAdditionCount?:number;ordinaryUntil?:number;conditionsUntil?:number;trackVetoPath?:boolean;initialPayoffRiskPct?:number;liveAt?:number;continueAfterMirrorMarker?:boolean}={}): Promise<QualityResult&{sellStageBoundary?:boolean}> {
+async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult,runtime:{initialNotional?:number;pauseAfterAdditionCount?:number;ordinaryUntil?:number;conditionsUntil?:number;trackVetoPath?:boolean;initialPayoffRiskPct?:number|null;liveAt?:number;continueAfterMirrorMarker?:boolean}={}): Promise<QualityResult&{sellStageBoundary?:boolean}> {
   const {initialNotional=QUALITY_NOTIONAL,pauseAfterAdditionCount,ordinaryUntil,conditionsUntil,trackVetoPath,initialPayoffRiskPct,liveAt,continueAfterMirrorMarker}=runtime;
   const key = qualityResultKey(sample, group, observeHours), base = { key, sampleId: sample.id, groupId: group.id, evaluatedAt: now };
   const actualPrice = sample.binanceEntry?.price;
@@ -965,7 +987,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let vetoPath:import('./qualityVeto').QualityHoldingPath|undefined;
     if(trackVetoPath){vetoPath=prior?.vetoPath??{entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};for(const b of held)vetoPath=advanceQualityHolding(vetoPath,b);vetoPath=advanceQualityHolding({...vetoPath,peak:Math.max(vetoPath.peak,fillPeak)},{openTime:finalTime,open:finalPrice,high:finalPrice,low:finalPrice,close:finalPrice,volume:0,takerBuyVolume:0});}
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
-    return { ...base,...(mirrorLossReviews?{mirrorLossReviews}:{}),...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
+    return { ...base,...(initialPayoffRiskPct!==undefined && (group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION) ? {initialDbl5RiskPct:initialPayoffRiskPct}:{}),...(mirrorLossReviews?{mirrorLossReviews}:{}),...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       ...(additionGuardPlus&&additionGuardPlus.at<=finalTime?{additionGuardPlus}:{}),
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
       ...(position&&(additionFill||trackLedger) ? {additionFill,...(group.addition?.quantityMode==='calculator'||prior?.instantMonitorSwitches?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,

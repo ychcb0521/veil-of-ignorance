@@ -29,7 +29,7 @@ function qualityReportedInitialRiskPct(plan: QualityRiskPlan) {
 export function qualityRelativeGain(plan:QualityRiskPlan,result?:QualityResult):{value:number|null;reason:string}{
  if(result?.status!=='closed')return {value:null,reason:result?.status==='open'?'持有中，卖出后才有相对涨幅':'尚无卖出结果'};
  const fills=qualityAdditionFills(result);if(!fills.length)return {value:null,reason:'没有实际加仓：相对涨幅只算有加仓的持仓（与交易战役一致）'};
- const stopPct=qualityReportedInitialRiskPct(plan);
+ const stopPct=result.initialDbl5RiskPct!==undefined ? result.initialDbl5RiskPct : qualityReportedInitialRiskPct(plan);
  if(stopPct==null)return {value:null,reason:'缺少初始止损 K初：请在组合算法起始阶段设置限制静态最大回撤'};
  const E=result.entryPrice,F=result.endPrice,K=fills.at(-1)?.sizing?.support,K0=E!=null?E*(1-stopPct/100):undefined;
  if(![E,F,K,K0].every(v=>v!=null&&Number.isFinite(v)&&v>0)||!(E!>K0!))return {value:null,reason:'缺少买入价、卖出价或加仓止损线'};
@@ -62,7 +62,7 @@ export const qualityGeometricPositionText=(value:number|null)=>value==null?'—'
  */
 export function qualityPayoffRatio(plan:QualityRiskPlan,result?:QualityResult):{value:number|null;reason:string}{
  if(result?.status!=='closed')return {value:null,reason:result?.status==='open'?'持有中，卖出后才有盈亏比':'尚无卖出结果'};
- const stopPct=timedDrawdownPayoffPct(plan) ?? qualityReportedInitialRiskPct(plan);
+ const stopPct=result.initialDbl5RiskPct!==undefined ? result.initialDbl5RiskPct : timedDrawdownPayoffPct(plan) ?? qualityReportedInitialRiskPct(plan);
  if(stopPct==null)return {value:null,reason:'缺少初始最大预期亏损 L₀：请在组合算法起始阶段设置限制静态最大回撤'};
  const notional=result.initialNotional??100,L0=notional*stopPct/100,pnl=result.pnl;
  if(pnl==null||!Number.isFinite(pnl)||!(L0>0))return {value:null,reason:'缺少已实现盈亏'};

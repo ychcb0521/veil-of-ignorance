@@ -33,6 +33,7 @@ export const ADDITION_PROFIT_LABEL='加仓后几何仓位与均衡价止盈';
 /** 【用户要求】2026-11-03 盈亏比止盈：整笔盈亏（已落袋＋按当时价格的未实现）÷ 初始最大预期亏损 L₀ ≥ N（R）时立刻卖出全部持仓。L₀＝初始仓位 × 硬性终止静态回撤%。 */
 export const PAYOFF_STOP_KIND='payoff-ratio' as const;
 export const PAYOFF_STOP_LABEL='盈亏比止盈';
+export const DBL5_PAYOFF_RISK_VERSION = 'payoff-stop-dbl5-initial-risk-v3' as const;
 export const LIMITED_PAYOFF_RISK_VERSION = 'payoff-stop-limited-initial-risk-v2' as const;
 export const holdingVetoName = (v: { kind: string; label: string;activation?:string;mirrorStage?:MirrorHardStopStage;limitedStaticVersion?:string }) => (v.kind === 'static-drawdown' ? isLimitedStaticDrawdownVeto(v)?LIMITED_STATIC_DRAWDOWN_LABEL:FREE_STATIC_DRAWDOWN_LABEL : v.label)+(v.activation?'（'+POST_MIRROR_PROTECTION_LABEL+'）':'')+(v.mirrorStage?'（'+mirrorHardStopStageLabel(v.mirrorStage)+'）':'');
 export const holdingVetoLabel=(v:Pick<QualityHoldingVeto,'label'|'direction'|'threshold'|'geometricMultiple'|'activation'|'mirrorStage'|'limitedStaticVersion'|'mirrorLossThreshold'|'mirrorReviewSchedule'>&{kind:string})=>v.kind===MIRROR_LOSS_REVIEW_KIND?mirrorLossReviewSummary(v.threshold,v.mirrorLossThreshold,v.mirrorReviewSchedule):v.kind===MIRROR_DEADLINE_KIND?`持仓 ${v.threshold} 小时${MIRROR_DEADLINE_LABEL}即清仓`:v.kind===BOX_STOP_KIND&&'boxStop' in v?boxStopLabel((v as QualityHoldingVeto).boxStop!)+(v.activation?POST_MIRROR_PROTECTION_LABEL:'')+(v.mirrorStage?mirrorHardStopStageLabel(v.mirrorStage):''):v.kind===PAYOFF_STOP_KIND?`盈亏比 ≥ ${v.threshold}R${v.mirrorStage?mirrorHardStopStageLabel(v.mirrorStage):''}`:v.kind===ADDITION_PROFIT_KIND?`几何仓位 ≥ ${v.geometricMultiple??100}× 且 价格高出均衡价 ≥ ${v.threshold}%`:`${holdingVetoName(v)} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`;
@@ -69,8 +70,8 @@ export function payoffStopL0Pct(vetoes: readonly QualityHoldingVeto[] = []): num
   const limited=stops.filter(isLimitedStaticDrawdownVeto),selected=limited.length?limited:stops;
   return selected.length ? Math.min(...selected.map(v=>v.threshold)) : undefined;
 }
-export function validatePayoffStops(vetoes: readonly QualityHoldingVeto[] = [], limitedPct?: number) {
-  if (activeHoldingVetoes(vetoes).some(v => v.kind === PAYOFF_STOP_KIND) && limitedPct == null && payoffStopL0Pct(vetoes) == null) throw new Error('盈亏比止盈需要初始最大预期亏损 L₀：请设置起始限制静态最大回撤，或启用自由静态最大回撤');
+export function validatePayoffStops(vetoes: readonly QualityHoldingVeto[] = [], limitedPct?: number, hasEntryLine = false) {
+  if (activeHoldingVetoes(vetoes).some(v => v.kind === PAYOFF_STOP_KIND) && !hasEntryLine && limitedPct == null && payoffStopL0Pct(vetoes) == null) throw new Error('盈亏比止盈需要初始最大预期亏损 L₀：请设置起始限制静态最大回撤，或启用自由静态最大回撤');
 }
 /** No conditions keeps old experiment keys byte-for-byte compatible. IDs/order do not change the outcome. */
 export function holdingBoxStopIdentity(v:QualityHoldingVeto){

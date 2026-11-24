@@ -66,3 +66,24 @@ it('reads buffered static distances from closed bars only and keys cached values
  expect(buffered.value).not.toBe(raw.value);
  expect(selected.value).toBeLessThanOrEqual(buffered.value!);
 });
+
+it('saves DBL-5 sellers with a payoff stop and freezes the entry distance as R', async()=>{
+ const {replaceQualitySellPlans}=await import('@/lib/fish/qualitySellPlans');
+ const {newQualityStudy}=await import('@/lib/fish/quality');
+ const {PAYOFF_STOP_KIND}=await import('@/lib/fish/qualityVeto');
+ const entry=T+15*300000, bars=new Map(dblSample().map(b=>[b.openTime,b]));
+ const load:FishReconstructionLoader=async(_r,a,b,p)=>Array.from({length:(b-a)/p.step},(_,i)=>{
+   const openTime=a+i*p.step;
+   return {...bars.get(openTime)??{openTime,open:100,high:100,low:100,close:100,volume:10,takerBuyVolume:5,quoteVolume:1000,takerBuyQuoteVolume:500},
+     ...(p.step===60000?{open:200,high:200,low:1,close:200}:{}),DBL5_tick_size:1};
+ });
+ const source={id:'row',symbol:'TESTUSDT',timeMs:entry,timeLabel:'',fallbackZone:''};
+ const sample:QualitySample={id:'row',source,enteredAt:entry,basis:'signal',groups:[],importedAt:entry};
+ const candidate=makeQualitySellPlan('sell-dbl5-guard+impulse1115:line','<',.25,[]);
+ candidate.holdingVetoes=[{id:'risk',label:'盈亏比止盈',kind:PAYOFF_STOP_KIND,enabled:true,direction:'>=',threshold:3000}];
+ const plan=replaceQualitySellPlans(newQualityStudy(),[candidate]).sellPlans![0];
+ expect(plan.payoffRiskVersion).toBe('payoff-stop-dbl5-initial-risk-v3');
+ const result=await evaluateQualitySample(sample,plan,0,entry+60000,load,new AbortController().signal);
+ expect(result.status).toBe('closed');
+ expect(result.initialDbl5RiskPct).toBeCloseTo((200-result.endPrice!)/2);
+});
