@@ -61,6 +61,10 @@ describe('native box decisions for holding additions',()=>{
   expect(noDeadline.simulation.additionFills).toHaveLength(2);
   expect(noDeadline.marker).toBeUndefined();
   expect(noDeadline.proposedSignal).toBeUndefined();
+  const unmarked = await replayParallelCandidate(o.row.symbol,2,async()=>noDeadline.baseline,true);
+  expect(unmarked.proposedSignal).toEqual(proposedSignal);
+  expect((await replayParallelCandidate(o.row.symbol,2,simulate,true)).proposedSignal).toBeUndefined();
+  expect((await replayParallelCandidate(o.row.symbol,3,async()=>noDeadline.baseline,true)).proposedSignal).toBeUndefined();
   expect(plan).toEqual(frozen);
   expect(await simulate(false)).toEqual(baseline);
   const study = {...newQualityStudy(), samples:[{...candidate, monitorEntry:{at:o.entry+M,records:[]}}],

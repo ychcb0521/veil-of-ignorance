@@ -27,7 +27,7 @@ function AttemptEvidence({attempt}: {attempt: RegretAttempt}) {
   return <details className="min-w-24">
     <summary className="cursor-pointer text-primary">查看</summary>
     <div className="mt-1 max-w-lg space-y-1 whitespace-normal text-muted-foreground">
-      <p>推演时间 {date(baseline.evaluatedAt)} · 目标第 {attempt.additionCount} 次加仓</p>
+      <p>推演时间 {date(baseline.evaluatedAt)} · 目标第 {attempt.additionCount} 次加仓 · 输出镜像前{attempt.unmarkedOnly ? "未打标" : "已打标"}信号</p>
       <p>镜像前终止 {marker ? [date(marker.observedAt), marker.cause?.label, baseline.reason].filter(Boolean).join(' · ') : '未触发'}</p>
       <p>{simulation.reason} · 模拟结束 {date(simulation.endTime)}</p>
       {proposedSignal && <p>信号价格 {proposedSignal.buyPrice} · 委托止损 {proposedSignal.stopPrice}</p>}
@@ -206,7 +206,7 @@ export function FishRegretLibrary({owner, revision, templates, openRequest}: {
       summary: `${round.done} / ${round.total} 条 · ${round.emitted} 条生成信号`,
       templateGroup: directory.groupPlans([round.plan]),
       settings: () => <>
-        <p>第 {round.additionCount} 次加仓生成信号 · 观察时长 {round.observeHours} 小时</p>
+        <p>第 {round.additionCount} 次加仓生成信号 · 观察时长 {round.observeHours} 小时 · 输出镜像前{round.unmarkedOnly ? "未打标" : "已打标"}信号</p>
         <FishQualityMonitorSettingsView plan={round.plan} savedOnly/>
       </>,
       content: (close, picking) => <RegretRecords key={`${round.id}:${round.done}`} owner={owner} id={round.id} picking={picking} close={close}/>,

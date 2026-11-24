@@ -33,6 +33,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
   const [simulationPlans, setSimulationPlans] = useState<QualityGroup[] | undefined>();
   const availablePlans = simulationPlans ?? plans;
   const [planId, setPlanId] = useState('');
+  const [unmarkedOnly,setUnmarkedOnly] = useState(false);
   const [count, setCount] = useState(String(DEFAULT_SIGNAL_ADDITION_COUNT));
   const [hours, setHours] = useState(String(study.observeHours));
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -49,6 +50,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
     let active = true;
     void loadParallelSettings(owner).then(settings => {
       if (!active) return;
+      setUnmarkedOnly(settings?.unmarkedOnly === true);
       if (settings) {
         setSimulationPlans(settings.plans);
         setPlanId(settings.planId);
@@ -68,7 +70,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
     if (!validSignalAdditionCount(additionCount) || hours === '' || !Number.isFinite(observeHours) || observeHours < 0 || observeHours > 8784) {
       throw Error('加仓次数须为正整数，观察时长须在 0～8784 小时之间');
     }
-    return { planId: selected.id, additionCount, observeHours, plans: nextPlans };
+    return { ...(unmarkedOnly ? {unmarkedOnly:true} : {}), planId: selected.id, additionCount, observeHours, plans: nextPlans };
   };
   const saveSettings = async (nextPlans?: QualityGroup[]) => {
     try {
@@ -133,7 +135,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
           task: 'monitor', mode: 'restart', signal: aborter.signal,
           onProgress: next => setProgress({ ...next, done: offset + next.done, total: ids.length }),
           onResult: () => {},
-          parallelUniverse: { additionCount: batch.conditions.additionCount, onAttempt: async attempt => {
+          parallelUniverse: { unmarkedOnly: batch.conditions.unmarkedOnly, additionCount: batch.conditions.additionCount, onAttempt: async attempt => {
             const result = await saveParallelAttempt(owner, attempt, batch.round);
             if (result) {
               onTableResult?.(result);
@@ -200,6 +202,12 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
       <FishConditionDialogContent><FishConditionSettings dialog title="反事实法" description="设置模拟方案、触发加仓次数和观察时长。">
         {saving && <p role="status" className="sticky top-0 z-10 bg-background">正在保存反事实法设置…</p>}
         {error && <p role="alert" className="sticky top-0 z-10 bg-background text-destructive">{error}</p>}
+        <div className="flex items-center gap-2">
+          <label>输出信号 <select className="rounded border bg-background p-2" value={unmarkedOnly ? "unmarked" : "marked"} onChange={e=>setUnmarkedOnly(e.target.value==="unmarked")}>
+            <option value="marked">镜像平衡减仓前已打标</option><option value="unmarked">镜像平衡减仓前未打标</option>
+          </select></label>
+          <FishQualityInfo label="输出信号说明"><p>按常规推演是否触发镜像平衡减仓前的终止标记选择候选。两种输出都要求第 N 次加仓实际成交，并取得该次成交价、时间和有效止损价。</p></FishQualityInfo>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1">信号触发加仓次数 N
             <input className="rounded border bg-background p-2" type="number" min={1} step={1} value={count} onChange={event => setCount(event.target.value)}/>

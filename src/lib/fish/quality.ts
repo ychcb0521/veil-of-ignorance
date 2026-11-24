@@ -1054,6 +1054,7 @@ export interface QualityRunTiming { sampleId: string; groupId: string; symbol: s
 export interface QualityRunOptions {
   parallelUniverse?: {
     additionCount: number;
+    unmarkedOnly?: boolean;
     onAttempt: (attempt: import('./parallelUniverse').ParallelAttempt) => Promise<void>;
   };
   /** A finite offline series ends at its last available candle rather than at wall-clock time. */
@@ -1196,7 +1197,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
           await parallel.onAttempt({
             version: parallelEngine.PARALLEL_UNIVERSE_VERSION, id: crypto.randomUUID(),
             candidate: originalCandidates?.get(s.id) ?? s, plan: g, observeHours: study.observeHours,
-            additionCount: parallel.additionCount, baseline: skipped, simulation: skipped,
+            unmarkedOnly: parallel.unmarkedOnly, additionCount: parallel.additionCount, baseline: skipped, simulation: skipped,
           });
         }
       }
@@ -1224,11 +1225,11 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
               if (isLegacyQualityPlan(g)) throw Error('此冻结旧版方案不支持镜像前标记');
               const { replayParallelCandidate, PARALLEL_UNIVERSE_VERSION } = await import('./parallelUniverse');
               const attempt = await replayParallelCandidate(s.source.symbol, options.parallelUniverse.additionCount,
-                continueAfterMirrorMarker => evaluateQualitySampleWithMarketRepair(s, g, study.observeHours, marketEnd, initializedLoad, signal, undefined, undefined, undefined, continueAfterMirrorMarker));
+                continueAfterMirrorMarker => evaluateQualitySampleWithMarketRepair(s, g, study.observeHours, marketEnd, initializedLoad, signal, undefined, undefined, undefined, continueAfterMirrorMarker), options.parallelUniverse.unmarkedOnly);
               abort(signal);
               await options.parallelUniverse.onAttempt({ ...attempt, version: PARALLEL_UNIVERSE_VERSION,
                 id: crypto.randomUUID(), candidate: originalCandidates?.get(s.id) ?? s, plan: g, observeHours: study.observeHours,
-                additionCount: options.parallelUniverse.additionCount });
+                additionCount: options.parallelUniverse.additionCount, unmarkedOnly: options.parallelUniverse.unmarkedOnly });
               result = attempt.simulation;
             } else if (isLegacyQualityPlan(g)) {
               result = await evaluateLegacyQualitySample(s, g, study.observeHours, marketEnd, tradeLoad, signal, qualityResultKey(s, g, study.observeHours));

@@ -24,6 +24,7 @@ export interface ParallelAttempt {
   plan: QualityGroup;
   observeHours: number;
   additionCount: number;
+  unmarkedOnly?: boolean;
   baseline: QualityResult;
   simulation: QualityResult;
   marker?: NonNullable<QualityResult['exitSnapshot']>;
@@ -37,6 +38,7 @@ export async function replayParallelCandidate(
   symbol: string,
   additionCount: number,
   replay: (continueAfterMarker: boolean) => Promise<QualityResult>,
+  unmarkedOnly = false,
 ) {
   if (!validSignalAdditionCount(additionCount)) throw Error('信号触发加仓次数须为正整数');
   // Use the ordinary replay to identify the winning exit without changing precedence.
@@ -49,10 +51,10 @@ export async function replayParallelCandidate(
   const simulation = marker ? await replay(true) : baseline;
   const fill = qualityAdditionFills(simulation)[additionCount - 1];
   const stop = fill && qualityAdditionStopOrder({ quality_addition_fill: fill });
-  const proposedSignal: ParallelSignal | undefined = marker && fill && stop &&
+  const proposedSignal: ParallelSignal | undefined = (unmarkedOnly ? !marker : !!marker) && fill && stop &&
     Number.isFinite(fill.at) && fill.at > 0 && Number.isFinite(fill.price) && fill.price > 0 &&
     (simulation.status === 'open' || simulation.status === 'closed') &&
-    (simulation.endTime ?? 0) >= marker.observedAt
+    (!marker || (simulation.endTime ?? 0) >= marker.observedAt)
     ? { symbol, buyPrice: fill.price, time: fill.at, stopPrice: stop.price, source: '平行宇宙', additionCount }
     : undefined;
   return { baseline, simulation, marker, proposedSignal };

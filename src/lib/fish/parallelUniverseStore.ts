@@ -114,6 +114,7 @@ async function transaction<T>(
 export interface ParallelSettings {
   plans?: import('./quality').QualityGroup[];
   planId: string;
+  unmarkedOnly?: boolean;
   additionCount: number;
   observeHours: number;
 }
@@ -134,6 +135,7 @@ export function saveParallelSettings(owner: string | undefined, settings: Parall
 export interface RegretRoundIdentity { id: string; startedAt: number; total: number }
 export interface RegretRound extends RegretRoundIdentity {
   plan: ParallelAttempt['plan'];
+  unmarkedOnly?: boolean;
   additionCount: number;
   observeHours: number;
   done: number;
@@ -171,7 +173,7 @@ export function saveParallelAttempt(owner: string | undefined, attempt: Parallel
           getRound.onsuccess = () => {
             const previousRound: RegretRound | undefined = getRound.result;
             const summary = previousRound ?? {
-              ...round, plan: attempt.plan, additionCount: attempt.additionCount, observeHours: attempt.observeHours,
+              ...round, unmarkedOnly: attempt.unmarkedOnly, plan: attempt.plan, additionCount: attempt.additionCount, observeHours: attempt.observeHours,
               done: 0, emitted: 0,
             };
             settings.put({ ...summary, done: summary.done + 1, emitted: summary.emitted + Number(emitted) }, roundKey);
@@ -310,7 +312,7 @@ export async function importRegretArchive(owner: string, archive: import('./regr
       const occupied = settings.count(rowsRange);
       occupied.onsuccess = () => {
         if (occupied.result) return;
-        const summary: RegretRound = {...round, plan: attempts[0].plan, additionCount: attempts[0].additionCount, observeHours: attempts[0].observeHours, done: 0, emitted: 0};
+        const summary: RegretRound = {...round, unmarkedOnly: attempts[0].unmarkedOnly, plan: attempts[0].plan, additionCount: attempts[0].additionCount, observeHours: attempts[0].observeHours, done: 0, emitted: 0};
         let proposed = 0;
         const insert = () => {
           const attempt = attempts[summary.done];
