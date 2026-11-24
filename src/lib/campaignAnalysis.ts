@@ -1099,6 +1099,10 @@ export function resolveMainRiskAnchors(
   reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
 ): CampaignRiskAnchors {
   const paperRisk=qualityCampaignStaticRisk(campaign);
+  if (!paperRisk && campaign.comparison?.sellEvidence?.dbl5SellerRiskPctV1 !== undefined) {
+    const exposure=campaign.comparison.holdingMetrics?.initialNotional ?? campaign.initial_main_size_usdt;
+    return {anchors:[],expectedMaxLoss:0,anchoredExposureNotional:0,unanchoredExposureNotional:exposure,fullExposureNotional:exposure};
+  }
   if(paperRisk)return {anchors:[{mainLegId:legs.find(l=>l.leg_role==='main_open')?.id??legs[0]?.id??'',entryPrice:paperRisk.entry,stopPrice:paperRisk.stop,exposureNotional:paperRisk.notional,drawdownFraction:paperRisk.percent/100,expectedMaxLoss:paperRisk.loss}],expectedMaxLoss:paperRisk.loss,anchoredExposureNotional:paperRisk.notional,unanchoredExposureNotional:0,fullExposureNotional:paperRisk.notional};
   const mainLegs = legs
     .filter(leg => leg.leg_role === 'main_open')

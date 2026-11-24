@@ -17,3 +17,10 @@ it('uses the same L₀ as the campaign page for monitored campaigns', () => {
   const risk = qualityCampaignStaticRisk({ initial_main_size_usdt: 100, comparison: { sellEvidence: { holdingVetoes: [veto(5)] }, holdingMetrics: { initialNotional: 100, entryPrice: 4 } } } as never);
   expect(risk?.loss).toBe(5); expect(qualityPayoffRatio({ holdingVetoes: [veto(5)] }, closed(10)).value).toBe(10 / risk!.loss);
 });
+
+it('uses the frozen opening DBL-5 seller distance for reported R even with a static veto',()=>{
+ const plan={holdingVetoes:[veto(5)]};
+ expect(qualityPayoffRatio(plan,{...closed(5.6),dbl5SellerRiskPctV1:2.8}).value).toBeCloseTo(2);
+ expect(qualityPayoffRatio(plan,{...closed(5.6),dbl5SellerRiskPctV1:null}).value).toBeNull();
+ expect(qualityCampaignStaticRisk({comparison:{monitorPlan:plan,sellEvidence:{dbl5SellerRiskPctV1:2.8,initialStaticStopPct:5},holdingMetrics:{initialNotional:100,entryPrice:100}}} as never)?.loss).toBeCloseTo(2.8);
+});

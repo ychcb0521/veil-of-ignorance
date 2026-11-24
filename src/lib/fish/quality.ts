@@ -43,6 +43,7 @@ import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVet
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
 
+import { staticDblDistancePct } from './dblDistancePct';
 import { DBL5_SELL_VERSION, isDbl5Sell, dbl5SellAsBox, initialDbl5RiskVetoes } from './qualityDbl5Sell';
 import { BOX_STOP_INVALID_DATA, qualityBoxMarketRepair, type BoxMarketRepairVersion } from './qualityBoxMarketRepair';
 
@@ -132,6 +133,8 @@ export interface QualityResult {
   routeDecision?: import('./qualityPlanRouter').QualityRouteDecision;
   status: 'open' | 'closed' | 'waiting' | 'error'; reason?: string;
   initialDbl5RiskPct?: number | null;
+  /** Reporting only: opening distance to the native seller line plus its own ATR buffer. */
+  dbl5SellerRiskPctV1?:number|null;
   entryTime?: number; entryPrice?: number; endTime?: number; endPrice?: number;
   returnPct?: number; pnl?: number; peakPct?: number; adversePct?: number;
   drawdownPct?: number; uncapturedPct?: number; heldHours?: number; complete?: boolean;
@@ -668,10 +671,26 @@ const abort = (signal: AbortSignal) => { if (signal.aborted) throw new DOMExcept
 /** Observe the saved timing policy causally; only the execution minute open contributes to a fill. */
 /** Replay each selected seller only until the next actual addition boundary. */
 export async function evaluateQualitySample(sample:QualitySample,group:QualityGroup,observeHours:number,now:number,load:FishReconstructionLoader,signal:AbortSignal,previous?:QualityResult, initialNotional=qualityPositionSize(group).notional,liveAt?:number,continueAfterMirrorMarker=false):Promise<QualityResult>{
- const result=await evaluateQualitySampleCore(sample,group,observeHours,now,load,signal,previous,initialNotional,liveAt,continueAfterMirrorMarker);
+ let result=await evaluateQualitySampleCore(sample,group,observeHours,now,load,signal,previous,initialNotional,liveAt,continueAfterMirrorMarker);
  // Forward execution must publish trade decisions without waiting for display-only market reads.
  // The holding-monitor/replay path reads this observer independently with no live execution clock.
  if(liveAt!=null)return result;
+ if(!group.router && isDbl5Sell(group.rule) && result.entryTime!=null && result.entryPrice!>0 && (result.status==="open" || result.status==="closed")){
+  const price=result.entryPrice!, at=result.entryTime;
+  let risk=previous?.key===result.key && previous.entryPrice===price && previous.entryTime===at ? previous.dbl5SellerRiskPctV1 : undefined;
+  if(risk==null){
+   const distances:number[]=[];
+   try {
+    const {createBoxStopReader}=await import("./qualityBoxStop");
+    const reader=createBoxStopReader({vetoes:[dbl5SellAsBox(group.rule,"opening-seller")],row:sample.source,entry:at,since:at,load,signal});
+    await reader.read({openTime:at,open:price,high:price,low:price,close:price,volume:0,takerBuyVolume:0},{onRawReference:(line,atr,buffer)=>{
+     distances.push(staticDblDistancePct(price,line,atr,buffer));
+    }});
+    risk=distances.length?Math.min(...distances):null;
+   } catch {abort(signal);risk=null;}
+  }
+  result={...result,dbl5SellerRiskPctV1:risk};
+ }
  if(!group.impulse1115Classification||group.router||!['open','closed','waiting'].includes(result.status)||result.entryTime==null||!(result.entryPrice!>0))return result;
  const observationAt=result.endTime??Math.min(Math.floor(now/QUALITY_MINUTE)*QUALITY_MINUTE,
    observeHours===0?Infinity:result.entryTime+Math.ceil(observeHours*60)*QUALITY_MINUTE);

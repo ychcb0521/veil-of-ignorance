@@ -86,4 +86,7 @@ it('saves DBL-5 sellers with a payoff stop and freezes the entry distance as R',
  const result=await evaluateQualitySample(sample,plan,0,entry+60000,load,new AbortController().signal);
  expect(result.status).toBe('closed');
  expect(result.initialDbl5RiskPct).toBeCloseTo((200-result.endPrice!)/2);
+ const plain=await evaluateQualitySample(sample,{...plan,holdingVetoes:[],payoffRiskVersion:undefined},0,entry+60000,load,new AbortController().signal);
+ expect(plain.dbl5SellerRiskPctV1).toBeGreaterThan(0);
+ expect(plain.dbl5SellerRiskPctV1).toBe(result.dbl5SellerRiskPctV1);
 });

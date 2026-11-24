@@ -62,7 +62,8 @@ export const qualityGeometricPositionText=(value:number|null)=>value==null?'—'
  */
 export function qualityPayoffRatio(plan:QualityRiskPlan,result?:QualityResult):{value:number|null;reason:string}{
  if(result?.status!=='closed')return {value:null,reason:result?.status==='open'?'持有中，卖出后才有盈亏比':'尚无卖出结果'};
- const stopPct=result.initialDbl5RiskPct!==undefined ? result.initialDbl5RiskPct : timedDrawdownPayoffPct(plan) ?? qualityReportedInitialRiskPct(plan);
+ const stopPct=result.dbl5SellerRiskPctV1!==undefined ? result.dbl5SellerRiskPctV1 : result.initialDbl5RiskPct!==undefined ? result.initialDbl5RiskPct : timedDrawdownPayoffPct(plan) ?? qualityReportedInitialRiskPct(plan);
+ if(result.dbl5SellerRiskPctV1!==undefined && !(stopPct!>0))return {value:null,reason:'开仓时缺少有效的 DBL-5 卖出线风险距离'};
  if(stopPct==null)return {value:null,reason:'缺少初始最大预期亏损 L₀：请在组合算法起始阶段设置限制静态最大回撤'};
  const notional=result.initialNotional??100,L0=notional*stopPct/100,pnl=result.pnl;
  if(pnl==null||!Number.isFinite(pnl)||!(L0>0))return {value:null,reason:'缺少已实现盈亏'};
