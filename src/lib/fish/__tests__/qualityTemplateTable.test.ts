@@ -65,3 +65,17 @@ it('imports a batch of original input records without copying view IDs, plans or
   expect(selected.ids[0]).not.toMatch(/^template-/);
   expect(input).toEqual(before);
 });
+
+it('imports monitored evidence only for selected rows and retains the original campaign link', () => {
+  const input=monitorArchiveFixture(), round=input.monitorLibrary!.rounds[0];
+  const builder=createQualityTemplateTable(true);
+  builder.append(monitorRoundStudy(input,round));
+  const view=builder.finish(), row=view.rows[0];
+  const picked=qualityTemplateImportSelection(view,[row.id],true);
+  expect(picked.snapshot.samples).toHaveLength(1);
+  const evidence=picked.snapshot.samples[0].importedMonitoring!;
+  const results=view.results.get(row.signalId!)!;
+  expect(evidence.map(item=>item.result)).toEqual([...results.values()]);
+  expect(evidence.map(item=>item.path)).toEqual([...results.values()].map(templateCampaignPath));
+  expect(picked.snapshot.sellPlans).toBeUndefined();
+});

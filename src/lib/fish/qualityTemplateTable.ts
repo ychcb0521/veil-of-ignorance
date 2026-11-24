@@ -1,4 +1,5 @@
 import {isDelayedTuringReplaySample} from '@/lib/turingReplaySamples';
+import {shortFishHash} from './algorithm';
 import {serializeAccountBlob} from '@/lib/accountBlobCodec';
 import {activeBuyFilters, activeStandaloneBuyFilters, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityEntryIdentity, qualityFilterReadingKey, qualityFilterStatus, type FishQualityStudy, type QualityBuyFilter, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample} from './quality';
 import {qualityResultMap, qualityRowResult} from './qualityComparison';
@@ -6,6 +7,14 @@ import {qualityScreeningResults, screeningResultIndex, screeningRowResults, type
 import {activeSignalMetrics, signalReadingKey, type QualitySignalMetric} from './qualitySignalReadings';
 import {qualityPostExitKey, type QualityPostExitReading} from './qualityPostExit';
 import {qualityRowMonitorTimeBasis,qualitySignalTime} from './qualityAdmissionTime';
+
+export interface ImportedMonitoring {
+  plan: QualityGroup;
+  result?: QualityResult;
+  path?: string;
+  postExit?: QualityPostExitReading;
+  filterStatus?: QualityFilterStatus;
+}
 
 interface TemplateSourceRow {
   samples:readonly QualitySample[];
@@ -137,8 +146,8 @@ export function createQualityTemplateTable(importSelection=false) {
 }
 
 /** Batch import copies original inputs only. View IDs, settings, and archived results stay in the library. */
-export function qualityTemplateImportSelection(table:QualityTemplateTable,ids:readonly string[]) {
-  const groups=new Map<string,QualityGroup>(), samples=new Map<string,{original:QualitySample;groups:Set<string>}>();
+export function qualityTemplateImportSelection(table:QualityTemplateTable,ids:readonly string[], includeMonitoring=false) {
+  const groups=new Map<string,QualityGroup>(), samples=new Map<string,{original:QualitySample;groups:Set<string>;monitoring:Map<string,ImportedMonitoring>}>();
   for(const id of ids){
     const entry=table.importRows?.get(id);
     if(!entry)continue;
@@ -148,10 +157,25 @@ export function qualityTemplateImportSelection(table:QualityTemplateTable,ids:re
       if(detector&&!sample.groups.includes(detector.id)||!detector&&sample.groups.length)continue;
       const key=JSON.stringify([sample.id,qualityEntryIdentity(sample.source,sample.enteredAt)]);
       let picked=samples.get(key);
-      if(!picked){picked={original:sample,groups:new Set()};samples.set(key,picked);}
+      if(!picked){picked={original:sample,groups:new Set(),monitoring:new Map()};samples.set(key,picked);}
+      if (includeMonitoring) {
+        const rowId = id.split('/detector/')[0];
+        for (const plan of table.study.sellPlans ?? []) {
+          const result = table.results.get(rowId)?.get(plan.id);
+          const filterStatus = table.filterStatus.get(plan.id)?.get(rowId);
+          if (!result && !filterStatus) continue;
+          const path = result && templateCampaignPath(result);
+          const archivePlanId = 'imported-monitor-' + shortFishHash(signature([withoutId(plan), result?.groupId]));
+          const previous = picked.monitoring.get(archivePlanId);
+          if (!previous || (result?.evaluatedAt ?? 0) >= (previous.result?.evaluatedAt ?? 0)) {
+            picked.monitoring.set(archivePlanId, {plan:{...plan,id:archivePlanId,label:plan.label+'（归档）'}, result, path,
+              filterStatus, postExit:table.postExit.get(rowId)?.get(plan.id)});
+          }
+        }
+      }
       if(detector){groups.set(detector.id,detector);picked.groups.add(detector.id);}
     }
   }
-  const snapshot={...newQualityStudy(0),samples:[...samples.values()].map(({original,groups})=>({...original,groups:[...groups]})),groups:[...groups.values()]};
+  const snapshot={...newQualityStudy(0),samples:[...samples.values()].map(({original,groups,monitoring})=>({...original,groups:[...groups],...(monitoring.size ? {importedMonitoring:[...monitoring.values()]} : {})})),groups:[...groups.values()]};
   return {snapshot,ids:qualityDisplayRows(snapshot).map(row=>row.id)};
 }

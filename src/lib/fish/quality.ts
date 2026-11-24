@@ -100,6 +100,7 @@ export function qualityRuleText(g: QualityGroup): string {
 // An addition-only plan still needs a valued holding path, even without an exit threshold.
 export const hasQualityExit = (group: QualityGroup) => !!group.router || !!group.addition?.enabled || (group.combo ? !!group.rule : !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0);
 export interface QualitySample {
+  importedMonitoring?: import("./qualityTemplateTable").ImportedMonitoring[];
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
   /** Exact information copied from a selected directory; no archive or detector recomputation. */
   directoryInformation?: {scope: import('./libraryBrowse').BrowseScope; directoryId: string; recordId: string; detail?: string; detectors?: import('./filterDetectorReadings').FilterDetectorReading[]};
