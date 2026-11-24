@@ -267,7 +267,7 @@ function PositionSetting({label,children,wide=false}:{label:ReactNode;children:R
  </div>;
 }
 /** vetoStages：每次加仓「卖出」里的否决条件，存为方案的 vetoStages（afterAdditions = 第几次），与硬性终止同一套条件和引擎。 */
-export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVetoStages,imageRound,stickyRounds=false,positionExtra}:{draft:AdditionDraft;setDraft:(draft:AdditionDraft)=>void;vetoStages?:VetoStagesDraft;setVetoStages?:(draft:VetoStagesDraft)=>void;imageRound?:number;stickyRounds?:boolean;positionExtra?:ReactNode}) {
+export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVetoStages,imageRound,stickyRounds=false,positionExtra,onRemoveRound}:{onRemoveRound?:(addition:AdditionDraft,vetoStages?:VetoStagesDraft)=>void;draft:AdditionDraft;setDraft:(draft:AdditionDraft)=>void;vetoStages?:VetoStagesDraft;setVetoStages?:(draft:VetoStagesDraft)=>void;imageRound?:number;stickyRounds?:boolean;positionExtra?:ReactNode}) {
  const imageCapture=useSettingsImageCapture();
  const defs=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(defs),[defs]);
  const features=[...new Map(choices.map(c=>[c.featureId,c.group])).entries()];
@@ -294,6 +294,23 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
  const defaultGrowth=availableGrowth.find(choice=>choice.key===DEFAULT_INCREASE_METRIC)??availableGrowth[0]??choices[0];
  const patch=(p:Partial<AdditionDraft>)=>{if('enabled' in p){setDraft({...all,...p});return;}if(!index){setDraft({...all,...p});return;}const others=Array.from({length:Math.max(count-1,all.otherRounds.length)},(_,i)=>all.otherRounds[i]??copyRound(all));others[index-1]={...current,...p};setDraft({...all,otherRounds:others});};
  const setLimit=(value:string)=>{const limit=Math.min(100,Math.max(1,Math.floor(Number(value)||1)));const others=Array.from({length:Math.max(limit-1,all.otherRounds.length)},(_,i)=>all.otherRounds[i]??copyRound(all));setSelectedRound(Math.min(index,limit-1));setDraft({...all,maxRounds:value,repeat:limit>1,otherRounds:others});};
+ const removeRound = () => {
+  if (!onRemoveRound || count <= 1) return;
+  const {enabled, quantityMode, quantity, positionVersion, alternativeRounds, attackFromRound, laterSellStages,
+    otherRounds, repeat, maxRounds, ...first} = all;
+  const rounds = [first, ...Array.from({length:Math.max(count-1, otherRounds.length)}, (_,i) => otherRounds[i] ?? copyRound(first))];
+  rounds.splice(index,1);
+  const removed = index+1;
+  const shift = (n:number) => n > removed ? n-1 : n;
+  const next:AdditionDraft = {...rounds[0], enabled, quantityMode, quantity, positionVersion,
+    repeat:count>2, maxRounds:String(count-1), otherRounds:rounds.slice(1),
+    alternativeRounds:alternativeRounds?.filter((_,i)=>i!==index), attackFromRound:attackFromRound && shift(attackFromRound),
+    laterSellStages:laterSellStages?.filter(s=>s.afterAdditions!==removed).map(s=>({...s,afterAdditions:shift(s.afterAdditions)}))};
+  const stages=vetoStages?.stages.filter(s=>Number(s.afterAdditions)!==removed).map(s=>Number(s.afterAdditions)>removed
+    ? {...s,afterAdditions:String(Number(s.afterAdditions)-1)} : s);
+  onRemoveRound(next,vetoStages && stages ? {...vetoStages,enabled:vetoStages.enabled && stages.length>0,stages} : undefined);
+  setSelectedRound(Math.min(index,count-2));
+ };
  const timeControls = (row: MetricDraft, label: string, disabled: boolean, setTime: (time: AdditionMetricTime) => void,
   snapshot?: QualityBuyFilter['snapshot'], metric?: string) => {
   const choice = choices.find(item => item.key === row.choice);
@@ -390,6 +407,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
     最多加仓<input aria-label="最多加仓次数" type="number" min="1" max="100" step="1" disabled={!d.enabled} value={all.maxRounds} onChange={e=>setLimit(e.target.value)} className={field+' w-16'}/>次
    </label>
+   {onRemoveRound && !imageCapture && <button type="button" disabled={!d.enabled || count<=1} onClick={removeRound} className="rounded px-2 py-1 text-[11px] text-destructive disabled:opacity-40">删除第 {index+1} 次加仓</button>}
    {showRoundTabs && <div role="tablist" aria-label="选择加仓轮次" className="addition-round-tabs flex flex-wrap gap-1">
     {roundIndices.map(round => <button key={round} type="button" role="tab" aria-selected={index===round}
      className={`rounded px-2 py-1 text-[11px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring ${index===round?'bg-primary/15 text-primary':'bg-muted/40 text-muted-foreground hover:bg-muted'}`}
