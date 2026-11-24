@@ -12,6 +12,9 @@ vi.mock('@/lib/fish/parallelUniverseStore', () => ({ loadParallelTableResults: l
 let screeningReady=true;
 vi.mock('@/lib/fish/qualityStore',()=>({loadQualityStudy:async(owner:string)=>{
   const study = structuredClone(fixture.study);
+  if (owner === 'regret-import-owner') return {study:importQualityLibrary(study, [{
+    ...study.samples[0].source, id:'regret:saved-attempt', timeMs:MATCHED_AT, preEntryMonitor:undefined,
+  }], MATCHED_AT, 'regret')};
   return { study: owner === 'counterfactual-owner' ? importQualityLibrary(study, [
     { ...study.samples[0].source, id: 'same-symbol-other-signal', timeMs: SIGNAL_AT + 120000 },
   ]) : study };
@@ -125,4 +128,19 @@ it('uses only the current counterfactual match for each selected originating row
   await act(() => result.current.restart('counterfactual'));
   await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
   expect(qualityMonitorRunSamples(run.mock.calls[1][0].study).map(row => row.enteredAt)).toEqual([updatedTime]);
+});
+
+it('starts counterfactual monitoring for an existing regret import without a live table result', async () => {
+  loadParallelResults.mockResolvedValue([]);
+  const empty: never[] = [];
+  const run = vi.fn(async (_options: QualityRunOptions) => {});
+  const {result} = renderHook(() => useFishQuality('regret-import-owner', empty, run));
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  const rows = qualityDisplayRows(result.current.study);
+  expect(rows.find(row => row.origin === 'regret')?.enteredAt).toBe(MATCHED_AT);
+  act(() => result.current.setSelectedRows(rows.map(row => row.id)));
+  await act(() => result.current.start(false, undefined, false, 'counterfactual'));
+  expect(run).toHaveBeenCalledOnce();
+  expect(qualityMonitorRunSamples(run.mock.calls[0][0].study).map(row => row.enteredAt)).toEqual([MATCHED_AT]);
+  expect(result.current.error).toContain('1 条缺少有效的平行宇宙信号首次满足时间');
 });

@@ -43,7 +43,7 @@ import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { qualitySalePriceChangePct, qualityPeakPct, qualityHalfMirror, qualityMirrorTimeHours, qualityMirrorTimeText, qualityAdditionSummary, qualityRelativeGain, qualityRelativeGainText, qualityPayoffRatio, qualityPayoffRatioText, qualityGeometricPosition, qualityGeometricPositionText } from '@/lib/fish/qualityPresentation';
 import { qualityVariables } from '@/lib/fish/qualityVariables';
 import { Fragment,useCallback,createContext,useContext,useId, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { clearParallelTableResults, loadParallelTableResults, type ParallelTableResult } from '@/lib/fish/parallelUniverseStore';
+import { clearParallelTableResults, loadImportedRegretTableResults, loadParallelTableResults, type ParallelTableResult } from '@/lib/fish/parallelUniverseStore';
 import { Link, useInRouterContext } from 'react-router-dom';
 import { qualityExitAlgorithmLabel, qualityStaticDrawdownReason } from '@/lib/fish/qualityStaticDrawdownSell';
 import { activeHoldingVetoes, holdingVetoIdentity } from '@/lib/fish/qualityVeto';
@@ -459,7 +459,13 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   const [parallelRunning, setParallelRunning] = useState(false);
   const [parallelBoard, setParallelBoard] = useState<{ owner?: string; results: Map<string, ParallelTableResult> }>();
   const parallelEnabled = !archiveView && !!state.runParallelUniverse;
-  const parallelResults = parallelBoard?.owner === state.account ? parallelBoard?.results : undefined;
+  const [importedRegretBoard, setImportedRegretBoard] = useState<typeof parallelBoard>();
+  const [regretBoardRevision, setRegretBoardRevision] = useState(0);
+  const parallelResults = useMemo(() => {
+    const live = parallelBoard?.owner === state.account ? parallelBoard?.results : undefined;
+    const imported = importedRegretBoard?.owner === state.account ? importedRegretBoard?.results : undefined;
+    return imported?.size ? new Map([...imported, ...(live ?? [])]) : live;
+  }, [parallelBoard, importedRegretBoard, state.account]);
   const showParallel = parallelEnabled && !parallelHidden;
   const parallelFor = (row: QualitySample) => parallelResults?.get(qualityEntryIdentity(row.source, row.enteredAt));
   useEffect(() => {
@@ -470,6 +476,14 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
     }, () => {});
     return () => { active = false; };
   }, [parallelEnabled, state.account]);
+  useEffect(() => {
+    if (!parallelEnabled) return;
+    let active = true;
+    void loadImportedRegretTableResults(state.account, study.samples).then(results => {
+      if (active) setImportedRegretBoard({owner: state.account, results: new Map(results.map(result => [result.entryKey, result]))});
+    }, () => {});
+    return () => { active = false; };
+  }, [parallelEnabled, state.account, study.samples, regretBoardRevision]);
   const [filterOpen, setFilterOpen] = useState(false), [monitorOpen, setMonitorOpen] = useState(false);
   // Saved library boards always show their own frozen results, regardless of the working table's preferences.
   const [filterHidden, setHideFilter] = useState(() => !archiveView && readHidden('filter')),
@@ -1086,6 +1100,8 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
               count={parallelResults?.size ?? 0} disabled={parallelRunning}
               onClear={lockedBatch ? undefined : async () => {
                 await clearParallelTableResults(state.account);
+                setImportedRegretBoard(undefined);
+                setRegretBoardRevision(revision => revision + 1);
                 setParallelBoard(board => board && board.owner === state.account ? { ...board, results: new Map() } : board);
               }}/>}/>}
         </FishQualityModuleGroup>

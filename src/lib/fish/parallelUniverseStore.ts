@@ -1,5 +1,6 @@
 import type { ParallelAttempt, ParallelSignal } from './parallelUniverse';
-import { qualityEntryIdentity } from './quality';
+import { qualityEntryIdentity, type QualitySample } from './quality';
+import { regretSignalTime } from './qualityAdmissionTime';
 import { renameLibraryDirectoryEdit, type LibraryDirectoryEdits } from './libraryDirectoryEdits';
 
 export interface RegretCandidate {
@@ -32,10 +33,53 @@ export function loadParallelTableResults(owner?: string) {
   });
 }
 
+const clearedRegretKey = (owner?: string) => ['parallel-table-regret-cleared-at', key(owner)];
+
+export function loadImportedRegretTableResults(owner: string | undefined, samples: readonly QualitySample[]) {
+  const imports = new Map(samples.flatMap(sample => regretSignalTime(sample) === null ? [] :
+    [[qualityEntryIdentity(sample.source, sample.enteredAt), sample] as const]));
+  if (!imports.size) return Promise.resolve([] as ParallelTableResult[]);
+  return transaction<ParallelTableResult[]>([HISTORY, SETTINGS], 'readonly', (tx, result) => {
+    const cleared = tx.objectStore(SETTINGS).get(clearedRegretKey(owner));
+    cleared.onsuccess = () => {
+      const clearedAt = cleared.result as number | undefined;
+      const found = new Map<string, {exact: boolean; value: ParallelTableResult}>();
+      const cursor = tx.objectStore(HISTORY).openCursor(prefixRange([key(owner)]));
+      cursor.onsuccess = () => {
+        const item = cursor.result;
+        if (!item) {
+          result([...found.values()].map(match => match.value));
+          return;
+        }
+        const attempt: RegretAttempt = item.value;
+        const signal = attempt.proposedSignal;
+        if (attempt.emitted && signal) {
+          const entryKey = qualityEntryIdentity({...attempt.candidate.source, symbol: signal.symbol, timeMs: signal.time}, signal.time);
+          const imported = imports.get(entryKey);
+          if (imported && (clearedAt === undefined || imported.importedAt > clearedAt)) {
+            const exact = imported.source.id === 'regret:' + attempt.id;
+            const previous = found.get(entryKey);
+            if (!previous || Number(exact) > Number(previous.exact) ||
+              (exact === previous.exact && attempt.baseline.evaluatedAt > previous.value.evaluatedAt)) {
+              found.set(entryKey, {exact, value: {
+                entryKey, signal, evaluatedAt: attempt.baseline.evaluatedAt, planLabel: attempt.plan.label,
+                reason: attempt.simulation.reason, markerAt: attempt.marker?.observedAt,
+              }});
+            }
+          }
+        }
+        item.continue();
+      };
+    };
+  });
+}
+
 export function clearParallelTableResults(owner?: string) {
   const prefix = tablePrefix(owner);
   return transaction<void>(SETTINGS, 'readwrite', tx => {
-    tx.objectStore(SETTINGS).delete(IDBKeyRange.bound(prefix, [...prefix, []], true, true));
+    const settings = tx.objectStore(SETTINGS);
+    settings.delete(IDBKeyRange.bound(prefix, [...prefix, []], true, true));
+    settings.put(Date.now(), clearedRegretKey(owner));
   });
 }
 

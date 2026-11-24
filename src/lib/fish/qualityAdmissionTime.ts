@@ -1,3 +1,4 @@
+import {qualityOrigins} from './qualitySources';
 import type {TradeSignal} from '../signalLibrary';
 import type { FishQualityStudy, QualitySample } from './quality';
 
@@ -22,8 +23,13 @@ export function qualityRowMonitorTimeBasis(study: Pick<FishQualityStudy, 'monito
 const validEntryTime = (at: unknown): number | null =>
   typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : null;
 
+export function regretSignalTime(sample: QualitySample): number | null {
+  return sample.enteredAt === sample.source.timeMs && qualityOrigins(sample).includes('regret')
+    ? validEntryTime(sample.source.timeMs) : null;
+}
+
 export function qualityMonitorEntryAt(sample: QualitySample, timeBasis?: QualityMonitorTimeBasis): number | null {
-  if (timeBasis === 'counterfactual') return validEntryTime(sample.counterfactualAt);
+  if (timeBasis === 'counterfactual') return regretSignalTime(sample) ?? validEntryTime(sample.counterfactualAt);
   if (timeBasis === 'signal') return validEntryTime(qualitySignalTime(sample.source));
   if (timeBasis === 'screening') {
     if (sample.source.preEntryMonitor) return qualityLibraryEntryAt(sample.source);

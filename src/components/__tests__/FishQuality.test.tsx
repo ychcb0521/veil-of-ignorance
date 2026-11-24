@@ -1551,3 +1551,33 @@ it('opens the existing regret library from workspace sources even when buy filte
   expect(await screen.findByRole('dialog', {name:'后悔库'})).toBeVisible();
   expect(s.runParallelUniverse).not.toHaveBeenCalled();
 });
+
+
+it('displays the archived plan, result, match time and evidence on the imported signal row', async () => {
+  const store = await import('@/lib/fish/parallelUniverseStore');
+  const {qualityEntryIdentity} = await import('@/lib/fish/quality');
+  const s = state();
+  s.runParallelUniverse = vi.fn(async () => {});
+  s.study = importQualityLibrary(newQualityStudy(T), [{
+    id: 'regret:saved-attempt', symbol: 'IMPORTUSDT', timeMs: T, timeLabel: '', fallbackZone: '',
+  }], T, 'regret');
+  const sample = s.study.samples[0];
+  const live = vi.spyOn(store, 'loadParallelTableResults').mockResolvedValue([]);
+  const archive = vi.spyOn(store, 'loadImportedRegretTableResults').mockResolvedValue([{
+    entryKey: qualityEntryIdentity(sample.source, T), evaluatedAt: T + 1, planLabel: '归档推演方案',
+    reason: '归档触发依据', signal: {symbol: 'IMPORTUSDT', time: T, buyPrice: 2, stopPrice: 1,
+      additionCount: 2, source: '平行宇宙'},
+  }]);
+  try {
+    render(<FishQuality state={s}/>);
+    const row = within(screen.getByTestId('quality-fish-row'));
+    expect(await row.findByText('归档推演方案')).toBeVisible();
+    expect(row.getByText('已生成信号')).toBeVisible();
+    expect(row.getAllByText('2026-10-20 08:00:00')).toHaveLength(2);
+    fireEvent.click(row.getByRole('button', {name:'查看'}));
+    expect(screen.getByText('归档触发依据')).toBeVisible();
+  } finally {
+    live.mockRestore();
+    archive.mockRestore();
+  }
+});
