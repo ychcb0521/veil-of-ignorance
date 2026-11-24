@@ -92,6 +92,7 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
   const [count, setCount] = useState(String(DEFAULT_SIGNAL_ADDITION_COUNT));
   const [hours, setHours] = useState(String(study.observeHours));
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
   const [running, setRunning] = useState(false), [error, setError] = useState('');
@@ -111,23 +112,30 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
     return () => { active = false; restart.current = undefined; controller.current?.abort(); };
   }, [owner]);
 
-  const plan = availablePlans.find(item => item.id === planId) ?? (!planId ? availablePlans[0] : undefined);
-  const settings = () => {
+  const plan = availablePlans.find(item => item.id === planId) ?? availablePlans[0];
+  const settings = (nextPlans = simulationPlans) => {
     const additionCount = Number(count), observeHours = Number(hours);
-    if (!plan) throw Error('请选择持仓监测方案');
+    const choices = nextPlans ?? plans;
+    const selected = choices.find(item => item.id === planId) ?? choices[0];
+    if (!selected) throw Error('请至少保留一套模拟方案');
     if (!validSignalAdditionCount(additionCount) || hours === '' || !Number.isFinite(observeHours) || observeHours < 0 || observeHours > 8784) {
       throw Error('加仓次数须为正整数，观察时长须在 0～8784 小时之间');
     }
-    return { planId: plan.id, additionCount, observeHours, plans: simulationPlans };
+    return { planId: selected.id, additionCount, observeHours, plans: nextPlans };
   };
-  const saveSettings = async () => {
+  const saveSettings = async (nextPlans?: QualityGroup[]) => {
     try {
-      await saveParallelSettings(owner, settings());
       setError('');
+      const saved = settings(nextPlans === undefined ? simulationPlans : structuredClone(nextPlans));
+      setSaving(true);
+      await saveParallelSettings(owner, saved);
+      setSimulationPlans(saved.plans);
+      setPlanId(saved.planId);
       setSettingsOpen(false);
     } catch (cause) { setError(errorText(cause)); }
+    finally { setSaving(false); }
   };
-  const canStart = settingsReady && !!plan && selectedIds.length > 0;
+  const canStart = settingsReady && !saving && !!plan && selectedIds.length > 0;
   const prepare = () => {
     const selected = qualityRunSamples({ ...study, selectedRowIds: selectedIds }).filter(row => !row.binanceEntry);
     if (!selected.length) throw Error('当前范围没有已勾选的模拟候选');
@@ -226,9 +234,11 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
         </PopoverContent>
       </Popover>
     </div>
-    <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+    <Dialog open={settingsOpen} onOpenChange={open => { if (!saving) setSettingsOpen(open); }}>
       <DialogTrigger asChild><button type="button" className={qualitySettingsAction} aria-label="反事实法" disabled={!settingsReady || running} onClick={() => setError('')}><Settings2 aria-hidden className="h-3 w-3"/>反事实法</button></DialogTrigger>
       <FishConditionDialogContent><FishConditionSettings dialog title="反事实法" description="设置模拟方案、触发加仓次数和观察时长。">
+        {saving && <p role="status" className="sticky top-0 z-10 bg-background">正在保存反事实法设置…</p>}
+        {error && <p role="alert" className="sticky top-0 z-10 bg-background text-destructive">{error}</p>}
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1">信号触发加仓次数 N
             <input className="rounded border bg-background p-2" type="number" min={1} step={1} value={count} onChange={event => setCount(event.target.value)}/>
@@ -238,16 +248,14 @@ export function FishParallelUniverse({ owner, study, plans, selectedIds, run, st
           </label>
         </div>
         {state && <HoldingMonitorSettings
-          state={{...state, study:{...study,sellPlans:availablePlans}, monitorSettings:{study:{...study,sellPlans:availablePlans},ready:settingsReady},
-            ready:settingsReady, setSellPlans: next => {
-              const copied=structuredClone(next);
-              setSimulationPlans(copied);
-              void saveParallelSettings(owner,{...settings(),plans:copied}).catch(cause=>setError(errorText(cause)));
-            },
+          state={{...state, study:{...study,sellPlans:availablePlans}, monitorSettings:{study:{...study,sellPlans:availablePlans},ready:settingsReady && !saving},
+            ready:settingsReady && !saving, setSellPlans: next => { void saveSettings(next); },
+            selectSell: setPlanId,
+            start: async () => {},
+            instantPosition: undefined,
             savePlanTemplate:state.savePlanTemplate,deletePlanTemplate:state.deletePlanTemplate,restorePlanTemplate:state.restorePlanTemplate}}
-          templateSource={state.study} activeId={plan?.id ?? null} onSelect={setPlanId} done={()=>setSettingsOpen(false)} selectedCount={selectedIds.length}/>}
-        {error && <p role="alert">{error}</p>}
-        <button type="button" className={qualitySettingsAction} onClick={() => void saveSettings()}>保存条件</button>
+          templateSource={state.study} activeId={planId || plan?.id || null} onSelect={setPlanId} done={()=>{}} selectedCount={0}/>}
+        {!state && <button type="button" disabled={saving} className={qualitySettingsAction} onClick={() => void saveSettings()}>保存条件</button>}
       </FishConditionSettings></FishConditionDialogContent>
     </Dialog>
     <Dialog>
