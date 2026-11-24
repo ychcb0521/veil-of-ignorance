@@ -29,7 +29,10 @@ it('runs only filters without any sell rules or price simulation, reuses reading
   const map = new Map(readings.map(r => [r.key, r]));
   expect(rows.map(row => qualityFilterCell(row, f, map))).toMatchObject([{ value: '2', status: '不满足' }, { value: '8', status: '满足' }]);
   const sheet = buildQualitySheets(study, rows)[0];
-  expect(sheet.columns[7].header).toContain(`过滤 · ${f.label}`); expect(sheet.rows[0].slice(7, 9)).toEqual([2, '不满足']);
+  const readingColumn = sheet.columns.findIndex(column => column.header === `过滤 · ${f.label}（> 5）读数`);
+  expect(readingColumn).toBeGreaterThanOrEqual(0);
+  expect(sheet.columns[readingColumn + 1].header).toBe(`${f.label} · 过滤结果`);
+  expect(sheet.rows[0].slice(readingColumn, readingColumn + 2)).toEqual([2, '不满足']);
   study.sellPlans[0].buyFilters = [filter(1)];
   expect(qualityFilterColumns(study)).toHaveLength(2); // Same metric, different thresholds.
   expect(qualityFilterNeedsData(study, 'filter')).toBe(false);
