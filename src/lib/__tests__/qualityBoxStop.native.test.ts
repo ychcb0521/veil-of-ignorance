@@ -41,3 +41,28 @@ it('executes a buffered defence line as the primary holding seller',async()=>{
  expect(buffered.endPrice).toBeLessThan(unbuffered.endPrice!);
  expect(planVersionChanges(plan(.25))).toEqual([]);
 });
+
+it('reads buffered static distances from closed bars only and keys cached values by ATR',async()=>{
+ const cut=T+15*300000, enteredAt=cut+17000;
+ const bars=new Map(dblSample().map(b=>[b.openTime,b]));
+ const load:FishReconstructionLoader=async(_r,a,b,p)=>{
+   expect(b).toBeLessThanOrEqual(cut);
+   return Array.from({length:(b-a)/p.step},(_,i)=>{
+     const openTime=a+i*p.step;
+     return {...bars.get(openTime)??{openTime,open:100,high:100,low:100,close:100,volume:10,takerBuyVolume:5,quoteVolume:1000,takerBuyQuoteVolume:500},DBL5_tick_size:1};
+   });
+ };
+ const source={id:'row',symbol:'TESTUSDT',timeMs:enteredAt,timeLabel:'',fallbackZone:''};
+ const sample:QualitySample={id:'row',source,enteredAt,basis:'signal',groups:[],importedAt:enteredAt};
+ const {makeStaticDblDistance,staticDblDistanceChoices}=await import('@/lib/fish/qualityStaticDblDistance');
+ const {evaluateQualityFilter}=await import('@/lib/fish/quality');
+ const guard=staticDblDistanceChoices.find(choice=>choice.metric==='guard')!;
+ const nearest=staticDblDistanceChoices.find(choice=>choice.metric==='nearest')!;
+ const read=(choice:typeof guard,atr:number)=>evaluateQualityFilter(sample,makeStaticDblDistance(choice,'<',10,true,atr),enteredAt,load,new AbortController().signal);
+ const raw=await read(guard,0), buffered=await read(guard,.25), selected=await read(nearest,.25);
+ expect(raw).toMatchObject({at:cut,value:expect.any(Number)});
+ expect(buffered).toMatchObject({at:cut,value:expect.any(Number)});
+ expect(buffered.key).not.toBe(raw.key);
+ expect(buffered.value).not.toBe(raw.value);
+ expect(selected.value).toBeLessThanOrEqual(buffered.value!);
+});

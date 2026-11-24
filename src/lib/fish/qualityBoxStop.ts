@@ -270,7 +270,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
     const ignore = o.ignoreExit;
     return ignore ? candidates.find(trigger => !ignore(trigger.cause)) : candidates[0];
   };
-  return {read,states,statesAt,deactivateBefore(boundary:number){
+  return {read,states,statesAt,latestLines:()=>rules.flatMap(r=>r.latestLine?[r.latestLine.line]:[]),deactivateBefore(boundary:number){
     for(const r of rules){if(r.v.mirrorStage?.stage!=='before')continue;
       const list=history.get(r.v.id)!,past=list.filter(p=>p.at<boundary);
       r.state={...(past.at(-1)?.state??{count:0})};

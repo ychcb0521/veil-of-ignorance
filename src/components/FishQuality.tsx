@@ -70,6 +70,7 @@ import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { hasQualityExit, qualityEntryIdentity, standaloneBuyFilters, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityDrawdownPct, qualityDisplayRows, qualityFilterReadingKey, qualityFilterStatus, type QualityBuyFilter, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample, qualityRuleText } from '@/lib/fish/quality';
+import {makeStaticDblDistance,staticDblDistanceChoice,staticDblDistanceChoices} from '@/lib/fish/qualityStaticDblDistance';
 import { makeQualityBuyFilter, makeQualitySignalMetrics, qualityFilterChoiceKey, qualityFilterDefinitions, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
 import { additionMetricTime, withAdditionMetricTime, withMetricSnapshotTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import { FishMetricTimeFields } from './FishMetricTimeFields';
@@ -124,12 +125,12 @@ export function heldText(hours: number | null | undefined): string {
 }
 const resultText = (r?: QualityResult) => r?.status === 'closed' ? '已卖出' : r?.status === 'open' ? '持有' : r?.status === 'error' ? '缺数据' : r?.status === 'waiting' && r.entryPrice ? '待设卖出' : '待评估';
 
-type FilterDraft = { choice: string; direction: '<' | '>'; threshold: string; enabled: boolean; saved?: QualityBuyFilter; time?: AdditionMetricTime };
+type FilterDraft = { atr?: string; choice: string; direction: '<' | '>'; threshold: string; enabled: boolean; saved?: QualityBuyFilter; time?: AdditionMetricTime };
 type SignalMetricDraft = { key: string; saved?: QualitySignalMetric; time?: AdditionMetricTime };
 
 const staticFilterDraft = (filters: readonly QualityBuyFilter[]): FilterDraft[] => filters.map(saved => ({
   choice: qualityFilterChoiceKey(saved), direction: saved.direction, threshold: String(saved.threshold),
-  enabled: saved.enabled, saved, time:additionMetricTime(saved.snapshot),
+  enabled: saved.enabled, saved, atr:saved.staticDblDistance?.atr.toString(), time:additionMetricTime(saved.snapshot),
 }));
 const signalMetricDraft = (metrics: readonly QualitySignalMetric[]): SignalMetricDraft[] => metrics.map(saved => ({
   key: qualityFilterChoiceKey(saved), saved, time:additionMetricTime(saved.snapshot),
@@ -137,7 +138,7 @@ const signalMetricDraft = (metrics: readonly QualitySignalMetric[]): SignalMetri
 
 function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualityState; done: () => void; selectedCount: number }) {
   const definitions = useFeatureDefinitions();
-  const choices = useMemo(() => qualityFilterMenuChoices(definitions), [definitions]);
+  const choices = useMemo(() => [...qualityFilterMenuChoices(definitions),...staticDblDistanceChoices], [definitions]);
   const filterDefinitions = useMemo(() => qualityFilterDefinitions(definitions), [definitions]);
   const readingDefinitions = useMemo(() => qualityFilterDefinitions(definitions, true), [definitions]);
   const groups = [...new Set(choices.map(choice => choice.group))];
@@ -182,6 +183,11 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
       const filters = draft.map(row => {
         const {saved} = row;
         if (!row.threshold.trim() || !Number.isFinite(Number(row.threshold))) throw Error('每条条件都要填有限数字门槛');
+        const distance=staticDblDistanceChoice(row.choice);
+        if (distance) {
+          const atr=row.atr ?? '0';
+          return makeStaticDblDistance(distance,row.direction,Number(row.threshold),row.enabled,atr.trim()?Number(atr):NaN,saved);
+        }
         if (saved && qualityFilterChoiceKey(saved) === row.choice) {
           const threshold=Number(row.threshold);
           const timed=withAdditionMetricTime(saved,row.time);
@@ -285,8 +291,11 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
         <select aria-label={'买入条件 ' + (i + 1) + ' 方向'} className={field} value={row.direction} onChange={event => patch(i, {direction: event.target.value as '<' | '>'})}><option value=">">&gt;</option><option value="<">&lt;</option></select>
         <input aria-label={'买入条件 ' + (i + 1) + ' 门槛'} type="number" step="any" className={field} value={row.threshold} onChange={event => patch(i, {threshold: event.target.value})}/>
         <button type="button" aria-label={'删除买入条件 ' + (i + 1)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => { setDirty(true); setDraft(previous => previous.filter((_, index) => index !== i)); }}><X aria-hidden className="h-3.5 w-3.5"/></button>
-        <FishMetricTimeFields label={`买入条件 ${i+1}`} className="col-span-full" metric={row.saved?.metric ?? choices.find(choice=>choice.key===row.choice)?.metric}
-          definition={filterDefinitions.get(row.choice.split(':')[0])} snapshot={row.saved?.snapshot} time={row.time} onChange={time=>patch(i,{time})}/>
+        {staticDblDistanceChoice(row.choice) ? <label className="col-span-full flex items-center gap-2">
+          冗余 ATR <input aria-label={`买入条件 ${i+1} 冗余 ATR`} type="number" min={0} step="any" className={field+' w-24'} value={row.atr ?? '0'} onChange={event=>patch(i,{atr:event.target.value})}/>
+          <span className="text-muted-foreground">使用买入前已收盘的 5 分钟行情，门槛单位为 %</span>
+        </label> : <FishMetricTimeFields label={`买入条件 ${i+1}`} className="col-span-full" metric={row.saved?.metric ?? choices.find(choice=>choice.key===row.choice)?.metric}
+          definition={filterDefinitions.get(row.choice.split(':')[0])} snapshot={row.saved?.snapshot} time={row.time} onChange={time=>patch(i,{time})}/>}
       </div>)}</div>}
     </section>
     <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 bg-popover px-4 py-2.5">
