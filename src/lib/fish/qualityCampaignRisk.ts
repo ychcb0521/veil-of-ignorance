@@ -11,9 +11,9 @@ export function qualityCampaignStaticRisk(campaign?:TradeCampaign){
  const stops=(evidence?.holdingVetoes??[]).filter(v=>v.kind==='static-drawdown'&&(v.direction==='>='||v.direction==='>')&&Number.isFinite(v.threshold)&&v.threshold>0&&v.threshold<=100);
  const plan=campaign.comparison.monitorPlan;
  const limited=plan && (timedDrawdownPayoffPct(plan) ?? initialLimitedDrawdownPct(plan));
- const percent=evidence?.dbl5SellerRiskPctV1!==undefined ? evidence.dbl5SellerRiskPctV1 : limited ?? (campaign.comparison.section==='instant'&&!plan
+ const percent=limited ?? (evidence?.dbl5SellerRiskPctV1!==undefined ? evidence.dbl5SellerRiskPctV1 : (campaign.comparison.section==='instant'&&!plan
   ? campaign.comparison.instant?.initialStaticStopPct
-  : evidence&&Object.prototype.hasOwnProperty.call(evidence,'initialStaticStopPct')?evidence.initialStaticStopPct:stops.length?Math.min(...stops.map(v=>v.threshold)):undefined);
+  : evidence&&Object.prototype.hasOwnProperty.call(evidence,'initialStaticStopPct')?evidence.initialStaticStopPct:stops.length?Math.min(...stops.map(v=>v.threshold)):undefined));
  if(!(percent!>0&&(evidence?.dbl5SellerRiskPctV1!=null||percent!<=100)&&Number.isFinite(percent)))return;
  const notional=campaign.comparison.holdingMetrics?.initialNotional??campaign.initial_main_size_usdt,entry=campaign.comparison.holdingMetrics?.entryPrice;
  if(!(notional>0)||!Number.isFinite(notional))return;
