@@ -312,6 +312,12 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,di
             </section>;
           }):<section aria-label="状态 S 准入模块" data-testid="admission-indicator-module" className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3"><div className="flex items-center gap-0.5"><input id={'state-event-'+active.id} className="mr-1.5 shrink-0" type="checkbox" aria-label="启用状态 S 事件准入" checked={false} onChange={()=>createEventAdmissionCopy()}/><h5 className="text-[11px] font-medium"><label htmlFor={'state-event-'+active.id} className="cursor-pointer">状态 S</label></h5><FishQualityInfo label="事件 2 模块使用说明"><p>勾选后创建独立副本，默认条件为状态 S &gt; 0.8。副本中可单独修改指标、方向、门槛和确认时点；与防守线按“或”判断，原方案保留。</p></FishQualityInfo></div><p className="text-[11px] text-muted-foreground">状态 S &gt; 0.8 · 勾选后可配置</p></section>}
         </div>
+        {!readOnly&&!automatic&&c.admission&&!active.initialization&&<button type="button" className={button+' text-primary'}
+          disabled={!state?.ready||!monitor?.ready||!savedDraft}
+          title={savedDraft?'沿用已保存的事件及门槛，从图灵杯归档首根完整 K 线初始化':'请先保存当前事件准入设置'}
+          onClick={()=>guardAction(()=>usePlan(createTuringPreEntryPlan(active,definitions,id())))}>
+          新建图灵杯事件准入副本
+        </button>}
         <button type="button" className={button} disabled={!choices.length} onClick={()=>retry?patch({admission:{...c.admission!,algorithms:[...c.admission!.algorithms,defaultAdmission()]}}):createEventAdmissionCopy(true,newCondition())}>添加事件</button>
         </>}
       </section>

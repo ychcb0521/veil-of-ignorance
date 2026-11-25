@@ -41,6 +41,20 @@ it('freezes a separate three-stage copy, including nested formulas and unchanged
  expect(source).toEqual(original);
 });
 
+it('preserves BSS and CBA admission thresholds and confirmation timing in the Turing copy', () => {
+ const bss = entryCondition(makeQualityBuyFilter('bss:avg_BSS_2', '>', .131, true, BUILTIN_FEATURES));
+ const cba = entryCondition(makeQualityBuyFilter('cba:avg_CBA_2', '>', 13.13, true, BUILTIN_FEATURES));
+ const config = signalAnchoredPreEntryThreeStage(emptyPreEntryThreeStage(), [
+   {...bss,id:'bss-admission',timing:'closed'},
+   {...cba,id:'cba-admission',timing:'intrabar'},
+ ]);
+ const source = freezeQualityPlan({id:'market',label:'market',metric:bss.metric,snapshot:bss.snapshot,preEntryThreeStage:config});
+ const copy = createTuringPreEntryPlan(source,BUILTIN_FEATURES,'cup');
+ expect(copy.initialization).toBe('turing-screening-origin-v1');
+ expect(copy.preEntryThreeStage?.admission).toEqual(source.preEntryThreeStage?.admission);
+ expect(planVersionChanges(copy)).toEqual([]);
+});
+
 it('runs both static tasks from the archive origin, retains old cache keys and rejects changed frozen settings', async () => {
  const start = Date.UTC(2026,2,29,5), step = 300000, time = start + 2*step;
  const def = {id:'fixture',name:'fixture',short:'fixture',definition:'',formula:'raw=C',scale:1,unit:'',positive:'1',control:'0',interval:'5m' as const};
