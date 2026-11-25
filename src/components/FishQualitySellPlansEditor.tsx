@@ -1,7 +1,7 @@
 import { downloadTextFile, safeExportFileName } from '@/lib/downloadTextFile';
 import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
 import type { QualityTemplateName } from '@/lib/fish/qualityTemplateNames';
-import { beijingTemplateDay, nextQualityPlanName, qualityTemplateNames } from '@/lib/fish/qualityTemplateNames';
+import { beijingTemplateDay, exactTemplateValue, nextQualityPlanName, qualityTemplateNames } from '@/lib/fish/qualityTemplateNames';
 import { qualityTemplateKind } from '@/lib/fish/qualityPlanTemplates';
 import { createTuringQualityPlan } from '@/lib/fish/qualityTuringPlan';
 import { TURING_SCREENING_INITIALIZATION_VERSION } from '@/lib/fish/qualityInitialization';
@@ -31,6 +31,7 @@ import { isLegacyQualityPlan, LEGACY_ENGINE_LABEL, legacyToEditablePlan } from '
 
 const field = 'h-7 min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring';
 interface Draft {
+  fromMonitorTemplate?: boolean;
   bands?: string[]; afterBands?: string[];
   advantageOptions?: QualityAdvantageOptions;
   id: string; original?: QualityGroup; label: string; choice: string; direction: '<' | '>' | '>='; threshold: string;
@@ -190,14 +191,10 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   };
   const fromTemplate = (template: PlanTemplateActions['templates'][number]) => {
     try {
-      const resolver=names??qualityTemplateNames({planTemplates:[...(templates?.templates??[])]});
-      const now=Date.now();
-      const label=purpose==='sell'?nextQualityPlanName('monitor',
-        [...drafts.map(d=>labelOf(d,baseOf(d))),...plans.map(p=>p.label)],
-        resolver.numberedCount('monitor',beijingTemplateDay(now)!),now):uniqueLabel(template.name);
+      const label=purpose==='sell'?template.name:uniqueLabel(template.name);
       const copyBase = qualityPlanFromTemplate(template, newQualitySellPlanId(), label);
       onCopyPlan?.({ ...template.plan, id: `template:${template.id}` }, copyBase);
-      change([...drafts, draftOf(copyBase)]);
+      change([...drafts, {...draftOf(copyBase),fromMonitorTemplate:purpose==='sell'}]);
       onSelectPlan?.(copyBase.id);
     } catch(cause) { setError(cause instanceof Error?cause.message:'从模板新建失败'); }
   };
@@ -254,6 +251,21 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
       const withAdvantage = next.map(p=>withQualityAdvantageOptions(p,drafts.find(d=>d.id===p.id)?.advantageOptions));
       const prepared = (prepare ? prepare(withAdvantage) : withAdvantage).map(p=>withQualityAdvantageOptions(p,drafts.find(d=>d.id===p.id)?.advantageOptions));
       const saved=after?after(prepared):prepared;
+      if(purpose==='sell'){
+        const resolver=names??qualityTemplateNames({planTemplates:[...(templates?.templates??[])]});
+        const used=[...plans.map(p=>p.label),...saved.map(p=>p.label)];
+        const now=Date.now();
+        for(const plan of saved){
+          const draft=drafts.find(d=>d.id===plan.id);
+          const base=draft&&baseOf(draft);
+          if(!base)continue;
+          const source=resolver.forPlan(base);
+          if(!draft?.fromMonitorTemplate && !(source&&(base.label===source.originalName||base.label===source.name)))continue;
+          if(exactTemplateValue(base)===exactTemplateValue(plan))continue;
+          plan.label=nextQualityPlanName('monitor',used,resolver.numberedCount('monitor',beijingTemplateDay(now)!),now);
+          used.push(plan.label);
+        }
+      }
       saved.forEach(p=>{validateQualitySellStages(p);validateQualityVetoStages(p);});
       return saved;
   };

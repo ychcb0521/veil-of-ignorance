@@ -1387,8 +1387,15 @@ it('saves a saved plan as a named template and creates a new plan from a templat
   expect(screen.getByLabelText('镜像平衡减仓卖出百分比')).toHaveValue(67);
   fireEvent.click(screen.getByRole('button', { name: '保存全部方案' }));
   const saved = vi.mocked(s.setSellPlans).mock.calls.at(-1)![0], made = saved.at(-1)!;
-  expect(made.id).not.toBe(a.id); expect(made.label).toMatch(/^监测_\d{8}_[A-Z]+$/);
+  expect(made.id).not.toBe(a.id); expect(made.label).toBe('好组合');
   expect(made).toMatchObject({ rule: { threshold: .45 }, mirrorTakeProfit: { gainPct: 2.5, sellPct: 67 }, holdingVetoes: [{ kind: 'static-drawdown', threshold: 5, enabled: true }] });
+  fireEvent.click(screen.getByRole('button', { name: /从模板新建/ }));
+  fireEvent.click(screen.getByRole('button', { name: '用模板 好组合 新建方案' }));
+  fireEvent.change(screen.getByLabelText('镜像平衡减仓卖出百分比'), { target: { value: '68' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存全部方案' }));
+  const modified = vi.mocked(s.setSellPlans).mock.calls.at(-1)![0].at(-1)!;
+  expect(modified.label).toMatch(/^监测_\d{8}_[A-Z]+$/);
+  expect(modified.mirrorTakeProfit?.sellPct).toBe(68);
   // 删除要再确认一次
   fireEvent.click(screen.getByRole('button', { name: /从模板新建/ })); fireEvent.click(screen.getByRole('button', { name: '删除模板 好组合' }));
   expect(s.deletePlanTemplate).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: '确认删除模板 好组合' }));
