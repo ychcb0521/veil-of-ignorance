@@ -162,8 +162,17 @@ function openStorage(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(databaseName, 1);
     request.onupgradeneeded = () => request.result.createObjectStore(storeName);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    let expired = false;
+    const timer = setTimeout(() => {
+      expired = true;
+      reject(Error('本机回放归档打开超时，请重试'));
+    }, 10_000);
+    request.onsuccess = () => {
+      clearTimeout(timer);
+      if (expired) request.result.close();
+      else resolve(request.result);
+    };
+    request.onerror = () => { clearTimeout(timer); reject(request.error); };
   });
 }
 
@@ -178,6 +187,12 @@ async function readStorage(accountId: string): Promise<TuringReplayArchive | und
   } finally {
     db.close();
   }
+}
+
+export async function readLocalTuringReplayArchive(accountId: string): Promise<TuringReplayArchive | undefined> {
+  if (!accountId || accountId !== getUserId() || typeof indexedDB === 'undefined') return;
+  const archive = await readStorage(accountId);
+  return accountId === getUserId() ? archive : undefined;
 }
 
 export const TURING_REPLAY_ARCHIVE_CHANGED = 'veil-turing-replay-archive-changed';
