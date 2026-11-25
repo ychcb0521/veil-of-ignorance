@@ -1,3 +1,4 @@
+import { makeDbl5Sell } from '@/lib/fish/qualityDbl5Sell';
 import {MIRROR_LOSS_REVIEW_KIND,MIRROR_PNL_THRESHOLD_VERSION,MIRROR_REVIEW_SCHEDULE_VERSION} from '@/lib/fish/qualityMirrorLossReview';
 import {MIRROR_DEADLINE_KIND,MIRROR_DEADLINE_DEFAULT_HOURS} from '@/lib/fish/qualityMirrorDeadline';
 import {FishMirrorLossReviewFields} from './FishMirrorLossReviewFields';
@@ -44,6 +45,10 @@ function HoldingVetoFields({draft,setDraft,compact=false,hardStopPanel=false,rea
       <button type="button" disabled={entry} title={entry?"观察期间没有实际加仓仓位，不适用":undefined} className="inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:ADDITION_PROFIT_KIND,direction:'>=',threshold:'5',geometricMultiple:'100',enabled:false}])}><Plus className="h-3 w-3"/>添加加仓止盈约束</button>
       <button type="button" disabled={entry} title={entry?"观察期间没有持仓盈亏，不适用":undefined} className="inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:PAYOFF_STOP_KIND,direction:'>=',threshold:'5000',enabled:true}])}><Plus className="h-3 w-3"/>添加盈亏比止盈</button>
       <button type="button" className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_STOP_KIND,direction:'<=',threshold:'0',enabled:false,boxStop:defaultBoxStop(definitions)}])}><Plus className="h-3 w-3"/>添加箱体终止</button>
+      {mirrorPhase==='before'&&<button type="button" className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{
+        choice:BOX_STOP_KIND,direction:'<=',threshold:'0',enabled:false,
+        boxStop:makeDbl5Sell('sell-dbl5-guard+impulse1115',0,definitions).rule.boxSell,
+      }])}><Plus className="h-3 w-3"/>添加 DBL-5 防守线和急拉线</button>}
       <button type="button" aria-label={mirrorPhase==='before'?'添加防守线断裂即退出（镜像前）':undefined} className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_BREAK_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxBreak()}])}><Plus className="h-3 w-3"/>添加支撑断裂终止</button>
       <button type="button" disabled={entry||mirrorPhase==='before'} className="inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_BREAK_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondBreak()}])}><Plus className="h-3 w-3"/>添加二次断裂终止</button>
       <button type="button" aria-label={mirrorPhase==='after'?'添加防守线首次观察、二次退出（镜像后）':undefined} disabled={entry||mirrorPhase==='before'} className="inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_EXIT_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondExit()}])}><Plus className="h-3 w-3"/>添加持仓期间二次断裂终止</button></div>
