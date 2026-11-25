@@ -13,7 +13,7 @@ import { qualityFilterDefinitions, qualityFilterMenuChoices, type HoldingVetoDra
 import { FishMetricTimeFields } from './FishMetricTimeFields';
 import { LIMITED_STATIC_DRAWDOWN_CHOICE, LIMITED_STATIC_DRAWDOWN_LABEL, FREE_STATIC_DRAWDOWN_LABEL, isHoldingPriceChoice, ADDITION_PROFIT_KIND, ADDITION_PROFIT_LABEL, PAYOFF_STOP_KIND, type QualityOperator } from '@/lib/fish/qualityVeto';
 const field='h-7 min-w-0 rounded-md bg-muted/50 px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring';
-type VetoEditorProps={draft:HoldingVetoDraft[];setDraft:(draft:HoldingVetoDraft[])=>void;compact?:boolean;hardStopPanel?:boolean;readOnly?:boolean;labelPrefix?:string;entry?:boolean;mirrorPhase?:'before'|'after'};
+type VetoEditorProps={draft:HoldingVetoDraft[];setDraft:(draft:HoldingVetoDraft[])=>void;compact?:boolean;hardStopPanel?:boolean;readOnly?:boolean;labelPrefix?:string;entry?:boolean;onMoveToFull?: (index:number)=>void;mirrorPhase?:'before'|'after'};
 const noDefinitions:ReturnType<typeof useFeatureDefinitions>=[];
 const ignore=()=>{};
 export function FishQualityHoldingVetoEditor(props:VetoEditorProps){
@@ -22,7 +22,7 @@ export function FishQualityHoldingVetoEditor(props:VetoEditorProps){
 export function FishFrozenHoldingVetoEditor(props:Omit<VetoEditorProps,'setDraft'>){
   return <HoldingVetoFields {...props} definitions={noDefinitions} setDraft={ignore} frozen/>;
 }
-function HoldingVetoFields({draft,setDraft,compact=false,hardStopPanel=false,readOnly=false,labelPrefix='',entry=false,mirrorPhase,definitions,frozen=false}:
+function HoldingVetoFields({draft,setDraft,compact=false,hardStopPanel=false,readOnly=false,labelPrefix='',entry=false,mirrorPhase,onMoveToFull,definitions,frozen=false}:
   VetoEditorProps & {definitions:ReturnType<typeof useFeatureDefinitions>;frozen?:boolean}) {
   const newBoxSecondExit=()=>defaultBoxSecondExit(definitions, DBL5_RETEST_GUARD_VERSION);
   const newBoxSecondBreak=()=>defaultBoxSecondBreak(definitions, DBL5_RETEST_GUARD_VERSION);
@@ -74,6 +74,7 @@ function HoldingVetoFields({draft,setDraft,compact=false,hardStopPanel=false,rea
       {!addition&&!box&&!deadline&&<><select aria-label={`${labelPrefix}持仓否决 ${i+1} 方向`} className={`${field} w-14`} value={d.direction} disabled={risk||payoff} onChange={e=>patch(i,{direction:e.target.value as QualityOperator})}>{(risk||payoff?['>=']:['>=','>','<=','<']).map(v=><option key={v} value={v}>{v==='>='?'≥':v==='<='?'≤':v}</option>)}</select>
       <input aria-label={`${labelPrefix}持仓否决 ${i+1} 阈值`} type="number" step="any" min={risk ? 0 : undefined} max={risk ? 100 : undefined} placeholder="自行设置" className={field} style={{width:`calc(${Math.max(4,d.threshold.length)}ch + 4.5rem)`,flexShrink:0}} value={d.threshold} onChange={e=>patch(i,{threshold:e.target.value})}/>{risk&&<span className="text-[10px]">%</span>}{payoff&&<span className="text-[10px]" title="盈亏比＝整笔盈亏 ÷ L₀；L₀＝初始仓位 × 初始静态回撤阈值">R</span>}</>}
       <button type="button" aria-label={`${labelPrefix}删除持仓否决 ${i+1}`} className="p-1 text-muted-foreground" onClick={()=>setDraft(draft.filter((_,j)=>i!==j))}><X className="h-3 w-3"/></button>
+      {onMoveToFull&&!deadline&&!readOnly&&<button type="button" className="text-[11px] text-primary" aria-label={`将镜像后条件 ${i+1} 改为全程生效`} onClick={()=>onMoveToFull(i)}>改为全程生效</button>}
       {periodic&&<FishMirrorLossReviewFields draft={d} label={`${labelPrefix}持仓否决 ${i+1} `} onChange={next=>patch(i,next)}/>}
       {deadline&&!periodic&&<><label className="inline-flex items-center gap-1 text-[11px]">持仓<input aria-label={`${labelPrefix}持仓否决 ${i+1} 镜像时限（小时）`} type="number" min={1/60} max={8784} step="any" className={field} style={{width:`calc(${Math.max(4,d.threshold.length)}ch + 3rem)`}} value={d.threshold} onChange={e=>patch(i,{threshold:e.target.value})}/>小时未实现镜像平衡减仓，即清仓</label><p className="w-full pl-4 text-[10px] text-muted-foreground">从首次建仓计时，按分钟检查；到期前已实际成交镜像减仓则继续按原规则持有，否则发出全仓市价卖出。加仓不重置计时，其他止损照常生效。</p></>}
       {d.choice===LIMITED_STATIC_DRAWDOWN_CHOICE&&(hardStopPanel

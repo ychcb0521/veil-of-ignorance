@@ -43,7 +43,8 @@ export function FishQualityHardStopStagesEditor({draft,setDraft,readOnly=false}:
      </span>
      {scope==='before'&&conditions.length>0&&!readOnly&&<button type="button" aria-label="跳过本阶段，不填写" onClick={()=>update('before',[])} className="ml-auto text-[11px] text-muted-foreground hover:text-foreground">清空前段条件</button>}
     </div>
-    <FishQualityHoldingVetoEditor compact hardStopPanel readOnly={readOnly} mirrorPhase={scope} labelPrefix={scope==='before'?'镜像前 ':'镜像后 '} draft={conditions} setDraft={next=>update(scope,next)}/>
+    <FishQualityHoldingVetoEditor compact hardStopPanel readOnly={readOnly} mirrorPhase={scope} labelPrefix={scope==='before'?'镜像前 ':'镜像后 '} draft={conditions} setDraft={next=>update(scope,next)}
+     onMoveToFull={scope==='after'?index=>setDraft(draft.map(d=>d===conditions[index]?{...d,activation:undefined,mirrorStage:undefined}:d)):undefined}/>
    </section>;
   })}
   {!!rows('legacy').length&&<details className="border-t border-border/60 pt-2" open={rows('legacy').some(d=>d.enabled)} data-testid="quality-hard-stop-legacy">
