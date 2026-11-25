@@ -230,6 +230,14 @@ it('v7 OR admission accepts a state threshold without a native event, and reject
  mocked.events=[];const p=retryPlan();p.preEntryThreeStage!.admission!.algorithms=[condition('状态 S',.8,'>','raw=C/100'),condition('另一算法',2,'>','raw=C/100')];
  const result=await run(p,{load:loader([79,80,81,81])});expect(result).toMatchObject({status:'matched',matchedAt:T+3*M,threeStage:{admission:{join:'any',met:['状态 S']}}});expect(result.threeStage!.event).toBeUndefined();
 });
+it('admits the exact interval bounds and rejects readings outside the interval',async()=>{
+ const p=retryPlan();
+ p.preEntryThreeStage!.admission={guardEnabled:false,algorithms:[{...condition('range',0),range:{min:100,max:110}}]};
+ for(const bound of [100,110]){
+  expect(await run(p,{load:loader([99,111,bound,bound])})).toMatchObject({status:'matched',matchedAt:T+3*M});
+ }
+ expect(await run(p,{load:loader([99,111,99,111])})).toMatchObject({status:'unmatched'});
+});
 it('v7 native guard admission still works when every parallel algorithm is false, and can be disabled independently',async()=>{
  const p=retryPlan();p.preEntryThreeStage!.admission!.algorithms=[condition('状态 S',2,'>','raw=C/100')];
  expect(await run(p)).toMatchObject({status:'matched',matchedAt:T+5*M,threeStage:{admission:{met:['原生防守线新事件']}}});

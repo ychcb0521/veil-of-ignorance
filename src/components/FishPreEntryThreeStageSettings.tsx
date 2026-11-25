@@ -202,8 +202,15 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,di
       <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>指标</span><select className={field+' w-full text-foreground'} aria-label={prefix+'指标'} value={readOnly?'frozen':choice} onChange={e=>guardAction(()=>put(changeIndicator(condition,e.target.value)))}>
         {readOnly?<option value="frozen">{condition.label}</option>:<>{!choices.some(item=>item.key===choice)&&<option hidden disabled value={choice}>{condition.label}（保存的公式）</option>}{choices.map(item=><option key={item.key} value={item.key}>{item.group} · {item.label}</option>)}</>}
       </select></label>
-      <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>方向</span><select className={field+' w-full text-foreground'} aria-label={prefix+'方向'} value={condition.direction} onChange={e=>put({...condition,direction:e.target.value as EntryMarketCondition['direction']})}>{['>','>=','<','<='].map(v=><option key={v}>{v}</option>)}</select></label>
-      <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>门槛</span><input className={field+' w-full text-foreground'} aria-label={prefix+'门槛'} type="number" step="any" value={Number.isFinite(condition.threshold)?condition.threshold:''} onChange={e=>put({...condition,threshold:e.target.value.trim()?Number(e.target.value):NaN})}/></label>
+      <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>方向</span><select className={field+' w-full text-foreground'} aria-label={prefix+'方向'} value={condition.range?'range':condition.direction} onChange={e=>{
+        const direction=e.target.value;
+        if(direction==='range')put({...condition,range:condition.direction.startsWith('<')?{max:condition.threshold}:{min:condition.threshold}});
+        else put({...condition,range:undefined,direction:direction as EntryMarketCondition['direction']});
+      }}>{['>','>=','<','<='].map(v=><option key={v}>{v}</option>)}<option value="range">区间</option></select></label>
+      {condition.range?<div className="flex min-w-0 flex-wrap gap-2">{(['min','max'] as const).map(bound=>{
+        const label=bound==='min'?'下限':'上限';
+        return <label key={bound} className="flex min-w-0 flex-1 flex-col gap-1 text-[10px] text-muted-foreground">{label}<input className={field+' w-full text-foreground'} aria-label={prefix+label} type="number" step="any" value={condition.range?.[bound]??''} onChange={e=>put({...condition,range:{...condition.range,[bound]:e.target.value===''?undefined:Number(e.target.value)}})}/></label>;
+      })}</div>:<label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>门槛</span><input className={field+' w-full text-foreground'} aria-label={prefix+'门槛'} type="number" step="any" value={Number.isFinite(condition.threshold)?condition.threshold:''} onChange={e=>put({...condition,threshold:e.target.value.trim()?Number(e.target.value):NaN})}/></label>}
       <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>确认时点</span><select className={field+' w-full text-foreground'} aria-label={prefix+'时点'} value={condition.timing} onChange={e=>put({...condition,timing:e.target.value as EntryMarketCondition['timing']})}><option value="intrabar">逐分钟复原</option><option value="closed">只读已收盘原周期</option></select></label>
       {conditionTime(condition,prefix)}
     </div>;

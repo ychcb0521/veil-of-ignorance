@@ -1,3 +1,4 @@
+import { rangeLabel } from '@/lib/fish/thresholdRange';
 import {useState} from 'react';
 import {ScrollText,OctagonX} from 'lucide-react';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from './ui/dialog';
@@ -59,7 +60,7 @@ export function FishScreeningProcessButton({results}:{results:readonly QualitySc
               {e.endedAt&&<p className="text-muted-foreground">{time(e.endedAt)} · {e.nextStatus==='pass'?'该门槛解除':'转为下一项原因'}</p>}
               {!!(e.readings?.length||e.lastReadings?.length)&&<details open={unmet>0}><summary className={'cursor-pointer '+(unmet?'font-semibold text-destructive':'text-muted-foreground')}>观测读数{vetoHits>0?` · ${vetoHits} 项触发否决`:''}{unmet>vetoHits?` · ${unmet-vetoHits} 项未满足`:''}</summary>{readingSets.map(({label,rows})=><div key={label} className="mt-2 space-y-1"><p className="text-muted-foreground">{label}</p>{rows.map((reading,j)=>{
                 const failed=!reading.pending&&(reading.role==='veto'?reading.met===true:reading.met===false&&reading.role!=='admission');
-                return <p key={j} data-testid={failed?'screening-process-unmet':undefined} className={failed?'rounded border border-destructive/25 bg-destructive/10 px-2 py-1 font-semibold text-destructive':'px-2 py-1 text-muted-foreground'}>{failed&&<span className="mr-2 inline-block rounded bg-destructive px-1 text-[10px] text-destructive-foreground">{reading.role==='veto'?'触发否决':'未满足'}</span>}{reading.label??reading.id} = {reading.value??'—'}{reading.threshold!=null?`（${reading.direction??''} ${reading.threshold}）`:''} · {reading.pending??(reading.met==null?'未判定':reading.role==='veto'?(reading.met?'触发否决':'未触发否决'):reading.met?'满足':reading.role==='admission'?'本路未满足（准入取或）':'未满足')}</p>;
+                return <p key={j} data-testid={failed?'screening-process-unmet':undefined} className={failed?'rounded border border-destructive/25 bg-destructive/10 px-2 py-1 font-semibold text-destructive':'px-2 py-1 text-muted-foreground'}>{failed&&<span className="mr-2 inline-block rounded bg-destructive px-1 text-[10px] text-destructive-foreground">{reading.role==='veto'?'触发否决':'未满足'}</span>}{reading.label??reading.id} = {reading.value??'—'}{reading.range?`（${rangeLabel(reading.range)}）`:reading.threshold!=null?`（${reading.direction??''} ${reading.threshold}）`:''} · {reading.pending??(reading.met==null?'未判定':reading.role==='veto'?(reading.met?'触发否决':'未触发否决'):reading.met?'满足':reading.role==='admission'?'本路未满足（准入取或）':'未满足')}</p>;
               })}</div>)}</details>}
             </article></div>;
           })}

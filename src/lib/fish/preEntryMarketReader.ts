@@ -44,7 +44,7 @@ export async function createPreEntryMarketReader(o:{condition:EntryMarketConditi
     }
     hadValue=true;
     if(isTuringCupSymbol(o.row.symbol)&&completeZeroTradeBar(minute))return {id:c.id,at,value,pending:'零成交分钟暂不准入',zeroTrade:true};
-    let met=qualityConditionMet(value,c.direction,c.threshold);
+    let met=c.range ? withinCaptureLimit(value,{range:c.range,direction:'>',threshold:0},1) : qualityConditionMet(value,c.direction,c.threshold);
     if(c.originalDetector){
       if(c.snapshot.range){
         const inRange=withinCaptureLimit(value,{direction:c.snapshot.direction??'>',threshold:c.snapshot.threshold,range:c.snapshot.range},1);

@@ -312,7 +312,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
             if (!record.trackedGate && gate.status==='pass' && !zeroTrade) {
               const readings = [...necessaryById].flatMap(([id,condition]) => {
                 const reading = map.get(id);
-                return reading ? [{...reading,threshold:condition.threshold,direction:condition.direction}] : [];
+                return reading ? [{...reading,threshold:condition.threshold,direction:condition.direction,...(condition.range?{range:condition.range}:{})}] : [];
               });
               record = {...record,trackedGate:{signalAt,at,status:'pass',readings}};
             } else {
@@ -378,7 +378,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           // Replaying up to the persisted cursor restores locks and confirmation
           // counts; it cannot admit or duplicate a previously observed event.
           if(fixedMinute==null&&at<=resumeAt)continue;
-          record={...record,cursor:decisionAt,threeStage:evidence,exclusionProcess:recordEntryEvidence(record.exclusionProcess!,{...evidence,readings:observations.map(r=>{const condition=conditions.find(c=>c.id===r.id);return {...r,...(admissionIds.has(r.id)?{role:'admission' as const}:{}),...(condition?{threshold:condition.threshold,direction:condition.direction}:{})};})}, indicatorEvents.map(condition => condition.id)),readings:observations.filter(r=>r.value!=null).map(r=>({key:r.id,at:r.at,value:r.value!}))};
+          record={...record,cursor:decisionAt,threeStage:evidence,exclusionProcess:recordEntryEvidence(record.exclusionProcess!,{...evidence,readings:observations.map(r=>{const condition=conditions.find(c=>c.id===r.id);return {...r,...(admissionIds.has(r.id)?{role:'admission' as const}:{}),...(condition?{threshold:condition.threshold,direction:condition.direction,...(condition.range?{range:condition.range}:{})}:{})};})}, indicatorEvents.map(condition => condition.id)),readings:observations.filter(r=>r.value!=null).map(r=>({key:r.id,at:r.at,value:r.value!}))};
           if(waiting&&at>(record.zeroTradeWait?.lastAt??-Infinity))record.zeroTradeWait={count:(record.zeroTradeWait?.count??0)+1,firstAt:record.zeroTradeWait?.firstAt??at,lastAt:at};
           if(v6){if(evidence.state==='zero-blocked'||evidence.state==='first-blocked'||evidence.state==='second-blocked')record.lastVeto={at:decisionAt,reason:evidence.state==='zero-blocked'?evidence.zero!.reason!:evidence.state==='first-blocked'?evidence.first.reason!:evidence.second.reason!,count:(record.lastVeto?.count??0)+1};}
           else if(first.status==='blocked'||second.status==='blocked')record.lastVeto={at,reason:first.status==='blocked'?first.reason!:second.reason!,count:(record.lastVeto?.count??0)+1};

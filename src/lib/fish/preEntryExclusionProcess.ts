@@ -1,9 +1,10 @@
+import type { FishRange } from './thresholdRange';
 import type {EntryStageEvidence} from './preEntryThreeStageScan';
 import type {EntryConditionReading} from './preEntryMarketReader';
 import type {EntryGuardEvent} from './preEntryGuardEvent';
 import {formatUTC8} from '../timeFormat';
 export type EntryProcessStage='necessary'|'guard'|'admission'|'exclusion'|'first'|'second'|'data';
-export type EntryProcessReading=EntryConditionReading&{threshold?:number;direction?:string;role?:'admission'|'veto'};
+export type EntryProcessReading=EntryConditionReading&{threshold?:number;range?:FishRange;direction?:string;role?:'admission'|'veto'};
 export interface EntryProcessItem {
   kind:'observation'|'guard-rejected'|'matched'|'unmatched'|'warming'|'error'|'paused'|'restart';
   from:number;through:number;count:number;reason:string;lastReason?:string;

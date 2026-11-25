@@ -1,3 +1,4 @@
+import { validateFishRange, type FishRange } from './thresholdRange';
 import { shortFishHash, type FishSnapshot } from './algorithm';
 import type { QualityGroup, QualityBuyFilter } from './quality';
 import { validateAdditionVetoes, type QualityAdditionEntryVeto } from './qualityAdditionVeto';
@@ -33,6 +34,7 @@ export interface EntryMarketCondition {
   id: string; label: string; metric: string; snapshot: FishSnapshot;
   enabled: boolean; direction: QualityOperator; threshold: number;
   timing: 'intrabar' | 'closed';
+  range?: FishRange;
   originalDetector?: { constraints:string[]; useOriginalRange?:boolean };
 }
 export type EntryMarketExpression = { condition: EntryMarketCondition } | { join: 'all' | 'any'; children: EntryMarketExpression[] };
@@ -100,6 +102,7 @@ export const usesTrackedGate = (version: unknown): boolean =>
 export const usesSignalTimeGate = (version: unknown): boolean => version === PRE_ENTRY_SIGNAL_GATE_VERSION || usesTrackedGate(version);
 export const expressionConditions = (e: EntryMarketExpression): EntryMarketCondition[] => 'condition' in e ? [e.condition] : e.children.flatMap(expressionConditions);
 export function validateEntryCondition(c: EntryMarketCondition) {
+  if (c.range) validateFishRange(c.range);
   if (!c.id || !c.metric || !c.snapshot?.definitionKey || !c.label.trim() || !Number.isFinite(c.threshold) || !['<','>','<=','>='].includes(c.direction) || !['intrabar','closed'].includes(c.timing)) throw Error('市场条件须选择指标、方向、有限门槛及确认方式');
 }
 /** Old v5/v6 configurations retain their original basis. */
