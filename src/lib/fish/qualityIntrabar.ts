@@ -1,3 +1,5 @@
+import { DBL5_MIRROR_MODE } from './qualityMirror';
+import { dbl5SellAsBox, makeDbl5Sell } from './qualityDbl5Sell';
 import {createBoxStopReader,type BoxStopState} from './qualityBoxStop';
 import {MIRROR_DEADLINE_KIND,mirrorDeadlineAt,mirrorCompletedBy} from './qualityMirrorDeadline';
 import {postMirrorProtectionAt,type POST_MIRROR_PROTECTION_VERSION} from './qualityPostMirrorProtection';
@@ -270,16 +272,37 @@ export async function findQualityIntrabarExit(o: {
   if(start===(o.resumed?o.since:o.entry)) {
     const trigger=await check(start);if(trigger)return {trigger,prices,mirrorFill,...boxState()};
   }
+  const mirrorReference = o.mirror?.mode === DBL5_MIRROR_MODE && o.mirror.enabled
+    ? createBoxStopReader({vetoes: (['sell-dbl5-guard','sell-dbl5-impulse'] as const).map(id =>
+        dbl5SellAsBox(makeDbl5Sell(id,0,[]).rule,id)), row:o.row, entry:o.entry, since:o.entry, load:o.load, signal})
+    : undefined;
+  const lastLine = new Map<string, number>();
+  let mirrorK: number | undefined;
+  const refreshMirrorReference = async (minute: ResearchBar) => {
+    if (!mirrorReference || mirrorFill || !holding) return;
+    const updates: {line:number; at:number}[] = [];
+    await mirrorReference.read(minute,{onRawReference:(line,_atr,_buffer,at,id)=>{
+      if (lastLine.get(id) === line) return;
+      lastLine.set(id,line);
+      updates.push({line,at:Math.max(o.entry,at)});
+    }});
+    updates.sort((a,b)=>a.at-b.at || Math.abs(b.line-holding!.entry)-Math.abs(a.line-holding!.entry) || a.line-b.line);
+    for (const update of updates) mirrorK=update.line;
+  };
   const mirrorAt=(minute:ResearchBar,openingOnly:boolean):QualityTrigger|undefined=>{
     if(!o.mirror?.enabled || mirrorFill || !holding || minute.openTime<o.since)return;
-    const target=holding.entry*(1+o.mirror.gainPct/100),observed=openingOnly?minute.open:minute.high;
+    const dynamic = o.mirror.mode === DBL5_MIRROR_MODE;
+    if (dynamic && (!(mirrorK! > 0) || mirrorK! > holding.entry)) return;
+    const target=dynamic ? mirrorK!+(holding.entry-mirrorK!)/(o.mirror.sellPct/100) : holding.entry*(1+o.mirror.gainPct/100);
+    const gainPct=dynamic ? (target/holding.entry-1)*100 : o.mirror.gainPct;
+    const observed=openingOnly?minute.open:minute.high;
     if (!Number.isFinite(target)) throw new Error('镜像止盈价格超出可计算范围，请降低涨幅阈值');
     if(observed<target && Math.abs(observed-target)>target*1e-12)return;
     const atOpen=minute.open>=target,price=atOpen?minute.open:target;
-    mirrorFill={at:minute.openTime,price,fraction:o.mirror.sellPct/100,gainPct:o.mirror.gainPct,atOpen};
+    mirrorFill={at:minute.openTime,price,fraction:o.mirror.sellPct/100,gainPct,atOpen};
     if(enabled.some(v=>v.mirrorStage?.stage==='before'))boxReader.deactivateBefore(postMirrorProtectionAt(mirrorFill)!);
     if(mirrorFill.fraction===1)return {at:minute.openTime,reading:(price/holding.entry-1)*100,barOpenTime:minute.openTime,fillPrice:price,fillPeak:price,atOpen,
-      cause:{id:'mirror-take-profit',label:'镜像止盈',kind:'mirror-take-profit',direction:'>=',threshold:o.mirror.gainPct}};
+      cause:{id:'mirror-take-profit',label:'镜像止盈',kind:'mirror-take-profit',direction:'>=',threshold:gainPct}};
   };
   const transport=minuteTransport(o.plan);
   transport.usesTaker=streams.some(s=>s.plan.usesTaker);
@@ -290,6 +313,7 @@ export async function findQualityIntrabarExit(o: {
     for(let i=0;i<minutes.length;i++) {
       if(signal.aborted)throw new DOMException('已暂停','AbortError');
       const minute=minutes[i];
+      if(minute.openTime>=o.since) await refreshMirrorReference(minute);
       if(minute.openTime>=o.since){const deadline=checkDeadline(minute.openTime);if(deadline){prices.push(minute);return {trigger:deadline,prices,mirrorFill,...boxState()};}}
       let boxTrigger=minute.openTime>=o.since?await boxReader.read(minute):undefined;
       const seller = boxTrigger?.cause && ordinaryBoxSellers.find(v => v.id === boxTrigger?.cause?.id);

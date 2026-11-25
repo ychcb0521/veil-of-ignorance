@@ -91,3 +91,22 @@ it('saves DBL-5 sellers with a payoff stop and freezes the entry distance as R',
  expect(plain.dbl5SellerRiskPctV1).toBeGreaterThan(0);
  expect(plain.dbl5SellerRiskPctV1).toBe(result.dbl5SellerRiskPctV1);
 });
+
+it('uses the closed DBL-5 line to reverse-calculate a mirror limit at entry', async()=>{
+ const {DBL5_MIRROR_MODE}=await import('@/lib/fish/qualityMirror');
+ const entry=T+15*300000, bars=new Map(dblSample().map(b=>[b.openTime,b]));
+ const at=(t:number):ResearchBar=>({...bars.get(t)??{openTime:t,open:100,high:100,low:100,close:100,volume:10,takerBuyVolume:5,quoteVolume:1000,takerBuyQuoteVolume:500},DBL5_tick_size:1} as ResearchBar);
+ const load:FishReconstructionLoader=async(row,a,b,p)=>{
+   expect(b).toBeLessThanOrEqual(Math.floor(row.timeMs/p.step)*p.step);
+   return Array.from({length:(b-a)/p.step},(_,i)=>p.step===60000
+     ? {...at(a+i*p.step),open:200,high:400,low:200,close:200} : at(a+i*p.step));
+ };
+ const source={id:'row',symbol:'TESTUSDT',timeMs:entry,timeLabel:'',fallbackZone:''};
+ const sample:QualitySample={id:'row',source,enteredAt:entry,basis:'signal',groups:[],importedAt:entry};
+ const candidate=makeQualitySellPlan('sell-dbl5-guard:line','<',0,[]);
+ const plan=freezeQualityPlan({...candidate,mirrorTakeProfit:{enabled:true,mode:DBL5_MIRROR_MODE,gainPct:5,sellPct:50}});
+ const result=await evaluateQualitySample(sample,plan,0,entry+60000,load,new AbortController().signal);
+ expect(result.mirrorFill).toMatchObject({fraction:0.5,at:entry,atOpen:false});
+ expect(result.mirrorFill!.price).toBeGreaterThan(200);
+ expect(result.mirrorFill!.price).toBeLessThan(400);
+});

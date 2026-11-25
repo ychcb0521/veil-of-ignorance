@@ -182,7 +182,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
   const history=new Map(rules.map(r=>[r.v.id,[{at:o.since,state:{...r.state}}]]));
   const record=(id:string,at:number,state:BoxStopState)=>{const list=history.get(id)!;if(JSON.stringify(list.at(-1)!.state)!==JSON.stringify(state))list.push({at,state:{...state}});};
   const statesAt=(at:number)=>Object.fromEntries(rules.map(r=>[r.v.id,{...history.get(r.v.id)!.filter(p=>p.at<=at).at(-1)?.state}]));
-  const read=async (minute:ResearchBar, options?:{observeNativeClose?:boolean;onlyActivated?:boolean;onRawReference?:(line:number,atr:number,buffer:number)=>void}):Promise<QualityTrigger|undefined>=>{
+  const read=async (minute:ResearchBar, options?:{observeNativeClose?:boolean;onlyActivated?:boolean;onRawReference?:(line:number,atr:number,buffer:number, confirmedAt:number, id:string)=>void}):Promise<QualityTrigger|undefined>=>{
     const candidates:QualityTrigger[]=[];
     for(const r of rules){
       const after=!!r.v.activation||r.v.mirrorStage?.stage==='after',boundary=o.activationAt?.();
@@ -243,7 +243,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
           if(base==null)return; // Keep an existing protective K when the box subsequently breaks.
           // Static distance observes the native line before any protective stop buffer or tick rounding.
           if (options?.onRawReference) {
-            options.onRawReference(base, r.atr.value, r.rule.structure.buffer);
+            options.onRawReference(base, r.atr.value, r.rule.structure.buffer, at, r.v.id);
             return;
           }
           const tick=reference?(r.readZero?dbl5TickAt(o.row.symbol,bars[i].openTime,bars[i].DBL5_tick_size??bars[i].ATI6H_tick_size??bars[i].PRS6H_tick_size,bars[i].PRS6H_data_source):(row as Dbl5Row).tick_size):undefined;
