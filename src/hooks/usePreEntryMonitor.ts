@@ -19,11 +19,11 @@ import { readActiveInstantRecordIds } from '@/lib/fish/instantCampaignStore';
 import { readAutomaticPreEntryCheckpoint, readOpenAdmissionCheckpoints } from '@/lib/fish/preEntryPersistence';
 import {projectPreEntryBatch} from '@/lib/fish/preEntryArchiveClient';
 import { usesSignalTimeGate, PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
-import { qualitySignalTime } from '@/lib/fish/qualityAdmissionTime';
+import { qualitySignalTime, type QualityMonitorTimeBasis } from '@/lib/fish/qualityAdmissionTime';
 import { freezeQualityPlan, freezeSavedPlans, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
 import { PRE_ENTRY_CONDITIONS_VERSION, validatePreEntryConditions } from '@/lib/fish/preEntryConditions';
-import { activeStandaloneBuyFilters, newQualityStudy, qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress, type QualityGroup } from '@/lib/fish/quality';
+import { qualityEntryIdentity, activeStandaloneBuyFilters, newQualityStudy, qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress, type QualityGroup } from '@/lib/fish/quality';
 
 export type AutomaticScreeningMatch = { record: PreEntryRecord; round: PreEntryRound };
 type ScreeningLane = { controller?: AbortController; execution?: Promise<void>; timer?: ReturnType<typeof setTimeout> };
@@ -316,7 +316,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       finish();
     }
   }, [commit, persistence, owner, persistAdmission]);
-  const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false, onMatch?: (match: AutomaticScreeningMatch) => void, automaticSettings?: PreEntrySettings, instantTrading?: true, liveCapturedAt?: number) => {
+  type ManualScreeningStudy = FishQualityStudy & {screeningTime?:{basis:QualityMonitorTimeBasis;times:NonNullable<FishQualityStudy['staticTimeByEntry']>;skipped:number}};
+  const start = useCallback(async (study: ManualScreeningStudy, hours: number, automaticId?: string, recover = false, onMatch?: (match: AutomaticScreeningMatch) => void, automaticSettings?: PreEntrySettings, instantTrading?: true, liveCapturedAt?: number) => {
     const settings = automaticSettings ?? current.current.settings;
     const lane = automaticId ? lanes.current.automatic : lanes.current.manual;
     const reportError = automaticId ? setAutomaticError : setError;
@@ -403,11 +404,12 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     if (!plans.length || !threeStage&&!filters.length || !samples.length) { reportError('请设置筛选条件，并勾选要监测的信号'); return; }
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) { reportError('监测时长须为 0～8784 小时'); return; }
     const at = Date.now(), id = automaticId ?? `pre-entry-${crypto.randomUUID()}`;
-    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)), ...(automaticId ? instantTrading ? { instantTrading, liveCapturedAt } : { automatic: true } : workspaceMode ? {workspaceDraft:true as const} : {}) };
+    const round: PreEntryRound = { id, ...(study.screeningTime?{timeBasis:study.screeningTime.basis,skippedTimeRows:study.screeningTime.skipped}:{}), startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)), ...(automaticId ? instantTrading ? { instantTrading, liveCapturedAt } : { automatic: true } : workspaceMode ? {workspaceDraft:true as const} : {}) };
     const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => {
-      const startTime = usesSignalTimeGate(round.engine) ? qualitySignalTime(sample.source) : sample.enteredAt ?? sample.source.timeMs;
+      const startTime = study.screeningTime ? study.screeningTime.times[qualityEntryIdentity(sample.source,sample.enteredAt)]!.at!
+        : usesSignalTimeGate(round.engine) ? qualitySignalTime(sample.source) : sample.enteredAt ?? sample.source.timeMs;
       return { id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
-        status: 'queued' as const, startTime, cursor: startTime, readings: [], updatedAt: at };
+        status: 'queued' as const, ...(study.screeningTime?{timeBasis:study.screeningTime.basis}:{}), startTime, cursor: startTime, readings: [], updatedAt: at };
     }));
     const base=!automaticId&&current.current.settings&&current.current.settings.plans.length>plans.length?archivePreEntrySettings(current.current,{...current.current.settings,plans:structuredClone(plans),updatedAt:at}):current.current;
     commit({...mergePreEntryLibraries(base, { version: 1, rounds: [round], records }), settings: automaticId ? base.settings : base.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
@@ -419,11 +421,18 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const round = current.current.rounds.find(r => r.id === roundId);
     if (round) await execute(round, newQualityStudy(study.startedAt));
   }, [execute]);
-  const restart = useCallback(async (study: FishQualityStudy, hours: number) => {
-    const generation = epoch.current, pending = lanes.current.manual.execution;
+  const restartRequest=useRef(0);
+  const restart = useCallback(async (study: ManualScreeningStudy, hours: number, prepare?:()=>Promise<ManualScreeningStudy>) => {
+    const generation=epoch.current, request=++restartRequest.current;
+    if (prepare) {
+      try { study=await prepare(); }
+      catch(cause) { if(generation===epoch.current && request===restartRequest.current) setError(cause instanceof Error?cause.message:'读取筛选起点失败'); return; }
+    }
+    if (generation!==epoch.current || request!==restartRequest.current) return;
+    const pending = lanes.current.manual.execution;
     lanes.current.manual.controller?.abort();
     await pending;
-    if (epoch.current === generation) await start(study, hours);
+    if (epoch.current === generation && request===restartRequest.current) await start(study, hours);
   }, [start]);
   const configure = useCallback((plans: QualityGroup[], hours: number) => {
     if (!readyRef.current) throw Error('入选库尚未恢复完成');

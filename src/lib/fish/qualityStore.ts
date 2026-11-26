@@ -34,6 +34,7 @@ const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualit
   const priorBases = saved?.monitorTimeBasisByRow;
   return {
     ...next,
+    ...(saved?.staticTimeByEntry ? {staticTimeByEntry:{...saved.staticTimeByEntry,...next.staticTimeByEntry}} : {}),
     planTemplates: mergeQualityPlanTemplates(saved?.planTemplates, next.planTemplates),
     ...(priorBases ? {
       monitorTimeBasis: next.monitorTimeBasis ?? saved.monitorTimeBasis,

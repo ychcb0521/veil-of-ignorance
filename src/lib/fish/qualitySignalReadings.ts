@@ -2,7 +2,7 @@ import {staticDblDistancePct} from './dblDistancePct';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { signalDedupKey } from '@/lib/signalLibrary';
 import { shortFishHash } from './algorithm';
-import { qualitySignalTime } from './qualityAdmissionTime';
+import { qualityMonitorTimeLabels, qualitySignalTime } from './qualityAdmissionTime';
 import { readQualityMetricAt } from './qualityEntry';
 import { definitionKey } from '../deepDig/features';
 import { dbl5GuardVersion, dbl5Parameters } from '../dbl5m';
@@ -40,13 +40,13 @@ export interface QualitySignalReadingBatch {
   rows: readonly QualitySample[];
 }
 export const signalReadingKey = (row: QualitySample, metric: QualitySignalMetric, viewRowId?: string) =>
-  'signal-read-v1:' + shortFishHash(JSON.stringify([signalDedupKey({...row.source,timeMs:qualitySignalTime(row.source)}),metric.id, ...(viewRowId ? [viewRowId] : []), ...(metric.initialization ? [metric.initialization] : [])]));
+  'signal-read-v1:' + shortFishHash(JSON.stringify([signalDedupKey({...row.source,timeMs:qualitySignalTime(row.source)}),metric.id, ...(row.staticTime ? ['static-time-v1',row.staticTime.basis,row.staticTime.at] : []), ...(viewRowId ? [viewRowId] : []), ...(metric.initialization ? [metric.initialization] : [])]));
 
 export function signalReadingCell(row: QualitySample, metric: QualitySignalMetric, readings: ReadonlyMap<string, QualityFilterReading>, viewRowId?: string) {
   const reading = readings.get(signalReadingKey(row,metric,viewRowId));
   const value = reading && !reading.error && Number.isFinite(reading.value) ? reading.value! : null;
-  const status = value !== null ? '' : reading?.error ? '缺数据' : '待计算';
-  const detail = [`信号时间 ${formatUTC8(qualitySignalTime(row.source))}`, reading?.at ? `读数截至 ${formatUTC8(reading.at)}` : '',
+  const status = row.staticTime?.at === null ? '已跳过' : value !== null ? '' : reading?.error ? '缺数据' : '待计算';
+  const detail = [row.staticTime ? qualityMonitorTimeLabels[row.staticTime.basis]+' '+(row.staticTime.at ? formatUTC8(row.staticTime.at) : '缺失，本轮跳过') : `信号时间 ${formatUTC8(qualitySignalTime(row.source))}`, reading?.at ? `读数截至 ${formatUTC8(reading.at)}` : '',
     value !== null ? String(value) + (metric.snapshot.unit === 'ATR' ? ' ATR' : '') : reading?.error ?? status].filter(Boolean).join('\n');
   const text = value === null ? status : metric.metric.startsWith(SIGNAL_GUARD_PCT) ? value.toFixed(2)+'%' : metric.snapshot.unit === 'ATR' ? `${value > 0 ? '+' : ''}${Number(value.toPrecision(6))} ATR` : String(value);
   return {value,status,detail,text};
@@ -54,7 +54,7 @@ export function signalReadingCell(row: QualitySample, metric: QualitySignalMetri
 
 export async function readSignalGuardDistance(metric: QualitySignalMetric, row: QualitySample, now: number,
     load: FishReconstructionLoader, signal: AbortSignal, marketStart?: QualityRunOptions['marketStart'], atr = 0) {
-  const time = qualitySignalTime(row.source);
+  const time = row.staticTime ? row.staticTime.at ?? NaN : qualitySignalTime(row.source);
   const pct = metric.metric.startsWith(SIGNAL_GUARD_PCT);
   const guard = guardDistanceSignalChoice(metric.snapshot.featureId, pct ? metric.metric.slice(SIGNAL_GUARD_PCT.length) : metric.metric);
   if (!guard || !Number.isFinite(atr) || atr < 0) throw Error('信号时点 DBL-5 距离参数无效');
@@ -86,7 +86,7 @@ export async function collectQualitySignalReadings(options: QualityRunOptions, l
     options.onProgress({done,total:unique.size,current:row.source.symbol});
     let reading: QualityFilterReading;
     try {
-      const time = qualitySignalTime(row.source);
+      const time = row.staticTime ? row.staticTime.at ?? NaN : qualitySignalTime(row.source);
       if (metric.metric.startsWith(SIGNAL_GUARD_PCT) || guardDistanceSignalChoice(metric.snapshot.featureId,metric.metric)) {
         reading = {key,...await readSignalGuardDistance(metric,row,now,load,signal,options.marketStart)};
       } else {

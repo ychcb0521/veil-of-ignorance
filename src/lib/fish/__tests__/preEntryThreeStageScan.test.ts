@@ -28,16 +28,26 @@ function loader(closes:number[]=Array(30).fill(100),zeroAt?:number):FishReconstr
     return {openTime,open,close,high:Math.max(open,close),low:Math.min(open,close),volume,quoteVolume:100*volume,takerBuyVolume:.5*volume,takerBuyQuoteVolume:50*volume};
   });
 }
-async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:PreEntryRecord;aborter?:AbortController;onRecord?:(r:PreEntryRecord)=>void;end?:number;hours?:number;start?:number;automatic?:boolean}={}){
-  let record:PreEntryRecord=options.old??{id:'r',roundId:'round',planId:p.id,sample,status:'queued',startTime:T,cursor:T,readings:[],updatedAt:T};
+async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:PreEntryRecord;aborter?:AbortController;onRecord?:(r:PreEntryRecord)=>void;end?:number;hours?:number;start?:number;automatic?:boolean;screeningAt?:number}={}){
+  let record:PreEntryRecord=options.old??{id:'r',roundId:'round',planId:p.id,sample,status:'queued',startTime:options.screeningAt??T,cursor:options.screeningAt??T,readings:[],updatedAt:T};
   const aborter=options.aborter??new AbortController();
   const retry=p.preEntryThreeStage?.observationBasis==='retry-origin-v2';
-  try{await collectPreEntryMonitor({round:{id:'round',engine:retry?p.preEntryThreeStage!.version:PRE_ENTRY_THREE_STAGE_VERSION,plans:[freezeQualityPlan(p)],filters:[],hours:options.hours??(retry?1:0),state:'running',startedAt:T,updatedAt:T,automatic:options.automatic},records:[record],onRecord:r=>{record=r;options.onRecord?.(r);}},options.load??loader(),options.end??T+12*M,aborter.signal,vi.fn(),options.start==null?undefined:{start:async()=>options.start});}
+  try{await collectPreEntryMonitor({round:{id:'round',...(options.screeningAt?{timeBasis:'screening' as const}:{}),engine:retry?p.preEntryThreeStage!.version:PRE_ENTRY_THREE_STAGE_VERSION,plans:[freezeQualityPlan(p)],filters:[],hours:options.hours??(retry?1:0),state:'running',startedAt:T,updatedAt:T,automatic:options.automatic},records:[record],onRecord:r=>{record=r;options.onRecord?.(r);}},options.load??loader(),options.end??T+12*M,aborter.signal,vi.fn(),options.start==null?undefined:{start:async()=>options.start});}
   catch(error){if(!aborter.signal.aborted)throw error;}
   return record;
 }
 beforeEach(()=>{mocked.events=[T+5*M,T+10*M];mocked.broken=[];});
 function retryPlan(){const p=plan();p.preEntryThreeStage=retryPreEntryThreeStage(p.preEntryThreeStage!);return p;}
+it('uses the chosen screening time for the signal gate and skipped-event admission',async()=>{
+  const p=retryPlan(), screeningAt=T+3*M;
+  p.preEntryThreeStage=signalAnchoredPreEntryThreeStage(p.preEntryThreeStage!);
+  p.preEntryThreeStage.steps={required:true,admission:false,exclusion:false};
+  p.preEntryThreeStage.requiredPaths={static:true,tracking:false};
+  p.preEntryThreeStage.required=[condition('门槛',120)];
+  const result=await run(p,{screeningAt,load:loader([90,95,130,80])});
+  expect(result).toMatchObject({status:'matched',startTime:screeningAt,matchedAt:screeningAt,signalGate:{signalAt:screeningAt},sample:{source:{timeMs:T}}});
+  expect(result.detail).toContain('筛选时间');
+});
 function intersectionPlan(algorithms:EntryMarketCondition[],guardIndex=0,guardEnabled=false) {
   const p=retryPlan();
   p.preEntryThreeStage=signalAnchoredPreEntryThreeStage(p.preEntryThreeStage!);

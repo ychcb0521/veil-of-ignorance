@@ -19,7 +19,8 @@ import { usePreEntryMonitor, type AutomaticScreeningMatch } from './usePreEntryM
 import { preEntrySignal } from '@/lib/fish/preEntryMonitor';
 import {withQualityScreeningEntries,type QualityScreeningScope} from '@/lib/fish/qualityScreeningResults';
 import { readQualityBatchLock, saveQualityBatchLock, sameQualityBatch, type QualityBatchLock } from '@/lib/fish/qualityBatchScope';
-import { qualityMonitorEntryAt, qualityRowMonitorTimeBasis, type QualityMonitorTimeBasis } from '@/lib/fish/qualityAdmissionTime';
+import {prepareFilterTime} from '@/lib/fish/qualityFilterTime';
+import { qualityMonitorTimeLabels, qualityMonitorEntryAt, qualityRowMonitorTimeBasis, type QualityMonitorTimeBasis } from '@/lib/fish/qualityAdmissionTime';
 import { backfillPlanVersions, freezeQualityPlan, refreezeSyncedFormulas } from '@/lib/fish/qualityPlanVersions';
 import { validatePayoffStops } from '@/lib/fish/qualityVeto';
 import { restoreQualityPlanTemplate, mergeQualityPlanTemplates, sameQualityPlanTemplates, campaignPlanForTemplate, deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
@@ -479,9 +480,23 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     }
   }, [change, defer, acceptReading, workspaceMode]);
   /** Separate lifetime and cancellation: filtering never submits sell outcomes or controls monitoring. */
-  const startFilter = useCallback(async (resume = false, rowIds?: FishQualityStudy['selectedRowIds'], force = false, includeSignalValues = false) => {
+  const resolveFilterTime = async (snapshot:FishQualityStudy,basis:QualityMonitorTimeBasis,mode:'static'|'screening') => {
+    const epoch=generation.current;
+    let input=snapshot;
+    if (basis==='screening') {
+      if (!screeningReady.current) throw Error('筛选记录尚未恢复，请稍后再试。');
+      input=withQualityScreeningEntries(snapshot,screeningLibrary.current,screeningScope.current);
+    } else if (basis==='counterfactual') {
+      input=withCounterfactualTimes(snapshot,await readCounterfactualTimes(account.current));
+    }
+    if (epoch!==generation.current) throw Error('账号已切换');
+    const prepared=prepareFilterTime(input,basis,mode);
+    if (!prepared.eligible) throw Error(`所选记录均无有效的${qualityMonitorTimeLabels[basis]}，本轮未开始。`);
+    return prepared;
+  };
+  const startFilter = useCallback(async (resume = false, rowIds?: FishQualityStudy['selectedRowIds'], force = false, includeSignalValues = false, prepared?:FishQualityStudy) => {
     if (!readyRef.current || filterController.current || workspaceMode && archiveLock.current) return;
-    const scopeForRun = (study: FishQualityStudy) => rowIds ? {...study, selectedRowIds: rowIds} : scoped(study);
+    const scopeForRun = (study: FishQualityStudy) => prepared ? {...prepared,filterReadings:study.filterReadings,signalReadings:study.signalReadings} : rowIds ? {...study, selectedRowIds: rowIds} : scoped(study);
     const paused = resume && filterBatch.current?.paused ? filterBatch.current : null;
     if (resume && (!paused || !canResumeBatch(paused.frozen) || !(workspaceMode ? current.current.workspaceFilterDraft : current.current.filterLibrary)?.rounds.some(round => round.id === paused.capture.roundId && round.state === 'paused'))) return;
     if (!paused) {
@@ -584,9 +599,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     stopFilter(); setFilterProgress(null); setFilterError('');
     change(s => ({...s,buyFilters:structuredClone(filters)}));
   }, [change,stopFilter]);
-  const generateSignalValues = useCallback(async (selectedMetrics: readonly QualitySignalMetric[], rowIds: FishQualityStudy['selectedRowIds'], force: boolean) => {
+  const generateSignalValues = useCallback(async (selectedMetrics: readonly QualitySignalMetric[], rowIds: FishQualityStudy['selectedRowIds'], force: boolean, prepared?:FishQualityStudy) => {
     if (!readyRef.current || filterController.current || !selectedMetrics.length) return;
-    const rows = qualityRunSamples({...current.current, selectedRowIds: rowIds});
+    const rows = qualityRunSamples(prepared ?? {...current.current, selectedRowIds: rowIds});
     if (!rows.length) return;
     // Keep frozen ATR readings under their original keys. The working table has a separate percentage cache.
     const metrics = [...new Map(selectedMetrics.flatMap(metric => [metric,signalGuardPercentMetric(metric)])
@@ -663,9 +678,27 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const saved = await saveQualityStudy(account.current, current.current);
     return saved && epoch === generation.current;
   }, [change, stopFilter]);
-  const runStaticSettings = useCallback(async (force = false) => {
+  const staticRequest=useRef(0);
+  const runStaticSettings = useCallback(async (force = false, basis?:QualityMonitorTimeBasis) => {
     if (!readyRef.current || (!force && filterController.current) || workspaceMode && archiveLock.current) return;
-    const snapshot = scoped(current.current);
+    const request=++staticRequest.current, epoch=generation.current, revisionAtStart=filterRevision.current;
+    let snapshot = scoped(current.current);
+    let prepared:FishQualityStudy|undefined;
+    let times:FishQualityStudy['staticTimeByEntry'];
+    if (basis) {
+      try {
+        const result=await resolveFilterTime(snapshot,basis,'static');
+        if(request!==staticRequest.current || epoch!==generation.current || revisionAtStart!==filterRevision.current) return;
+        snapshot=prepared=result.study;
+        times=result.times;
+        setWarning(result.skipped ? `${result.skipped} 条缺少有效的${qualityMonitorTimeLabels[basis]}，本轮静态过滤已跳过。` : '');
+      } catch(cause) {
+        if(request===staticRequest.current && epoch===generation.current) setFilterError(cause instanceof Error?cause.message:'读取时间失败');
+        return;
+      }
+    } else if (snapshot.staticTimeByEntry) {
+      times=Object.fromEntries(qualityRunSamples(snapshot).map(r=>[qualityEntryIdentity(r.source,r.enteredAt),null]));
+    }
     const rowIds = snapshot.selectedRowIds ?? [];
     const metrics = activeSignalMetrics(snapshot);
     const filtersOn = anyBuyFilters(snapshot);
@@ -681,13 +714,14 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       catch (cause) { setFilterError(cause instanceof Error ? cause.message : '图灵杯静态过滤方案无效'); return; }
     }
     const ownerEpoch = generation.current;
-    const readings = generateSignalValues(metrics, rowIds, force);
+    if (times) change(s=>({...s,staticTimeByEntry:{...s.staticTimeByEntry,...times}}));
+    const readings = generateSignalValues(metrics, rowIds, force, prepared);
     const revision = filterRevision.current;
     await readings;
-    if (ownerEpoch === generation.current && revision === filterRevision.current && (filtersOn || workspaceMode && metrics.length)) {
-      await startFilter(false, rowIds, force, workspaceMode && metrics.length > 0);
+    if (request===staticRequest.current && ownerEpoch === generation.current && revision === filterRevision.current && (filtersOn || (workspaceMode || !!basis) && metrics.length)) {
+      await startFilter(false, rowIds, force, (workspaceMode || !!basis) && metrics.length > 0,prepared);
     }
-  }, [generateSignalValues, startFilter, stopFilter, workspaceMode]);
+  }, [generateSignalValues, startFilter, stopFilter, workspaceMode, change]);
   const cancelSignalValues = useCallback(() => stopFilter(true, true), [stopFilter]);
   const cancelFilter = useCallback(() => stopFilter(true), [stopFilter]);
   // 「暂停监测」按钮直接把 cancel 当点击处理函数：收到的是事件对象，不是原因
@@ -1186,7 +1220,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const preEntryState = { ...preEntry,automaticReady:historicalPreEntry.ready,automaticLibrary:historicalPreEntry.automaticLibrary,instantReady:historicalPreEntry.instantReady,instantLoadError:historicalPreEntry.instantLoadError,missingCheckpoint:historicalPreEntry.missingCheckpoint,automaticRunning:historicalPreEntry.automaticRunning,automaticError:historicalPreEntry.automaticError,pauseAutomatic:historicalPreEntry.pauseAutomatic,
     automaticState,startAutomatic:automaticState.startAutomatic,
     start: (hours: number) => preEntry.start(scoped(current.current), hours),
-    restart: (hours: number) => preEntry.restart(scoped(current.current), hours),
+    restart: (hours: number, basis?:QualityMonitorTimeBasis) => {
+      const snapshot=scoped(current.current);
+      return preEntry.restart(snapshot,hours,basis ? async () => {
+        const result=await resolveFilterTime(snapshot,basis,'screening');
+        return {...result.study,screeningTime:{basis,times:result.times,skipped:result.skipped}};
+      } : undefined);
+    },
     resume: async (roundId: string) => { if (canResumeScreening(roundId)) await preEntry.resume(roundId, current.current); } };
   return {requestStudyArchive,runParallelUniverse:run,monitorSettings:{study:readyRef.current?study:settingsStudy,ready:readyRef.current||savedPlansReady},...(studyReadWarning ? {studyReadWarning} : {}),retryStudyLoad,templateCatalog,workspace: workspaceMode ? {sources:workspaceSources,informationReady:!!workspaceInformation.study,archiveReady:ready&&!study.workspaceExecution,importInformation:importWorkspaceInformation,importRows:importWorkspaceRows,removeRows:removeWorkspaceRows,saveMonitoring:saveWorkspaceMonitoring,saveFiltering:saveWorkspaceFiltering} : undefined,signalValues,saveStaticSettings,runStaticSettings,cancelSignalValues,lockedBatch,setLockedBatch,canResumeScreening,setSourceQuality, preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,purgeMonitorEntries,purgeDirectorySource,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : workspaceInformation.study ?? newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, resumeMonitoring: monitorBatch.current?.paused && canResumeBatch(monitorBatch.current.frozen) ? () => start(false, undefined, true) : undefined, resumeFiltering: filterBatch.current?.paused && canResumeBatch(filterBatch.current.frozen) ? () => startFilter(true) : undefined, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
 }

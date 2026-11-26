@@ -56,7 +56,7 @@ function tasksFor(study: FishQualityStudy, catalog: Map<string, QualityFilterSet
     if (plan.label && !setting.plans.includes(plan.label)) { setting = { ...setting, plans: [...setting.plans, plan.label] }; catalog.set(signature, setting); }
     for (const original of qualityRunSamples(study)) {
       const sample=study.independentFilters||includeSignalValues?{...original,monitorEntry:undefined}:qualityMonitoringSample(original);
-      const id = JSON.stringify([setting.id, ...librarySignalIdentity(sample.source), sample.enteredAt]);
+      const id = JSON.stringify([setting.id, ...librarySignalIdentity(sample.source), sample.enteredAt, ...(sample.staticTime ? [sample.staticTime.basis,sample.staticTime.at] : [])]);
       tasks.set(id, { id, setting: catalog.get(signature)!, sample });
     }
   }

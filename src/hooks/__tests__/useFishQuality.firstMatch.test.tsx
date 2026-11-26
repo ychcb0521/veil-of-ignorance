@@ -9,6 +9,7 @@ import {qualityRowResult} from '@/lib/fish/qualityComparison';
 const fixture=firstMatchFixture();
 const loadParallelResults = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/fish/parallelUniverseStore', () => ({ loadParallelTableResults: loadParallelResults }));
+const manualRestart=vi.hoisted(()=>vi.fn());
 let screeningReady=true;
 vi.mock('@/lib/fish/qualityStore',()=>({loadQualityStudy:async(owner:string)=>{
   const study = structuredClone(fixture.study);
@@ -19,9 +20,39 @@ vi.mock('@/lib/fish/qualityStore',()=>({loadQualityStudy:async(owner:string)=>{
     { ...study.samples[0].source, id: 'same-symbol-other-signal', timeMs: SIGNAL_AT + 120000 },
   ]) : study };
 },saveQualityStudy:vi.fn(async()=>true)}));
-vi.mock('../usePreEntryMonitor',()=>({usePreEntryMonitor:()=>({ready:screeningReady,library:fixture.library})}));
+vi.mock('../usePreEntryMonitor',()=>({usePreEntryMonitor:()=>({ready:screeningReady,library:fixture.library,restart:manualRestart})}));
 afterEach(()=>{cleanup();localStorage.clear();screeningReady=true;loadParallelResults.mockReset();});
 
+it('freezes eligible counterfactual records for a dynamic restart and keeps their original signal times',async()=>{
+  const empty:never[]=[];
+  const h=renderHook(()=>useFishQuality('counterfactual-owner',empty,async()=>{}));
+  await waitFor(()=>expect(h.result.current.ready).toBe(true));
+  const rows=qualityDisplayRows(h.result.current.study).filter(r=>!r.source.preEntryMonitor);
+  expect(rows).toHaveLength(2);
+  const key=qualityEntryIdentity(rows[0].source,rows[0].enteredAt);
+  loadParallelResults.mockResolvedValue([{entryKey:key,signal:{time:MATCHED_AT}}]);
+  act(()=>{h.result.current.setSelectedRows(rows.map(r=>r.id));h.result.current.setScope(rows.map(r=>r.id));});
+  await act(()=>h.result.current.preEntry!.restart(12,'counterfactual'));
+  const frozen=await manualRestart.mock.calls.at(-1)![2]();
+  expect(frozen.screeningTime).toMatchObject({basis:'counterfactual',skipped:1,times:{[key]:{at:MATCHED_AT}}});
+  expect(qualityRunSamples(frozen).map(r=>r.source.timeMs)).toEqual([rows[0].source.timeMs]);
+});
+it('freezes the static screening time for both reading paths while preserving the table signal',async()=>{
+  const tasks:QualityRunOptions[]=[],empty:never[]=[];
+  const h=renderHook(()=>useFishQuality('static-first-match',empty,async task=>{tasks.push(task);}));
+  await waitFor(()=>expect(h.result.current.ready).toBe(true));
+  const row=qualityDisplayRows(h.result.current.study).find(r=>!r.source.preEntryMonitor)!;
+  act(()=>{h.result.current.setSelectedRows([row.id]);h.result.current.setScope([row.id]);});
+  const metric={id:'close',label:'收盘',metric:'raw',snapshot:fixture.plan.snapshot};
+  await act(()=>h.result.current.saveStaticSettings([metric],[{...metric,direction:'>',threshold:1,enabled:true}]));
+  await act(()=>h.result.current.runStaticSettings(true,'screening'));
+  expect(tasks.map(t=>t.task)).toEqual(['signal-values','filter']);
+  const signalRow=tasks[0].signalReadingBatches![0].rows[0];
+  const [filterRow]=qualityRunSamples(tasks[1].study);
+  for(const frozen of [signalRow,filterRow]) expect(frozen).toMatchObject({enteredAt:SIGNAL_AT,staticTime:{basis:'screening',at:MATCHED_AT}});
+  expect(h.result.current.study.staticTimeByEntry![qualityEntryIdentity(row.source,row.enteredAt)]).toEqual({basis:'screening',at:MATCHED_AT});
+  expect(h.result.current.study.samples[0].staticTime).toBeUndefined();
+});
 it('runs a selected original signal from its first match and records the corrected campaign without changing its selection or saved plan',async()=>{
  const tasks:QualityRunOptions[]=[],empty:never[]=[];
  const run=vi.fn(async(options:QualityRunOptions)=>{
@@ -137,7 +168,7 @@ it('starts counterfactual monitoring for an existing regret import without a liv
   const {result} = renderHook(() => useFishQuality('regret-import-owner', empty, run));
   await waitFor(() => expect(result.current.ready).toBe(true));
   const rows = qualityDisplayRows(result.current.study);
-  expect(rows.find(row => row.origin === 'regret')?.enteredAt).toBe(MATCHED_AT);
+  expect(rows.find(row => row.origins?.includes('regret'))?.enteredAt).toBe(MATCHED_AT);
   act(() => result.current.setSelectedRows(rows.map(row => row.id)));
   await act(() => result.current.start(false, undefined, false, 'counterfactual'));
   expect(run).toHaveBeenCalledOnce();

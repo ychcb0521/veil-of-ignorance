@@ -849,6 +849,17 @@ it('folds restart into the start button menu, during a run too, and requires a s
   expect(screen.getByRole('button', { name: '开始监测的其他方式' })).toBeDisabled();
   expect(screen.getByRole('button', { name: '开始监测' })).toBeDisabled();
 });
+it('passes each selected static calculation time to the filter runner',()=>{
+  const s=state(),runStaticSettings=vi.fn();
+  s.study.independentFilters=true;
+  s.study.signalMetrics=[{id:'metric',label:'读数',metric:'结果',snapshot:s.study.sellPlans![0].snapshot}];
+  render(<FishQuality state={{...s,runStaticSettings}}/>);
+  for(const [label,basis] of [['信号','signal'],['筛选','screening'],['反事实','counterfactual']]){
+    fireEvent.click(screen.getByLabelText('开始过滤的其他方式'));
+    fireEvent.click(screen.getByRole('button',{name:'基于'+label+'时间'}));
+    expect(runStaticSettings).toHaveBeenLastCalledWith(true,basis);
+  }
+});
 it('offers counterfactual time for both starting and restarting holding monitoring', () => {
   const s = state();
   render(<FishQuality state={s}/>);

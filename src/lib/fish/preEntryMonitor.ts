@@ -27,6 +27,7 @@ export interface PreEntryRecord {
   zeroTradeWait?: { count: number; firstAt: number; lastAt: number };
   planId?: string;
   id: string; roundId: string; sample: QualitySample; status: PreEntryStatus;
+  timeBasis?:import('./qualityAdmissionTime').QualityMonitorTimeBasis;
   startTime: number; cursor: number; endTime?: number; matchedAt?: number;
   entryTimeBasis?: 'signal' | 'tracked';
   readings: QualityFilterReading[]; detail?: string; updatedAt: number;
@@ -38,6 +39,7 @@ export const PRE_ENTRY_INTRABAR_VERSION = 'pre-entry-intrabar-v2' as const;
 export const PRE_ENTRY_ZERO_TRADE_VERSION = 'pre-entry-zero-trade-v3' as const;
 export interface PreEntrySettings { updatedAt: number; plans: QualityGroup[]; hours: number }
 export interface PreEntryRound {
+  timeBasis?:import('./qualityAdmissionTime').QualityMonitorTimeBasis; skippedTimeRows?:number;
   engine?: typeof PRE_ENTRY_INTRABAR_VERSION | typeof PRE_ENTRY_ZERO_TRADE_VERSION | typeof PRE_ENTRY_CONDITIONS_VERSION | import('./preEntryThreeStage').PreEntryThreeStageVersion; plans?: QualityGroup[];
   id: string; startedAt: number; updatedAt: number; filters: QualityBuyFilter[];
   hours: number; state: 'running' | 'paused' | 'complete';
@@ -89,7 +91,7 @@ export function preEntrySignal(record: PreEntryRecord): TradeSignal | null {
   return { id: `pre-entry:${record.id}`, symbol: source.symbol, exchange: source.exchange, market: source.market,
     underlying: source.underlying, binanceSymbol: source.binanceSymbol,
     timeMs: matchedAt, timeLabel: formatUTC8(matchedAt), fallbackZone: source.fallbackZone,
-    preEntryMonitor: { recordId: record.id, roundId: record.roundId, sourceId: source.id, sourceTime: record.entryTimeBasis ? qualitySignalTime(source) : source.timeMs, matchedAt } };
+    preEntryMonitor: { recordId: record.id, roundId: record.roundId, sourceId: source.id, sourceTime: record.timeBasis || record.entryTimeBasis ? qualitySignalTime(source) : source.timeMs, matchedAt } };
 }
 export interface PreEntryRun {
   round: PreEntryRound; records: readonly PreEntryRecord[];

@@ -139,6 +139,16 @@ it('offers an explicit new round for an old failed scan instead of silently chan
   fireEvent.click(screen.getByText('从头重新筛选'));
   expect(restart).toHaveBeenCalledWith(48); expect(state.preEntry!.resume).not.toHaveBeenCalled();
 });
+it('passes the selected time basis when restarting dynamic screening',()=>{
+ const restart=vi.fn();
+ const state={ready:true,preEntry:{ready:true,running:false,restart,library:emptyPreEntryLibrary()}} as unknown as FishQualityState;
+ render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
+ for(const [label,basis] of [['信号','signal'],['筛选','screening'],['反事实','counterfactual']]){
+   fireEvent.click(screen.getByLabelText('开始筛选的其他方式'));
+   fireEvent.click(screen.getByRole('button',{name:'基于'+label+'时间'}));
+   expect(restart).toHaveBeenLastCalledWith(48,basis);
+ }
+});
 it('orders start, conditions and selected library like holding monitoring, with duration inside settings', async () => {
   const start = vi.fn(), pause = vi.fn();
   const state = { ready: true, preEntry: { library: {...emptyPreEntryLibrary(),settings:{updatedAt:1,hours:48,plans:[]}}, ready: true, running: false, error: '', progress: null, start, pause, resume: vi.fn(), retry: vi.fn() } } as unknown as FishQualityState;

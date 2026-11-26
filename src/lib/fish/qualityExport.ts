@@ -34,7 +34,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     row.source.symbol + (row.source.exchange && row.source.exchange !== 'binance' ? `（${EXCHANGE_NAMES[row.source.exchange]}）` : ''),
     qualitySourceLabel(row),
     formatUTC8(qualitySignalTime(row.source)), row.source.market === 'us_stock' ? '美股' : '', row.source.quality ?? null, qualityDetectorReading(row).value,
-    ...filters.flatMap(({ filter }) => [qualityFilterValue(row, filter, readings), qualityFilterCell(row, filter, readings).status]),
+    ...filters.flatMap(({ filter }) => [qualityFilterValue(row, filter, readings,study.staticTimeByEntry), qualityFilterCell(row, filter, readings,study.staticTimeByEntry).status]),
     ...plans.flatMap(p => { const r = qualityRowResult(study, row, p, results), f = activeBuyFilters(study, p).length ? qualityFilterStatus(study, row, p, readings) : undefined;
       // 这套方案开着买入过滤而这一行没买入：与界面一致写原因，不列它的卖出结果
       if (f && f.state !== 'pass') return ['未买入',f.state === 'fail' ? '未买入' : f.state === 'pending' ? '待判断（买入过滤）' : '买入过滤缺数据', null, null, null, null, null, null, '未买入', qualityDetectorLabel(p,r,true).label, null,...Array(10).fill(null)];

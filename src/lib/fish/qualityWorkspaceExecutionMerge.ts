@@ -22,6 +22,7 @@ export function mergeQualityWorkspaceExecution(history: FishQualityStudy, workin
   return preserveQualityRepairs(old, preserveQualityRepairs(current, { ...combined, workspaceExecution: undefined,
     campaignRuns: [...runs.values()],
     results: readings(old.results, current.results),
+    ...(old.staticTimeByEntry || current.staticTimeByEntry ? {staticTimeByEntry:{...old.staticTimeByEntry,...current.staticTimeByEntry}} : {}),
     buyFilters: current.buyFilters, independentFilters: current.independentFilters,
     workspaceFilterDraft: current.workspaceFilterDraft, workspaceFilterDraftUpdatedAt: current.workspaceFilterDraftUpdatedAt,
     signalMetrics: current.signalMetrics, signalMetricsUpdatedAt: current.signalMetricsUpdatedAt, turingStaticSettings: current.turingStaticSettings,

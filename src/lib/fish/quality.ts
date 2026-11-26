@@ -102,6 +102,8 @@ export function qualityRuleText(g: QualityGroup): string {
 // An addition-only plan still needs a valued holding path, even without an exit threshold.
 export const hasQualityExit = (group: QualityGroup) => !!group.router || !!group.addition?.enabled || (group.combo ? !!group.rule : !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0);
 export interface QualitySample {
+  /** Explicit calculation anchor on a frozen static-filter input or archived result. */
+  staticTime?: {basis: QualityMonitorTimeBasis; at: number | null};
   importedMonitoring?: import("./qualityTemplateTable").ImportedMonitoring[];
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
   /** Exact information copied from a selected directory; no archive or detector recomputation. */
@@ -175,6 +177,8 @@ export interface QualityBuyFilter { signalGuardAtr?: number; staticDblDistance?:
 /** 买入时刻的读数缓存：与门槛无关，改门槛不必重新取数。 */
 export interface QualityFilterReading { key: string; value?: number; at?: number; error?: string }
 export interface FishQualityStudy {
+  /** Last static run per original entry. Null restores the original calculation defaults. */
+  staticTimeByEntry?: Record<string, NonNullable<QualitySample['staticTime']> | null>;
   /** Isolated working execution; never save this partial study over the historical archive. */
   workspaceExecution?:1;
   sourceRatings?:import('./qualitySourceRatings').QualitySourceRatings;
@@ -572,7 +576,7 @@ export function staticDblDistanceKeyParts(filter: QualityBuyFilter) {
   if (!config) return [];
   return [config.version === 'static-dbl5-distance-v2' ? stableEntryJson(config) : config];
 }
-export const qualityFilterReadingKey = (row: QualitySample, f: QualityBuyFilter) => shortFishHash(JSON.stringify(['buy-filter', row.signalId ?? row.id, f.signalGuardAtr !== undefined ? qualitySignalTime(row.source) : row.enteredAt, f.snapshot.definitionKey, f.metric, f.snapshot.interval, ...(f.initialization ? [f.initialization] : []), ...staticDblDistanceKeyParts(f)]));
+export const qualityFilterReadingKey = (row: QualitySample, f: QualityBuyFilter) => shortFishHash(JSON.stringify(['buy-filter', row.signalId ?? row.id, ...(row.staticTime ? ['static-time-v1',row.staticTime.basis,row.staticTime.at] : [f.signalGuardAtr !== undefined ? qualitySignalTime(row.source) : row.enteredAt]), f.snapshot.definitionKey, f.metric, f.snapshot.interval, ...(f.initialization ? [f.initialization] : []), ...staticDblDistanceKeyParts(f)]));
 /** 某套卖出方案的买入过滤（含停用的）；方案没单独设过时沿用旧版本的全局过滤。 */
 export const planBuyFilters = (study: FishQualityStudy, plan: QualityGroup | undefined): QualityBuyFilter[] => study.independentFilters ? [] : plan ? plan.buyFilters ?? study.buyFilters ?? [] : [];
 /** 某套卖出方案启用中的买入过滤。 */
@@ -634,6 +638,7 @@ function filterStatusForConditions(row: QualitySample, filters: readonly Quality
 /** 买入时刻之前最后一根已收盘 K 线上的读数（原值，倍率 1）。 */
 export async function evaluateQualityFilter(row: QualitySample, f: QualityBuyFilter, now: number, load: FishReconstructionLoader, signal: AbortSignal, marketStart?: QualityRunOptions['marketStart']): Promise<QualityFilterReading> {
   const key = qualityFilterReadingKey(row, f);
+  if (row.staticTime) row = {...row, enteredAt:row.staticTime.at};
   try {
     if (f.metric.startsWith('signal-guard-distance-pct-v1/')) {
       if (f.signalGuardAtr === undefined || f.snapshot.unit !== '%') throw Error('缺少冻结的信号距离参数');

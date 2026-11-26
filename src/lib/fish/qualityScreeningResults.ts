@@ -4,7 +4,7 @@ import {preEntrySignal,type PreEntryLibrary,type PreEntryRecord,type PreEntryRou
 import {qualityTableMembers,qualityTableRange,type QualityTableRow} from './qualityTableRows';
 import {formatUTC8} from '@/lib/timeFormat';
 import type {XlsxSheet} from '@/lib/xlsxWorkbook';
-import { qualitySignalTime, type QualityMonitorEntry } from './qualityAdmissionTime';
+import { qualityMonitorTimeLabels, qualitySignalTime, type QualityMonitorEntry } from './qualityAdmissionTime';
 import {clearedPreEntryRecord} from './preEntryTableClears';
 import {isTuringCupSymbol} from '@/lib/turingCupSymbol';
 
@@ -71,7 +71,7 @@ export function withQualityScreeningEntries(study: FishQualityStudy, library?: P
  });
  return samples.every((sample,i)=>sample===study.samples[i])?study:{...study,samples};
 }
-const screeningSignalTime = (record: PreEntryRecord) => record.entryTimeBasis ? qualitySignalTime(record.sample.source) : record.sample.source.timeMs;
+const screeningSignalTime = (record: PreEntryRecord) => record.timeBasis || record.entryTimeBasis ? qualitySignalTime(record.sample.source) : record.sample.source.timeMs;
 
 export type ScreeningPlanName=(plan:NonNullable<PreEntryRound['plans']>[number],round:PreEntryRound)=>string;
 export function screeningCell(results:readonly QualityScreeningResult[],name?:ScreeningPlanName){
@@ -81,7 +81,7 @@ export function screeningCell(results:readonly QualityScreeningResult[],name?:Sc
  };
  const plans=[...new Set(results.map(({record,round})=>label(record,round)??(round.filters.map(f=>f.label).join(' 且 ')||'历史筛选方案')))];
  const statuses=[...new Set(results.map(({record})=>screeningRecordStatus(record)))],matched=results.filter(r=>r.record.status==='matched'&&r.record.matchedAt);
- const detail=results.map(({record:r,round})=>[plans.length===1?plans[0]:label(r,round)??'历史筛选方案',screeningRecordStatus(r),r.detail,`引擎 ${round.engine??'pre-entry-close-v1'}`,`原信号 ${formatUTC8(screeningSignalTime(r))}`,`扫描到 ${formatUTC8(Math.min(r.cursor,r.endTime??r.cursor))}`,r.matchedAt?`首次满足 ${formatUTC8(r.matchedAt)}`:'',...(r.signalGate?.readings.map(reading=>`信号时点 ${formatUTC8(reading.at)} · ${reading.label??reading.id} = ${reading.value??'缺数据'}（${reading.direction} ${reading.threshold}） · ${reading.pending??(reading.met?'满足':'未满足')}`)??[]),...r.readings.map((reading,i)=>{const conditions=round.plans?.find(p=>p.id===r.planId)?.preEntryThreeStage?.required??round.filters,f=conditions.find(f=>f.id===reading.key)??(!round.engine?conditions[i]:undefined),label=f?.label??r.threeStage?.readings.find(x=>x.id===reading.key)?.label??'观测读数 '+(i+1);return `${label} = ${reading.error??(reading.value==null?'缺数据':String(+reading.value.toPrecision(8)))}${f?`（${f.direction} ${f.threshold}）`:''}`;}),r.threeStage?`${r.threeStage.zero?'⓪ 必要条件 '+r.threeStage.zero.status+' / ① 防守线 '+r.threeStage.first.status+' / ② 排除门槛 '+r.threeStage.second.status:'三阶：'+r.threeStage.first.status+' / '+r.threeStage.second.status+' / '+r.threeStage.third?.status}${r.threeStage.event?'；新防守线 '+r.threeStage.event.price:''}`:''].filter(Boolean).join('；')).join('\n');
+ const detail=results.map(({record:r,round})=>[plans.length===1?plans[0]:label(r,round)??'历史筛选方案',screeningRecordStatus(r),r.detail,`引擎 ${round.engine??'pre-entry-close-v1'}`,`原信号 ${formatUTC8(screeningSignalTime(r))}`,...(r.timeBasis?[`筛选起点 · ${qualityMonitorTimeLabels[r.timeBasis]} ${formatUTC8(r.startTime)}`]:[]),`扫描到 ${formatUTC8(Math.min(r.cursor,r.endTime??r.cursor))}`,r.matchedAt?`首次满足 ${formatUTC8(r.matchedAt)}`:'',...(r.signalGate?.readings.map(reading=>`${r.timeBasis ? qualityMonitorTimeLabels[r.timeBasis] : '信号时点'} ${formatUTC8(reading.at)} · ${reading.label??reading.id} = ${reading.value??'缺数据'}（${reading.direction} ${reading.threshold}） · ${reading.pending??(reading.met?'满足':'未满足')}`)??[]),...r.readings.map((reading,i)=>{const conditions=round.plans?.find(p=>p.id===r.planId)?.preEntryThreeStage?.required??round.filters,f=conditions.find(f=>f.id===reading.key)??(!round.engine?conditions[i]:undefined),label=f?.label??r.threeStage?.readings.find(x=>x.id===reading.key)?.label??'观测读数 '+(i+1);return `${label} = ${reading.error??(reading.value==null?'缺数据':String(+reading.value.toPrecision(8)))}${f?`（${f.direction} ${f.threshold}）`:''}`;}),r.threeStage?`${r.threeStage.zero?'⓪ 必要条件 '+r.threeStage.zero.status+' / ① 防守线 '+r.threeStage.first.status+' / ② 排除门槛 '+r.threeStage.second.status:'三阶：'+r.threeStage.first.status+' / '+r.threeStage.second.status+' / '+r.threeStage.third?.status}${r.threeStage.event?'；新防守线 '+r.threeStage.event.price:''}`:''].filter(Boolean).join('；')).join('\n');
  return {plan:plans.join(' / ')||'—',status:statuses.join(' / ')||'—',at:matched.length?qualityTableRange(matched.map(r=>r.record.matchedAt),formatUTC8):'—',time:matched.length?Math.max(...matched.map(r=>r.record.matchedAt!)):null,detail,matched:!!results.length&&results.every(r=>r.record.status==='matched'),error:statuses.includes(screeningStatus.error)||statuses.includes('行情缺口')};
 }
 export function screeningResultsSheet(results:readonly QualityScreeningResult[]):XlsxSheet{

@@ -1,6 +1,7 @@
 import {isDelayedTuringReplaySample} from '@/lib/turingReplaySamples';
 import {shortFishHash} from './algorithm';
 import {serializeAccountBlob} from '@/lib/accountBlobCodec';
+import {staticTimeSample} from './qualityFilterTime';
 import {activeBuyFilters, activeStandaloneBuyFilters, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityEntryIdentity, qualityFilterReadingKey, qualityFilterStatus, type FishQualityStudy, type QualityBuyFilter, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample} from './quality';
 import {qualityResultMap, qualityRowResult} from './qualityComparison';
 import {qualityScreeningResults, screeningResultIndex, screeningRowResults, type QualityScreeningResult} from './qualityScreeningResults';
@@ -92,12 +93,13 @@ export function createQualityTemplateTable(importSelection=false) {
         const exitKey=qualityPostExitKey(row.source,result,original);
         return {plan,result,path,status,exit:exitKey?savedPostExit.get(exitKey):undefined};
       });
-      const filtered=filters.map(([original,f])=>[f,savedFilters.get(qualityFilterReadingKey(row,original))] as const);
-      const signal=readings.map(([original,m])=>[m,savedSignals.get(signalReadingKey(row,original))] as const);
+      const staticRow=staticTimeSample(row,input.staticTimeByEntry);
+      const filtered=filters.map(([original,f])=>[f,savedFilters.get(qualityFilterReadingKey(staticRow,original))] as const);
+      const signal=readings.map(([original,m])=>[m,savedSignals.get(signalReadingKey(staticRow,original))] as const);
       const matched=row.source.preEntryMonitor?.recordId;
       const exactMatch=matched?screeningById.get(matched):undefined;
       const screened=exactMatch?[exactMatch]:screeningRowResults(row,screeningIndex);
-      const key=signature([qualityEntryIdentity(row.source,row.enteredAt),row.basis,basis,row.source.quality,qualitySignalTime(row.source),row.minedAt,row.monitorEntry?.at,row.monitorEntry?.error,row.counterfactualAt,
+      const key=signature([qualityEntryIdentity(row.source,row.enteredAt),row.basis,basis,row.source.quality,qualitySignalTime(row.source),row.minedAt,row.monitorEntry?.at,row.monitorEntry?.error,row.counterfactualAt,...(staticRow.staticTime?[staticRow.staticTime]:[]),
         row.origins,row.readings,sources.map(([,group])=>group.id),row.source.preEntryMonitor?.matchedAt,
         filtered.map(([f,r])=>[f.id,r&&withoutKey(r)]),signal.map(([m,r])=>[m.id,r&&withoutKey(r)]),
         sell.map(({plan,result,path,status,exit})=>[plan.id,result&&resultEvidence(result),path??result?.key,status,exit&&withoutKey(exit)]),
@@ -108,7 +110,7 @@ export function createQualityTemplateTable(importSelection=false) {
       if(keys.has(key)) continue;
       keys.add(key);
       const id='template-row-'+study.samples.length;
-      const base={...row,id,signalId:undefined,groups:sources.map(([,g])=>g.id),
+      const base={...staticRow,id,signalId:undefined,groups:sources.map(([,g])=>g.id),
         readings:Object.fromEntries(sources.flatMap(([old,g])=>row.readings?.[old]?[[g.id,row.readings[old]]]:[]))};
       if(basis) study.monitorTimeBasisByRow![id]=basis;
       study.samples.push(base);

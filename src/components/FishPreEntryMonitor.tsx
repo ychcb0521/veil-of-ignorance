@@ -14,6 +14,8 @@ import {entryDirectoryGroups,entryDirectoryStudy,downloadDirectoryTables} from '
 import type {FishQualityStudy} from '@/lib/fish/quality';
 import { FishPreEntrySettings } from './FishPreEntrySettings';
 import { useMemo, useState, useEffect, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import {FishRunTimeChoices} from './FishRunTimeChoices';
+import {qualityMonitorTimeLabels} from '@/lib/fish/qualityAdmissionTime';
 import { ChevronDown, Filter, Pause, RotateCcw, Settings2 } from 'lucide-react';
 import { libraryCell } from './FishLibraryDialog';
 import { qualitySettingsAction, qualitySplitPrimaryAction, qualitySplitPauseAction, qualitySplitMenuAction } from './FishQualityModule';
@@ -131,7 +133,7 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
     description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复模板目录与入选记录…'):items=>`${visibleAdmitted} 条入选记录 · ${items.filter(item=>!directoryEdits[item.id]?.hidden).length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
     transferMenu={!samplePicker ? actions=><FishEntryLibraryDataActions actions={actions} onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...archived,directoryEdits}} onImport={monitor.importLibrary}/>:undefined}
     download={()=>downloadDirectoryTables('筛选库',getDirectoryItems().map(item=>({id:item.id,study:item.study!() as FishQualityStudy})))}
-    info={<><p>按冻结模板整理筛选轮次，按轮次保存入选组合表，目录菜单可编辑并保存名称。手动保存的轮次包含各标的的判定结果，自动筛选照常记录入选。</p><p>v8 在原信号时点判定一次必要条件。v7 支持多条准入取“或”和否决后重建起点，总截止时间不变。旧方案 v6 保留固定起点：⓪ 必要条件、① 防守线新事件、② 排除门槛（加仓否决／卖出／硬终止）同刻通过才入选；v5 旧轮次沿用原顺序，旧版筛选引擎已下线。</p><p>展开目录后，可选择记录导入组合表。下载和导入保留各版本历史。</p></>}
+    info={<><p>按冻结模板整理筛选轮次，按轮次保存入选组合表，目录菜单可编辑并保存名称。手动保存的轮次包含各标的的判定结果，自动筛选照常记录入选。</p><p>v8 在本轮筛选起点判定一次必要条件。v7 支持多条准入取“或”和否决后重建起点，总截止时间不变。旧方案 v6 保留固定起点：⓪ 必要条件、① 防守线新事件、② 排除门槛（加仓否决／卖出／硬终止）同刻通过才入选；v5 旧轮次沿用原顺序，旧版筛选引擎已下线。</p><p>展开目录后，可选择记录导入组合表。下载和导入保留各版本历史。</p></>}
     empty="暂无入选记录。满足全部条件后才会进入筛选库。"/>;
 }
 
@@ -158,8 +160,11 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
           onClick={() => void (resumable ? monitor.resume(resumable.id) : monitor.start(Number(hours)))}><Filter aria-hidden className="h-3 w-3"/>{resumable ? "继续筛选" : "开始筛选"}</button>}
       <Popover open={menuOpen} onOpenChange={setMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始筛选的其他方式" disabled={!state.ready}
         className={`${qualitySplitMenuAction} ${monitor.running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
-        <PopoverContent align="start" className="w-64 p-1"><button type="button" disabled={!canStart} className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.restart(Number(hours)); }}>
+        <PopoverContent align="start" className="w-64 p-1">
+          <FishRunTimeChoices disabled={!canStart} onChoose={basis=>{setMenuOpen(false);void monitor.restart(Number(hours),basis);}}/>
+          <button type="button" disabled={!canStart} className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.restart(Number(hours)); }}>
           <span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新筛选</span><span className="text-[10px] leading-relaxed text-muted-foreground">保留历史轮次，按当前勾选和条件重新开始{monitor.running ? '；先停止当前批次' : ''}。</span></button>
+          {manualRound?.timeBasis && <p className="px-2 py-1 text-[10px] text-muted-foreground">本轮按{qualityMonitorTimeLabels[manualRound.timeBasis]}筛选{manualRound.skippedTimeRows ? '，跳过 '+manualRound.skippedTimeRows+' 条缺少时点的记录' : ''}</p>}
           {manualRound&&<button type="button" className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted" onClick={()=>{setMenuOpen(false);setAutomaticResults(false);setResultsOpen(true);}}>本轮筛选结果</button>}
           {menuOpen&&monitor.library.rounds.some(isAutomaticPreEntryRound)&&<button type="button" className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted" onClick={()=>{setMenuOpen(false);setAutomaticResults(true);setResultsOpen(true);}}>最近自动筛选结果</button>}
           {manualRound && canResume && missingCount > 0 && <button type="button" disabled={monitor.running || !monitor.ready} className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.resume(manualRound.id); }}>重试本轮缺数据（{missingCount}）</button>}

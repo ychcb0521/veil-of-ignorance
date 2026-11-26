@@ -2,7 +2,7 @@ import { createInstantBalanceCalibration } from '@/lib/fish/instantBalanceCalibr
 import * as campaigns from '@/lib/fish/instantCampaignStore';
 import * as checkpoints from '@/lib/fish/preEntryPersistence';
 import * as admissions from '@/lib/fish/instantAdmission';
-import {collectFishQuality} from '@/lib/fish/quality';
+import {collectFishQuality,qualityEntryIdentity} from '@/lib/fish/quality';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PRE_ENTRY_CONDITIONS_VERSION } from '@/lib/fish/preEntryConditions';
@@ -28,6 +28,17 @@ function study() {
     snapshot: { featureId: def.id, featureShort: def.short, definitionKey: definitionKey(def), statistic: 'raw', interval: '5m' as const, scale: 1, direction: '>' as const, threshold: 100, cutoffMs: t, average: 0, cbi2: 0, startAverage: 0, previousAverage: 0 } }] };
 }
 beforeEach(() => { vi.clearAllMocks(); storage.load.mockImplementation(async () => emptyPreEntryLibrary()); storage.save.mockResolvedValue(undefined); storage.clear.mockResolvedValue(undefined); storage.v5Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v4Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v1Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v2Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v3Load.mockResolvedValue(emptyPreEntryLibrary()); });
+it('freezes the alternative start time on the manual round and record without moving the source',async()=>{
+ const run=vi.fn(async(_task:QualityRunOptions)=>{}),s=study(),at=t+3600000;
+ const h=renderHook(()=>usePreEntryMonitor('manual-time-basis',true,run));
+ await waitFor(()=>expect(h.result.current.ready).toBe(true));
+ const sample=s.samples[0],key=qualityEntryIdentity(sample.source,sample.enteredAt);
+ await act(()=>h.result.current.restart(s,2,async()=>({...s,screeningTime:{basis:'counterfactual',skipped:1,times:{[key]:{at,basis:'counterfactual'}}}})));
+ expect(run).toHaveBeenCalledOnce();
+ const job=run.mock.calls[0][0].preEntry!;
+ expect(job.round).toMatchObject({hours:2,timeBasis:'counterfactual',skippedTimeRows:1});
+ expect(job.records[0]).toMatchObject({startTime:at,cursor:at,sample:{enteredAt:t,source:{timeMs:t}}});
+});
 it('persists a table-only clear without deleting history or frozen settings, and retains results when saving fails',async()=>{
  const input=study(),sample=qualityComparisonRows(input)[0],saved={...emptyPreEntryLibrary(),rounds:[{id:'r',state:'complete' as const,startedAt:t,updatedAt:t,filters:input.buyFilters,hours:1}],records:[{id:'record',roundId:'r',sample,status:'matched' as const,matchedAt:t+60000,startTime:t,cursor:t+60000,updatedAt:t+60000,readings:[{key:'f',value:101}]}]},before=structuredClone(saved);
  storage.load.mockResolvedValue(saved);const run=vi.fn(),h=renderHook(()=>usePreEntryMonitor('clear-owner',true,run));await waitFor(()=>expect(h.result.current.ready).toBe(true));

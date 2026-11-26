@@ -25,6 +25,7 @@ import {FishQualitySourcePicker} from './FishQualitySourcePicker';
 import {latestEntryDirectory,sourceDirectoryKeys,sourceDirectoryIds,matchesMiningDirectory,type QualitySourceDirectory} from '@/lib/fish/qualitySourceDirectories';
 import {type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import { FishPreEntryMonitor } from './FishPreEntryMonitor';
+import {FishRunTimeChoices} from './FishRunTimeChoices';
 import { HoldingMonitorSettings, MonitorTimePicker } from './FishHoldingMonitorSettings';
 import { FishParallelUniverse } from './FishParallelUniverse';
 import { ADDITION_VETO_LABELS, type AdditionEntryVetoKind } from '@/lib/fish/qualityAdditionVeto';
@@ -76,6 +77,7 @@ import { additionMetricTime, withAdditionMetricTime, withMetricSnapshotTime, typ
 import { FishMetricTimeFields } from './FishMetricTimeFields';
 import { shortFishHash } from '@/lib/fish/algorithm';
 import { qualityResultMap, qualityRowResult } from '@/lib/fish/qualityComparison';
+import {staticTimeSample} from '@/lib/fish/qualityFilterTime';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from '@/lib/fish/qualityFilterColumns';
 import { activeSignalMetrics, SIGNAL_GUARD_PCT, makeSignalGuardFilter, signalGuardPercentMetric, signalReadingCell, signalReadingKey, type QualitySignalMetric } from '@/lib/fish/qualitySignalReadings';
 import { createStaticFilterPlan, createTuringStaticFilterPlan } from '@/lib/fish/qualityStaticFilterPlan';
@@ -264,7 +266,7 @@ function BuyFilterEditor({ state, done, selectedCount, initialGuard }: { state: 
     {state.saveStaticSettings && <section className={moduleClass} aria-label="信号时点读数">
       <header className="flex items-start gap-2.5">
         <Activity aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"/>
-        <div><h4>信号时点读数</h4><p className="text-muted-foreground">按原信号时间读取算法数值，每个算法在组合表中占一列。</p></div>
+        <div><h4>信号时点读数</h4><p className="text-muted-foreground">按本轮选定时点读取算法数值，每个算法在组合表中占一列。</p></div>
       </header>
       <select aria-label="添加信号读数算法" className={field + ' w-full'} value="" onChange={event => {
         const key = event.target.value;
@@ -318,7 +320,7 @@ function BuyFilterEditor({ state, done, selectedCount, initialGuard }: { state: 
         <button type="button" aria-label={'删除买入条件 ' + (i + 1)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => { setDirty(true); setDraft(previous => previous.filter((_, index) => index !== i)); }}><X aria-hidden className="h-3.5 w-3.5"/></button>
         {staticDblDistanceChoice(row.choice) || row.saved?.signalGuardAtr !== undefined ? <label className="col-span-full flex items-center gap-2">
           冗余 ATR <input aria-label={`买入条件 ${i+1} 冗余 ATR`} type="number" min={0} step="any" className={field+' w-24'} value={row.atr ?? '0'} onChange={event=>patch(i,{atr:event.target.value})}/>
-          <span className="text-muted-foreground">{row.saved?.signalGuardAtr !== undefined ? '按原信号时点的现价、有效防守线和 ATR 计算，门槛单位为 %'
+          <span className="text-muted-foreground">{row.saved?.signalGuardAtr !== undefined ? '按本轮选定时点的现价、有效防守线和 ATR 计算，门槛单位为 %'
             : row.saved?.staticDblDistance?.version === LEGACY_STATIC_DBL_DISTANCE_VERSION
             ? 'v1 · 买前 5 分钟收盘价到下移后价线的距离（%）'
             : 'v2 ·（5 分钟收盘价与原线的绝对价差 + 冗余倍数 × ATR）÷ 收盘价 × 100%'}</span>
@@ -683,8 +685,8 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
       if (sort === 'quality') return normalizeSignalQuality(r.source.quality) ?? null;
       if (sort === 'process') return !archiveKind && isLibrary(r) ? null : r.source.fish?.cutoffMs ?? null;
       if (sort === 'detector') { const g = detectorMap.get(r.detectorId ?? ''); return g ? `${g.label}\u0000${String(g.snapshot.threshold).padStart(12, '0')}\u0000${g.metric}` : null; }
-      if (sort.startsWith('signal-value:')) { const metric=tableSignalMetrics.find(metric=>`signal-value:${metric.id}`===sort); return metric ? signalReadingMap.get(signalReadingKey(r,metric,signalViewId(r)))?.value ?? null : null; }
-      if (sort.startsWith('filter:')) { const column = filterColumns.find(c => `filter:${c.id}` === sort); return column ? qualityFilterValue(r, column.filter, filterReadingMap) : null; }
+      if (sort.startsWith('signal-value:')) { const metric=tableSignalMetrics.find(metric=>`signal-value:${metric.id}`===sort); return metric ? signalReadingMap.get(signalReadingKey(staticTimeSample(r,study.staticTimeByEntry),metric,signalViewId(r)))?.value ?? null : null; }
+      if (sort.startsWith('filter:')) { const column = filterColumns.find(c => `filter:${c.id}` === sort); return column ? qualityFilterValue(r, column.filter, filterReadingMap,study.staticTimeByEntry) : null; }
       if(sort.startsWith('entry:')){const p=plansForSort?.find(p=>p.id===sort.slice(6));if(!p)return null;const f=filterStatus.get(p.id)?.get(r.signalId??r.id);if(f&&f.state!=='pass')return null;const result=resultFor(r,p),key=qualityEntryKey(r.source,result,p,qualityEntryParts(p)[0]),reading=key?entryReadings.get(key):undefined;return validEntryReading(reading)?reading!.value!:null;}
       if(sort.startsWith('price-change:')){const p=plansForSort?.find(p=>p.id===sort.slice(13));if(!p)return null;const f=filterStatus.get(p.id)?.get(r.signalId??r.id);return f&&f.state!=='pass'?null:qualitySalePriceChangePct(resultFor(r,p));}
       if(sort.startsWith('addition:')){const p=plansForSort?.find(p=>p.id===sort.slice(9));if(!p)return null;const f=filterStatus.get(p.id)?.get(r.signalId??r.id);return f&&f.state!=='pass'?null:qualityAdditionSummary(p,resultFor(r,p)).count;}
@@ -711,7 +713,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
       const order = typeof a.v === 'string' ? a.v.localeCompare(String(b.v)) : a.v - (b.v as number);
       return order * (ascending ? 1 : -1) || qualitySignalTime(b.r.source) - qualitySignalTime(a.r.source) || a.r.id.localeCompare(b.r.id);
     }).map(x => x.r);
-  }, [directoryReadings,runScopeRows, sort, ascending, detectorMap, resultMap, templateTable, catchTypes, archiveKind, plansForSort, monitorTimeBasisByRow, study.monitorTimeBasis, filterStatus, filterColumns, tableSignalMetrics, signalReadingMap, filterReadingMap, postExitReadings, entryReadings,screeningIndex,screeningRoundId,screeningRunId,mergeCabinSignals,screenName,parallelResults]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [directoryReadings,runScopeRows, sort, ascending, detectorMap, resultMap, templateTable, catchTypes, archiveKind, plansForSort, monitorTimeBasisByRow, study.monitorTimeBasis, filterStatus, filterColumns, tableSignalMetrics, signalReadingMap, filterReadingMap, study.staticTimeByEntry, postExitReadings, entryReadings,screeningIndex,screeningRoundId,screeningRunId,mergeCabinSignals,screenName,parallelResults]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows: QualityTableRow[] = useMemo(() => detectorExpanded ? sortedRows : collapseQualityTableRows(sortedRows, templateTable ? 'saved-entry' : mergeCabinSignals ? 'signal' : 'entry'), [sortedRows, detectorExpanded, mergeCabinSignals, templateTable]);
   // 表格为空时探测算法表头不显示：是它们滤空的，就在空状态里写明并给出清除
   const emptyByDetector = !rows.length && activeAlgorithms.length > 0 && searched.length > 0 && narrowed.length === 0;
@@ -1026,7 +1028,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
           <td className={`${cell} ${wrapCell} border-t border-border/40 text-muted-foreground`} data-testid="quality-detector-cell" data-detector-id={row.detectorId ?? ''} title={row.detectorId ? `${detectorMap.get(row.detectorId)?.metric} · ${detectorMap.get(row.detectorId)?.snapshot.interval ?? '5m'} · 公式版本 ${row.detectorId}` : '导入的信号不归属探测算法'}>{!detectorExpanded && row.groups.length > 0 ? <button type="button" className="text-primary hover:underline" onClick={() => expandDetectors(true)} title="展开此列表的探测算法与各次买入记录">{row.groups.length} 个算法 · 展开</button> : row.detectorId ? <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5"><span>{detectorMap.get(row.detectorId)?.label ?? '探测算法'}</span><span className="font-mono text-muted-foreground/70">{detectorMap.has(row.detectorId)?captureLimitText(detectorMap.get(row.detectorId)!.snapshot.direction??'>',detectorMap.get(row.detectorId)!.snapshot.threshold,detectorMap.get(row.detectorId)!.snapshot.range):'—'}</span></span> : '—'}</td></>}
           {showClassicProcess && <td className={`${cell} border-t border-border/40`}>{isLibrary(row) ? <span className="text-muted-foreground/60">—</span> : <FishProcessButton signal={row.source} captures={mergeCabinSignals ? [...new Map(members.map(member => [member.source.id, member.source])).values()] : undefined}/>}</td>}
           {shownFilters.map(column => {
-            const reading = qualityFilterCell(row, column.filter, filterReadingMap);
+            const reading = qualityFilterCell(row, column.filter, filterReadingMap,study.staticTimeByEntry);
             const split = isDrawdownFilter(column.filter);
             const status = <span className={reading.state === 'pass' ? 'text-emerald-600 dark:text-emerald-400' : reading.state === 'fail' ? 'text-destructive' : 'text-muted-foreground'}>{reading.status}</span>;
             return <Fragment key={column.id}>
@@ -1036,7 +1038,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
               {split && <td className={`${cell} border-l border-t border-border/40`} data-testid="quality-drawdown-status" title={reading.detail}>{status}</td>}
             </Fragment>;
           })}
-          {shownSignalMetrics.map(metric=>{const reading=signalReadingCell(row,metric,signalReadingMap,signalViewId(row));return <Fragment key={metric.id}><td className={`${cell} ${wrapCell} border-l border-t border-border/40 font-mono tabular-nums`} data-testid="quality-signal-reading-cell" data-signal-reading-value={reading.value ?? undefined} title={reading.detail}>{reading.value===null?<span className="font-sans text-muted-foreground">{reading.status}</span>:reading.text}</td>{isDrawdownPreview(metric) && <td className={`${cell} border-l border-t border-border/40 text-muted-foreground`}>未设门槛</td>}</Fragment>;})}
+          {shownSignalMetrics.map(metric=>{const reading=signalReadingCell(staticTimeSample(row,study.staticTimeByEntry),metric,signalReadingMap,signalViewId(row));return <Fragment key={metric.id}><td className={`${cell} ${wrapCell} border-l border-t border-border/40 font-mono tabular-nums`} data-testid="quality-signal-reading-cell" data-signal-reading-value={reading.value ?? undefined} title={reading.detail}>{reading.value===null?<span className="font-sans text-muted-foreground">{reading.status}</span>:reading.text}</td>{isDrawdownPreview(metric) && <td className={`${cell} border-l border-t border-border/40 text-muted-foreground`}>未设门槛</td>}</Fragment>;})}
           {showScreening&&<ScreeningCells cell={cell} results={screeningFor(row)} planName={screenName}/>}
           {showParallel && (() => {
             const results = [...new Set(members.map(parallelFor))].filter(result => result !== undefined);
@@ -1128,7 +1130,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
       <p>批量捕捞、买前过滤、持仓监测独立运行和暂停。买前过滤分为静态过滤、动态筛选。开始过滤、筛选和监测，只处理当前来源、月份、探测算法和标的范围内已勾选的记录；本轮清单和条件在开始时冻结。</p>
       <p>勾选标的后点击「锁定所选」，可单独查看和处理本批。解除锁定可返回原筛选范围。</p>
       <p>批量捕捞按设置中的算法、门槛与组合方式扫描信号。开始按钮右侧的 ▾ 中可选「重新开始」。捕捞库按算法家族分目录，目录表格沿用组合表形式。</p>
-      <p>静态过滤按每条条件选择的周期检查原入场时点之前最后一根已收盘的 K 线，不移动入场时间。动态筛选须让必要条件、准入与排除门槛同分钟共同通过。v7 支持防守线新事件与多条指标准入取或，否决后重建观察起点，原总截止时间不变；旧版方案保留原口径。</p>
+      <p>静态过滤按每条条件选择的周期检查本轮选定时点之前最后一根已收盘的 K 线，不移动入场时间。动态筛选须让必要条件、准入与排除门槛同分钟共同通过。v7 支持防守线新事件与多条指标准入取或，否决后重建观察起点，原总截止时间不变；旧版方案保留原口径。</p>
       <p>动态筛选在条件设置中填写「单标的筛选时限（小时）」，新筛选默认 48 小时，已有正数设置保留。首次满足即停在命中时间；到时未满足则结束并继续下一条。时限从每个标的的筛选起点计，不是现实运行耗时。行情更短、缺数据或历史不足会按实际状态显示。</p>
       <p>动态筛选运行时显示完成条数与实际扫描进度；暂停或完成后收起进度提示。运行时点击进度、停止后从开始按钮右侧的 ▾ 选择「本轮筛选结果」，可查看全部状态、原因和首次满足时间。组合表随新轮开始更新，手动保存后可在筛选库的时间目录查看。静态过滤与动态筛选的显示和擦除各自独立。</p>
       <p>暂停继续沿用本轮冻结条件；要使用新条件和时限，选「从头重新筛选」。旧的无限时暂停轮次保留，主按钮另开有限时新轮次。保存方案只保存设置；「保存并开始三阶筛选」按新设置从头运行。</p>
@@ -1148,7 +1150,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
         } : undefined} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && hasQualityExit(p))} campaignHref="/journal/campaigns?section=quality"/>}
         <FishQualityModuleGroup>
           <FishQualityModule level="submodule" title="静态过滤" icon={Filter} testId="quality-static-controls" trailing={<QualityResultTools kind="filter" hidden={hideFilter} onToggle={()=>toggleHidden('filter')} count={study.filterReadings?.length??0} onClear={lockedBatch ? undefined : state.clearFilterResults} disabled={!ready||state.signalValues?.running}/>}
-            summary={<FishQualityInfo label="静态过滤说明"><p>信号时点读数按原信号时间生成。买前过滤按每条条件选择的周期检查原入场时点之前最后一根已收盘的 K 线。两项都只处理当前范围内已勾选的记录。</p><p>过滤库按时间目录查看各轮结果，表格与组合表一致。本模块的眼睛和擦除独立于动态筛选、持仓监测。</p></FishQualityInfo>}
+            summary={<FishQualityInfo label="静态过滤说明"><p>信号时点读数按原信号时间生成。通过运行按钮右侧菜单可改用筛选时间或反事实时间。买前过滤读取所选时点之前最后一根已收盘的对应周期 K 线。两项都只处理当前范围内已勾选的记录。</p><p>过滤库按时间目录查看各轮结果，表格与组合表一致。本模块的眼睛和擦除独立于动态筛选、持仓监测。</p></FishQualityInfo>}
             status={!staticRunning&&state.filterProgress&&<span role="status">{resumeFiltering?'已暂停':state.filterError?'过滤未完成':state.filterProgress.done===state.filterProgress.total?'过滤完成':'过滤未完成'} {state.filterProgress.done}/{state.filterProgress.total}</span>}>
           <div role="group" aria-label="静态过滤运行" className="inline-flex h-6 shrink-0 items-stretch">
             {staticRunning
@@ -1166,11 +1168,14 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
                 <ChevronDown aria-hidden className="h-3 w-3"/>
               </button></PopoverTrigger>
               <PopoverContent align="start" className="w-64 p-1">
+                <FishRunTimeChoices disabled={!canStartStatic || !state.runStaticSettings} onChoose={basis=>{
+                  setFilterMenuOpen(false); void state.runStaticSettings?.(true,basis);
+                }}/>
                 <button type="button" aria-label="重新开始" disabled={!canStartStatic || !state.runStaticSettings}
                   className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-40"
                   onClick={() => { setFilterMenuOpen(false); void state.runStaticSettings?.(true); }}>
                   <span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>重新开始</span>
-                  <span className="text-[10px] leading-relaxed text-muted-foreground">{staticRunning ? '停止当前运行，再按当前勾选和已保存设置重新计算。' : '按当前勾选和已保存设置重新计算。'}</span>
+                  <span className="text-[10px] leading-relaxed text-muted-foreground">{staticRunning ? '停止当前运行，再按当前勾选和已保存设置重新计算。' : '按默认起点和已保存设置重新计算。'}</span>
                 </button>
               </PopoverContent>
             </Popover>
@@ -1193,7 +1198,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
           {state.filterError && <p role="alert" className="text-[11px] text-destructive">{state.filterError}</p>}
           </FishQualityModule>
           {state.preEntry&&<FishQualityModule level="submodule" title="动态监测" icon={Activity} testId="quality-dynamic-controls"
-            trailing={<QualityResultTools kind="screening" hidden={hideScreening} onToggle={()=>toggleHidden('screening')} count={screeningResults.length} onClear={lockedBatch ? undefined : state.clearScreeningResults} disabled={!ready||!state.preEntry?.ready||!!state.archiving}/>} summary={<FishQualityInfo label="动态筛选说明"><ol className="list-decimal space-y-2 pl-4"><li>必要条件。原信号时点全部通过，或跳过本步，即可继续。未通过时可启用动态门槛逐分钟追踪。</li><li>事件准入。任一启用项触发即成为候选。首次进入本步时，已达标的指标也可触发。跳过本步时，具备资格的观察时点直接成为候选。</li><li>排除检查。从候选时点向前检查。通过或跳过本步即入选。被排除就继续找候选，沿用原截止时间。</li></ol><p>三步开关适用于新版方案。已保存方案按冻结版本运行。</p></FishQualityInfo>}>
+            trailing={<QualityResultTools kind="screening" hidden={hideScreening} onToggle={()=>toggleHidden('screening')} count={screeningResults.length} onClear={lockedBatch ? undefined : state.clearScreeningResults} disabled={!ready||!state.preEntry?.ready||!!state.archiving}/>} summary={<FishQualityInfo label="动态筛选说明"><ol className="list-decimal space-y-2 pl-4"><li>必要条件。在本轮选定的起点全部通过，或跳过本步，即可继续。未通过时可启用动态门槛逐分钟追踪。</li><li>事件准入。并集由任一启用项触发。交集由首项触发，再按顺序检查同一时点的其余条件，全部满足才成为候选。首次进入本步时，已达标的指标也可触发。跳过本步时，具备资格的观察时点直接成为候选。</li><li>排除检查。从候选时点向前检查。通过或跳过本步即入选。被排除就继续找候选，沿用原截止时间。</li></ol><p>三步开关适用于新版方案。已保存方案按冻结版本运行。</p></FishQualityInfo>}>
             <FishPreEntryMonitor renderTemplate={(table,close,source)=>renderTemplate(table,close,'screening',source)} openRequest={directoryRequests['pre-entry']} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('pre-entry',id,snapshot,ids)} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:!workspace&&filtersOn} onJump={onJump}
               onSelected={()=>{sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}}/>
           </FishQualityModule>}
@@ -1351,7 +1356,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             </>}
             {showClassicProcess && <th aria-hidden="true"/>}
             {qualityVariables(shownFilters.map(c => c.filter)).map(v => <th key={v.id} colSpan={v.levels.reduce((total, filter) => total + filterTracks(filter), 0)} className="relative border-l border-border/40 px-2 py-1.5 font-normal" aria-label={`过滤变量 ${v.label}`}>{v.label}{v.levels.length > 1 && <span className="ml-2 text-muted-foreground/50">{v.levels.length} 个水平</span>}</th>)}
-            {!!shownSignalMetrics.length && <th colSpan={signalSpan} className="border-l border-border/40 px-2 py-1 font-normal">原信号时点</th>}
+            {!!shownSignalMetrics.length && <th colSpan={signalSpan} className="border-l border-border/40 px-2 py-1 font-normal">静态计算时点</th>}
             {showScreening&&<th colSpan={4} className="relative border-l border-border/40 px-2 py-1 font-normal text-muted-foreground/60">冻结方案与首次满足结果</th>}
             {showParallel && <th colSpan={4} className="relative border-l border-border/40 px-2 py-1 font-normal text-muted-foreground/60">冻结方案与信号触发结果</th>}
             {shownPlans.length>0 && sellVariables.map(v => <th key={v.id} colSpan={qualitySellSpan(v.levels,postExitOpen)} className="relative border-l border-border/40 px-2 py-1.5 font-normal" aria-label={`卖出变量 ${v.label}`}>{v.label}{v.levels.length > 1 && <span className="ml-2 text-muted-foreground/50">{v.levels.length} 个水平</span>}</th>)}
@@ -1382,13 +1387,13 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
                   {split ? '安全回撤（%）' : '过滤 · '+filter.label}{arrow(sortKey)}
                 </button>
                 <span className="mt-0.5 block font-mono text-primary">{split
-                  ? `冗余 ${distance?.atr ?? filter.signalGuardAtr} ATR · ${distance ? (distance.version === LEGACY_STATIC_DBL_DISTANCE_VERSION ? 'v1' : 'v2') : '原信号时点'}`
+                  ? `冗余 ${distance?.atr ?? filter.signalGuardAtr} ATR · ${distance ? (distance.version === LEGACY_STATIC_DBL_DISTANCE_VERSION ? 'v1' : 'v2') : '静态计算时点'}`
                   : `${filter.direction} ${filter.threshold}`}</span>
               </th>
               {split && <th className={`${cell} border-l border-border/40 font-medium`}>是否满足<span className="mt-0.5 block font-mono text-primary">{filter.direction} {filter.threshold}%</span></th>}
             </Fragment>;
           })}
-          {shownSignalMetrics.map(metric=><Fragment key={metric.id}><th className={`${cell} ${wrapCell} border-l border-border/40 font-medium`} data-testid="quality-signal-reading-column" aria-sort={ariaSort(`signal-value:${metric.id}`)} title={`原信号时点读数 · 算法周期 ${metric.snapshot.interval}`}>{sortButton(`signal-value:${metric.id}`,isDrawdownPreview(metric) ? '安全回撤（%）' : metric.label)}
+          {shownSignalMetrics.map(metric=><Fragment key={metric.id}><th className={`${cell} ${wrapCell} border-l border-border/40 font-medium`} data-testid="quality-signal-reading-column" aria-sort={ariaSort(`signal-value:${metric.id}`)} title={`静态计算时点读数 · 算法周期 ${metric.snapshot.interval}`}>{sortButton(`signal-value:${metric.id}`,isDrawdownPreview(metric) ? '安全回撤（%）' : metric.label)}
             {!archiveView && !templateTable && metric.metric.startsWith(SIGNAL_GUARD_PCT) && <div className="mt-1">
               <span>冗余 0 ATR</span> <button type="button" className="text-primary" disabled={!ready || staticRunning || !!lockedBatch}
                 onClick={()=>{setInitialGuard(metric);setFilterOpen(true);}}>设置百分比门槛</button>

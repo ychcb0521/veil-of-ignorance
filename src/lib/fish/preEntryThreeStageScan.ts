@@ -23,7 +23,7 @@ import { screeningTimeSlice } from './screeningYield';
 import { formatUTC8 } from '../timeFormat';
 import { completeZeroTradeBar } from './qualityZeroTrade';
 import { isTuringCupSymbol } from '../turingCupSymbol';
-import { qualitySignalTime } from './qualityAdmissionTime';
+import { qualityMonitorTimeLabels, qualitySignalTime } from './qualityAdmissionTime';
 import type { TradeSignal } from '../signalLibrary';
 import type { ResearchBar } from '../deepRsa/window';
 
@@ -194,7 +194,8 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       if (selected.initialization === TURING_SCREENING_INITIALIZATION_VERSION) {
         validateTuringScreeningMetrics(detectorGroups.flatMap(group => group.conditions));
       }
-      const signalAt = qualitySignalTime(record.sample.source);
+      const anchorLabel=task.round.timeBasis?qualityMonitorTimeLabels[task.round.timeBasis]:'原信号时间';
+      const signalAt = task.round.timeBasis ? record.startTime : qualitySignalTime(record.sample.source);
       if (useGateTime && !(Number.isFinite(signalAt) && signalAt > 0)) throw Error('缺少有效原信号时间');
       const hasNecessary = required.length > 0 || detectorGroups.length > 0;
       const dynamicOnly = useGateTime && hasNecessary && !!trackedPath && config.requiredPaths?.static === false;
@@ -245,7 +246,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
         const evidence = decideThreeStageV7(signalAt,
           {status:'pass', ...(!requiredEnabled ? {reason:'已跳过必要条件'} : {})},
           {status:'pass', ...(!exclusionEnabled ? {reason:'已跳过排除检查'} : {})}, {}, [], false, true,config.admission?.combination?.join);
-        publish({status:'matched',cursor:signalAt,matchedAt:signalAt,entryTimeBasis:'signal',threeStage:evidence,detail:'已入选 · 跳过事件准入，采用原信号时间'});
+        publish({status:'matched',cursor:signalAt,matchedAt:signalAt,entryTimeBasis:'signal',threeStage:evidence,detail:'已入选 · 跳过事件准入，采用'+anchorLabel});
         continue;
       }
       const readers=await Promise.all(conditions.map(async condition=>{
@@ -423,7 +424,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           }
           if(evidence.state==='matched'){
             const match = useGateTime ? { matchedAt: decisionAt, entryTimeBasis: fixedMinute != null ? 'signal' as const : 'tracked' as const } : { matchedAt: at };
-            const detail = useGateTime ? (fixedMinute != null ? '已入选 · 跳过事件准入，采用原信号时间' : '已入选 · 跳过事件准入，采用动态门槛首次达标时间')
+            const detail = useGateTime ? (fixedMinute != null ? '已入选 · 跳过事件准入，采用'+anchorLabel : '已入选 · 跳过事件准入，采用动态门槛首次达标时间')
               : config.steps ? (admissionEnabled ? '已入选 · 事件准入：'+metAdmission.join('、') : '已入选 · 已跳过事件准入')
               : signalGate ? `新事件通过排除检查，已入选；准入：${metAdmission.join('、')}` : entryStageText(evidence);
             publish({status:'matched',...match,detail});matched=true;break;
