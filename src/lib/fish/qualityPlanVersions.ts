@@ -79,6 +79,11 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     version: STATIC_FILTER_VERSION + ' · 参数 #' + shortFishHash(stableEntryJson(plan.staticFilter)),
     summary: '冻结各条过滤条件及信号读数的公式、参数、周期和启用状态。过滤使用买入前最后一根已收盘 K 线。',
   }];
+  if (plan.firstEntryVetoes?.length) {
+    if(plan.firstEntryVetoes.some(rule=>rule.kind!=='indicator')) throw Error('首仓否决须使用指标算法');
+    validateAdditionVetoes(plan.firstEntryVetoes);
+    initialization.push({key:'first-entry-veto',part:'首仓',name:'拒绝开仓',version:'holding-first-entry-veto-v1 · 参数 #'+shortFishHash(stableEntryJson(plan.firstEntryVetoes)),summary:'首仓时读取各算法最近已收盘值，任一启用条件命中即跳过本次开仓。'});
+  }
   if (plan.positionManagement && !isLegacyQualityPlan(plan)) {
     validateQualityPositionManagement(plan.positionManagement);
     const { version, leverage, notional } = plan.positionManagement;

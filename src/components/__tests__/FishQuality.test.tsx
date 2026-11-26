@@ -1777,3 +1777,13 @@ it('configures a same-signal percentage threshold from the legacy combination-ta
   expect(screen.getAllByTestId('quality-drawdown-status')[0].textContent).toBe('不满足');
   expect(s.study.signalReadings![0]).toEqual(raw);
 });
+
+it('configures an independent ATRP first-entry veto at the start of holding settings',()=>{
+ const s=state();render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
+ const section=screen.getByText('拒绝开仓 · 首仓一票否决').closest('section')!;
+ expect(section.compareDocumentPosition(screen.getByTestId('quality-sell-plans-editor')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ fireEvent.change(within(section).getByLabelText('添加算法否决'),{target:{value:'atr-price-pct-v1:ATRP'}});
+ fireEvent.change(within(section).getByLabelText('算法否决 1 阈值'),{target:{value:'3.25'}});
+ fireEvent.click(screen.getByText('保存到「状态 S 原始值」'));
+ expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({firstEntryVetoes:[expect.objectContaining({enabled:true,indicator:expect.objectContaining({metric:'ATRP',threshold:3.25,direction:'>='})})]})]));
+}, 30000);

@@ -110,7 +110,7 @@ export function TemplatePicker({ actions, disabled, onUse, purpose='sell', allow
     <FishQualityTemplateArchive owner={actions.owner} purpose={purpose} restore={browseOnly?undefined:actions.restore}/>
   </PopoverContent></Popover>;
 }
-export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan, onCopyPlan, templates, recoverablePlans,readOnly = false, embedded = false, onDirtyChange, purpose = 'sell', singlePlan = false, templateName }: {
+export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderBeforePlans, renderHolding, onSelectPlan, onCopyPlan, templates, recoverablePlans,readOnly = false, embedded = false, onDirtyChange, purpose = 'sell', singlePlan = false, templateName }: {
   purpose?: 'sell' | 'entry';
   singlePlan?: boolean;
   templateName?:QualityTemplateName;
@@ -122,7 +122,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   readOnly?: boolean;
   /** A branch is one editable plan; its parent owns save, copy and run actions. */
   embedded?: boolean; onDirtyChange?: (dirty: boolean) => void;
-  onSelectPlan?: (id: string) => void; prepare?: (plans: QualityGroup[]) => QualityGroup[]; extraDirty?: boolean; renderHolding?: (view: SellPlansDraftView) => ReactNode;
+  onSelectPlan?: (id: string) => void; prepare?: (plans: QualityGroup[]) => QualityGroup[]; extraDirty?: boolean; renderBeforePlans?: (plans:QualityGroup[])=>ReactNode; renderHolding?: (view: SellPlansDraftView) => ReactNode;
 }) {
   const action = purpose === 'entry' ? '筛选' : '卖出';
   const names=useQualityTemplateNames();
@@ -244,6 +244,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         } else delete plan.combo;
         // 按加仓次数改用的卖出算法在「加仓细节 · 卖出」里逐次设置（monitor 草稿写入 sellStages），这里保持原值。
 
+        if(base?.firstEntryVetoes)plan.firstEntryVetoes=base.firstEntryVetoes;
         return plan;
       });
       // A newly hydrated plan was never a deletion decision in this open form.
@@ -348,7 +349,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
       急拉线冗余 ATR
       <input type="number" min={0} step="any" className={field+' w-24'} value={value ?? '0'} onChange={event=>update(event.target.value)}/>
     </label>;
-  return <><fieldset disabled={readOnly} className="contents"><section className="mb-3 space-y-2 border-b border-border/60 pb-3" data-testid={embedded ? "quality-branch-sell-plans-editor" : "quality-sell-plans-editor"}>
+  return <>{renderBeforePlans?.(preview)}<fieldset disabled={readOnly} className="contents"><section className="mb-3 space-y-2 border-b border-border/60 pb-3" data-testid={embedded ? "quality-branch-sell-plans-editor" : "quality-sell-plans-editor"}>
     <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-medium">{renderHolding ? (purpose === 'entry' ? '① 筛选算法' : '① 组合算法') : `${action}算法`} <span className="text-muted-foreground" data-testid={embedded ? "branch-sell-plan-draft-count" : "sell-plan-draft-count"}>{drafts.length} 套</span></h4>
       {!readOnly && !embedded && !singlePlan && <><button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, purpose === 'entry' ? '>' : '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增{action}算法</button>{templates && <TemplatePicker actions={templates} disabled={!ready} onUse={fromTemplate}/>}</>}</div>
     {!readOnly && !embedded && <p className="text-[10.5px] leading-relaxed text-muted-foreground">{purpose === 'entry' ? '筛选算法与启用的确认条件在同一分钟满足，且无否决时，纳入观察并保存到入选库。' : '每套方案独立监测，可选特征值、公式变量、方向和门槛。下方监测方案随增删、改名即时对应；保存后更新表格；全部调整完成后点击「开始监测」运行已勾选信号，历史轮次保留。'}</p>}

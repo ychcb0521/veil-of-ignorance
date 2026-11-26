@@ -32,6 +32,8 @@ import { FishQualityInfo } from './FishQualityModule';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { hasQualityExit, type QualityGroup } from '@/lib/fish/quality';
 import { holdingVetoDraft, planHoldingVetoDraft, parseHoldingVetoDraft } from '@/lib/fish/qualityFilters';
+import { FishIndicatorEntryVetoFields } from './FishIndicatorEntryVetoFields';
+import { parseIndicatorVetoRows, indicatorVetoDrafts, type IndicatorVetoDraft } from '@/lib/fish/qualityEntryVetoDraft';
 import { FishInstantPositionSettings } from './FishInstantPositionSettings';
 import { sizeInstantEntry } from '@/lib/fish/instantPositionSettings';
 import { FishQualityPositionManagement, positionManagementDraft, parsePositionManagement, type PositionManagementDraft } from './FishQualityPositionManagement';
@@ -262,7 +264,8 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
   const controllers=useRef<Record<string,{current:RouterDraftHandle|null}>>({});
   const [routerDirty,setRouterDirty]=useState<Record<string,boolean>>({});
   const setRouterDirtyFlag=useCallback((id:string,dirty:boolean)=>setRouterDirty(old=>old[id]===dirty?old:{...old,[id]:dirty}),[]);
-  const extraDirty=Object.keys(positions).length>0||plans.some(changed)||Object.values(routerDirty).some(Boolean);
+  const [entryDrafts,setEntryDrafts]=useState<Record<string,IndicatorVetoDraft[]>>({});
+  const extraDirty=Object.keys(entryDrafts).length>0||Object.keys(positions).length>0||plans.some(changed)||Object.values(routerDirty).some(Boolean);
   const merge=(next:QualityGroup[])=>next.map(original=>{
     const draft = positions[original.id];
     const isNewPlan = !original.frozenVersions && !plans.some(p => p.id === original.id);
@@ -272,10 +275,15 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
     // 【用户要求】2026-11-03 旧引擎方案不经过新版监测表单（表单会把加仓改写成箱体），原样保存
     if(p.router){
       const router=controllers.current[p.id]?.current?.build()??p.router;
-      return router===p.router?p:{...router.structure,id:p.id,label:p.label,buyFilters:p.buyFilters,frozenVersions:p.frozenVersions,router,...(positionManagement ? { positionManagement } : {})};
+      return router===p.router?p:{...router.structure,id:p.id,label:p.label,buyFilters:p.buyFilters,firstEntryVetoes:p.firstEntryVetoes,frozenVersions:p.frozenVersions,router,...(positionManagement ? { positionManagement } : {})};
     }
     if(!changed(p)||isLegacyQualityPlan(p))return p;
     try { return {...p,...parseChangedMonitorDraft(p,forPlan(p),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
+  }).map(plan=>{
+    const draft=entryDrafts[plan.id];
+    if(!draft)return plan;
+    const firstEntryVetoes=parseIndicatorVetoRows(draft);
+    return {...plan,firstEntryVetoes:firstEntryVetoes.length?firstEntryVetoes:undefined};
   });
   const recoverablePlans=useMemo(()=>instant?undefined:recoverableQualityPlans(settingsStudy,readSavedQualityPlans(state.account)),
     [instant,state.account,settingsStudy.sellPlans,settingsStudy.monitorLibrary,settingsStudy.campaignRuns]);
@@ -295,19 +303,30 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
   </div>;
   return <>
   {!instant&&!state.ready&&<p role="status" className="mb-2 text-[10.5px] text-muted-foreground">已保存方案可先编辑；历史记录仍在恢复，完成后可开始监测。</p>}
-  <FishQualitySellPlansEditor plans={plans} ready={settingsReady} singlePlan={instant} templateName={templateName} onSave={next => { state.setSellPlans(next); if (!instant) setPositions({}); }} onSelectPlan={choosePlan} recoverablePlans={recoverablePlans} templates={templates} onCopyPlan={(source,copy)=>{
+  <FishQualitySellPlansEditor plans={plans} ready={settingsReady} singlePlan={instant} templateName={templateName} onSave={next => { state.setSellPlans(next); setEntryDrafts({}); if (!instant) setPositions({}); }} onSelectPlan={choosePlan} recoverablePlans={recoverablePlans} templates={templates} onCopyPlan={(source,copy)=>{
+    if(entryDrafts[source.id])setEntryDrafts(current=>({...current,[copy.id]:structuredClone(entryDrafts[source.id])}));
     const position = positions[source.id];
     if (position) setPositions(current => ({ ...current, [copy.id]: { ...position } }));
     if(copy.router){copy.router=structuredClone(controllers.current[source.id]?.current?.build()??copy.router);return;}
     setDrafts(current=>({...current,[copy.id]:{base:monitorBaseKey(copy),draft:structuredClone(forPlan(source))}}));
-  }} extraDirty={extraDirty} prepare={merge} renderHolding={view=>{
+  }} extraDirty={extraDirty} prepare={merge} renderBeforePlans={items=>{
+    const active=items.find(p=>p.id===activeId)??items[0];
+    if(instant||!active||isLegacyQualityPlan(active))return null;
+    return <section aria-label="拒绝开仓" className="mb-3 space-y-2 rounded-md border border-border/60 p-3">
+      <h4 className="text-xs font-medium">拒绝开仓 · 首仓一票否决</h4>
+      <p className="text-[11px] text-muted-foreground">{active.label} · 首仓前检查最近已收盘的指标值，任一启用条件命中即跳过该信号。</p>
+      <FishIndicatorEntryVetoFields definitions={definitions} enabled={settingsReady}
+        rows={entryDrafts[active.id]??indicatorVetoDrafts(active.firstEntryVetoes)??[]}
+        onChange={rows=>setEntryDrafts(current=>({...current,[active.id]:rows}))}/>
+    </section>;
+  }} renderHolding={view=>{
     const planName=view.displayName;
     const active=view.plans.find(p=>p.id===activeId)??view.plans[0];
     const savedPlan=plans.find(p=>p.id===active?.id);
     return <>
       <p className="mb-2 text-[10.5px] text-muted-foreground" data-testid="monitor-plan-draft-count">监测方案 {view.plans.length} 套 · 与上方按编号一一对应{view.dirty?' · 有待保存设置':''}</p>
       {view.plans.length>0&&<div role="tablist" aria-label="选择要设置持仓监测的卖出方案" className="mb-3 flex flex-wrap gap-1 rounded-md bg-muted/60 p-1 text-[10.5px]">{view.plans.map((p,i)=>{
-        const d=forPlan(p),n=d.vetoes.filter(v=>v.enabled).length+(d.mirror.enabled?1:0)+(d.addition.enabled?1:0)+[d.addition,...d.addition.otherRounds].slice(0,Math.max(1,Number(d.addition.maxRounds)||1)).filter(r=>r.sellSwitch?.enabled).length+(d.vetoStages.enabled?d.vetoStages.stages.length:0);
+        const d=forPlan(p),n=(entryDrafts[p.id]??p.firstEntryVetoes??[]).filter(v=>v.enabled).length+d.vetoes.filter(v=>v.enabled).length+(d.mirror.enabled?1:0)+(d.addition.enabled?1:0)+[d.addition,...d.addition.otherRounds].slice(0,Math.max(1,Number(d.addition.maxRounds)||1)).filter(r=>r.sellSwitch?.enabled).length+(d.vetoStages.enabled?d.vetoStages.stages.length:0);
         return <button type="button" role="tab" key={p.id} data-plan-id={p.id} aria-selected={active?.id===p.id} onClick={()=>choosePlan(p.id)} className={`inline-flex min-h-6 items-center gap-1 rounded px-2 py-1 ${active?.id===p.id?'bg-background font-medium shadow-sm':'text-muted-foreground hover:text-foreground'}`}><span className="text-muted-foreground">{i+1}.</span>{planName(p)}<span title="当前填写中已启用的监测条件数" className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{n} 项条件</span></button>;
       })}</div>}
       {!instant&&savedPlan&&hasQualityExit(savedPlan)&&<button type="button" className={button+' mb-2'} disabled={!state.ready} aria-pressed={state.study.selectedSellId===savedPlan.id} onClick={()=>state.selectSell(savedPlan.id)}>固定此方案，比较探测算法</button>}

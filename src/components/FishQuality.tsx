@@ -125,7 +125,7 @@ export function heldText(hours: number | null | undefined): string {
   if (hours < 48) return `${hours.toFixed(1)} 小时`;
   return `${(hours / 24).toFixed(1)} 天`;
 }
-const resultText = (r?: QualityResult) => r?.status === 'closed' ? '已卖出' : r?.status === 'open' ? '持有' : r?.status === 'error' ? '缺数据' : r?.status === 'waiting' && r.entryPrice ? '待设卖出' : '待评估';
+const resultText = (r?: QualityResult) => r?.entryRejected ? '拒绝开仓' : r?.status === 'closed' ? '已卖出' : r?.status === 'open' ? '持有' : r?.status === 'error' ? '缺数据' : r?.status === 'waiting' && r.entryPrice ? '待设卖出' : '待评估';
 
 type FilterDraft = { atr?: string; choice: string; direction: '<' | '>'; threshold: string; enabled: boolean; saved?: QualityBuyFilter; time?: AdditionMetricTime };
 type SignalMetricDraft = { key: string; saved?: QualitySignalMetric; time?: AdditionMetricTime };
@@ -364,6 +364,7 @@ function ResultCell({ plan, result, onClick, section, onOpenCampaign }: { plan: 
     const title = `${summary}\n打开交易战役`;
     return router ? <Link to={href} state={FROM_FISH_QUALITY} onClick={onOpenCampaign} className={className} title={title}>{content}</Link> : <a href={href} className={className} title={title}>{content}</a>;
   }
+  if(result?.entryRejected)return <button type="button" onClick={onClick} className={wrapCell+' text-left'} title={result.reason}>{result.reason}</button>;
   if (result?.status === 'error') {
     const limited = /(?:HTTP|API)\s*(?:429|418)\b/.test(result.reason ?? '');
     const disconnected = /币安.*(?:连接中断|浏览器拦截)/.test(result.reason ?? '');

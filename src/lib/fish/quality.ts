@@ -54,6 +54,7 @@ export const QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
 export interface QualityExitRule { metric: string; direction: '<' | '>' | '>='; threshold: number; version?: typeof import('./qualityStaticDrawdownSell').STATIC_DRAWDOWN_SELL_VERSION | typeof import('./qualityStaticDrawdownSell').TIMED_STATIC_DRAWDOWN_VERSION | typeof DBL5_SELL_VERSION | typeof import("./qualityDbl5Sell").DBL5_SELL_OR_VERSION; boxSell?: import('./qualityBoxStop').BoxStopRule; bandThresholds?: number[]; mirrorScopeVersion?: typeof import('./qualityStaticDrawdownSell').PRE_MIRROR_STATIC_SELL_VERSION }
 export interface QualityGroup {
+  firstEntryVetoes?: import('./qualityAdditionVeto').QualityAdditionEntryVeto[];
   impulse1115Classification?:HoldingImpulse1115Rule;
   preEntryThreeStage?: import('./preEntryThreeStage').PreEntryThreeStage;
   preEntryConditions?: import('./preEntryConditions').PreEntryConditions;
@@ -133,6 +134,7 @@ export interface QualityResult {
   advantageState?: QualityAdvantageState;
   key: string; sampleId: string; groupId: string; evaluatedAt: number;
   routeDecision?: import('./qualityPlanRouter').QualityRouteDecision;
+  entryRejected?: true;
   status: 'open' | 'closed' | 'waiting' | 'error'; reason?: string;
   selectedL0Pct?: number | null;
   initialDbl5RiskPct?: number | null;
@@ -464,6 +466,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 }
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number, timeBasis?: QualityMonitorTimeBasis) => {
   const identity: unknown[] = [s.signalId ?? s.id, qualityMonitorEntryAt(s, timeBasis), g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
+  if (g.firstEntryVetoes?.length) identity.push(['holding-first-entry-veto-v1',stableEntryJson(g.firstEntryVetoes)]);
   if (s.binanceEntry) identity.push(s.binanceEntry);
   if (g.initialization) identity.push(g.initialization);
   if (g.positionManagement) identity.push(qualityPositionIdentity(g.positionManagement));
@@ -716,6 +719,21 @@ export async function evaluateQualitySample(sample:QualitySample,group:QualityGr
 async function evaluateQualitySampleCore(sample:QualitySample,group:QualityGroup,observeHours:number,now:number,load:FishReconstructionLoader,signal:AbortSignal,previous?:QualityResult, initialNotional=qualityPositionSize(group).notional,liveAt?:number,continueAfterMirrorMarker=false):Promise<QualityResult>{
  sample=qualityMonitoringSample(sample);
  if(sample.monitorEntry?.error)return {key:qualityResultKey(sample,group,observeHours),sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:sample.monitorEntry.error};
+ if (!sample.binanceEntry && sample.enteredAt && group.firstEntryVetoes?.some(rule=>rule.enabled)) {
+  const at=Math.ceil(sample.enteredAt/QUALITY_MINUTE)*QUALITY_MINUTE;
+  const base={key:qualityResultKey(sample,group,observeHours),sampleId:sample.id,groupId:group.id,evaluatedAt:now};
+  if(at>now)return {...base,status:'waiting',reason:'等待首仓判断时点'};
+  try {
+   const {createIndicatorEntryVetoReader}=await import('./qualityIndicatorEntryVeto');
+   const read=createIndicatorEntryVetoReader(group.firstEntryVetoes,{row:sample.source,load,signal});
+   const {hit,pending}=await read(at);
+   if(hit)return {...base,status:'waiting',complete:true,entryRejected:true,reason:'拒绝开仓：'+hit.label+'（'+hit.reading+'）'};
+   if(pending)return {...base,status:'waiting',reason:pending};
+  } catch(error){
+   abort(signal);
+   return {...base,status:'error',reason:'首仓否决读数不可用：'+(error instanceof Error?error.message:String(error))};
+  }
+ }
  if(group.router){
   const key=qualityResultKey(sample,group,observeHours);
   try{return {...await evaluateQualityRouter(group.router,(p,prior)=>evaluateQualitySample(sample,p,observeHours,now,load,signal,prior,initialNotional,liveAt,continueAfterMirrorMarker),p=>qualityResultKey(sample,p,observeHours),previous?.key===key?previous:undefined,!!sample.binanceEntry),key,groupId:group.id,...(group.positionManagement ? { initialNotional } : {})};}
@@ -1289,7 +1307,7 @@ export function qualityGroupSummary(study: FishQualityStudy, group: QualityGroup
   const valid = results.filter(r => r.status === 'open' || r.status === 'closed'), closed = valid.filter(r => r.status === 'closed');
   const mean = (values: number[]) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
   return { total: samples.length, valid: valid.length, closed: closed.length, open: valid.length - closed.length + results.filter(r => r.status === 'waiting' && r.entryPrice! > 0).length,
-    failed: results.filter(r => r.status === 'error').length, pending: samples.length - results.length + results.filter(r => r.status === 'waiting').length,
+    failed: results.filter(r => r.status === 'error').length, pending: samples.length - results.length + results.filter(r => r.status === 'waiting' && !r.entryRejected).length,
     averageReturn: mean(valid.map(r => r.returnPct!)), averagePeak: mean(valid.map(r => r.peakPct!)),
     pnl: valid.reduce((a, r) => a + r.pnl!, 0), closedWinRate: closed.length ? closed.filter(r => r.pnl! > 0).length / closed.length * 100 : null };
 }

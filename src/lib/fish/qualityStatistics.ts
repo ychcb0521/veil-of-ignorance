@@ -46,6 +46,7 @@ export function qualityStatisticsSeries(study: FishQualityStudy, rows: readonly 
         if (status !== 'pass') { series.excluded[status === 'fail' ? 'filtered' : 'pendingFilter']++; continue; }
       }
       const result = qualityRowResult(study, row, plan, results);
+      if (result?.entryRejected) { series.excluded.filtered++; continue; }
       if (!hasQualityExit(plan) || !result || result.status === 'waiting') { series.excluded.waiting++; continue; }
       if (result.status !== 'closed') { series.excluded[result.status]++; continue; }
       if (!finite(result.returnPct)) { series.excluded.invalidReturn++; continue; }

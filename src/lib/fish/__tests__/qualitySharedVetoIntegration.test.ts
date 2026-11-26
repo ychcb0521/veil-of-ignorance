@@ -120,3 +120,23 @@ it('uses the native closed guard and ATR with a strict one-sided threshold', asy
  const unformed=createPreEntryGate({conditions:{...emptyPreEntryConditions(),entryVetoes:[rule]},start:T,row:signal,load,signal:signalController.signal,availableStart:T});
  expect(await unformed(T+M,minute(T+M,200))).toMatchObject({pending:expect.stringContaining('等待有效防守线')});
 });
+
+it('freezes the first-entry gate and rejects a matching closed reading before creating any position', async()=>{
+ const indicator={version:INDICATOR_ENTRY_VETO_VERSION,label:'价格',metric:'raw',snapshot,direction:'>=' as const,threshold:100};
+ const rule={kind:'indicator' as const,enabled:true,indicator};
+ const plain:QualityGroup={id:'first',label:'首仓',metric:'raw',snapshot,rule:{metric:'raw',direction:'<',threshold:0}};
+ const plan=freezeQualityPlan({...plain,firstEntryVetoes:[rule]});
+ const saved=saveQualityPlanTemplate(newQualityStudy(T),plan,'首仓算法',T);
+ const copy=qualityPlanFromTemplate({...saved.planTemplates![0],plan:saved.planTemplates![0].plan!},'副本');
+ expect(planVersionChanges(copy)).toEqual([]);
+ expect(planVersionChanges({...copy,firstEntryVetoes:[{...rule,indicator:{...indicator,threshold:101}}]})).not.toEqual([]);
+ const run=(g:QualityGroup)=>evaluateQualitySample(row,g,0,T+4*M,fixture('indicator'),new AbortController().signal);
+ const rejected=await run(copy);
+ expect(rejected).toMatchObject({entryRejected:true,complete:true,reason:expect.stringContaining('已收盘读数 100')});
+ expect(rejected.entryPrice).toBeUndefined();
+ const baseline=await run(plain);
+ expect(baseline.entryPrice).toBe(100);
+ for(const firstEntryVetoes of [[{...rule,enabled:false}],[{...rule,indicator:{...indicator,threshold:101}}]]){
+   expect((await run({...plain,firstEntryVetoes})).entryPrice).toBe(baseline.entryPrice);
+ }
+});
