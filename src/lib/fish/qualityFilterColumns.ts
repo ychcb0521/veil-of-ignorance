@@ -1,8 +1,11 @@
+import { ATR_PRICE_PCT_DEF } from '@/lib/deepDig/features';
 import {staticTimeSample} from './qualityFilterTime';
 import {qualityMonitorTimeLabels,qualitySignalTime} from './qualityAdmissionTime';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { staticDblDistanceKeyParts, activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualitySample } from './quality';
 import { qualityTableMembers, qualityTableRange, type QualityTableRow } from './qualityTableRows';
+
+export const isAtrPriceFilter = (filter: QualityBuyFilter) => filter.snapshot.featureId === ATR_PRICE_PCT_DEF.id;
 
 export interface QualityFilterColumn { id: string; filter: QualityBuyFilter; plans: string[] }
 /** Equal conditions share a column, while different thresholds/formulas remain distinguishable. */
@@ -45,5 +48,5 @@ export function qualityFilterCell(row: QualityTableRow, filter: QualityBuyFilter
   const status = skipped===entries.length ? '已跳过' : errors ? `缺数据${entries.length > 1 ? ` ${errors}/${entries.length}` : ''}`
     : pending ? `待计算${entries.length > 1 ? ` ${pending}/${entries.length}` : ''}`
     : state === 'mixed' ? `满足 ${passed}/${entries.length}` : passed ? '满足' : '不满足';
-  return { value: qualityTableRange(values, value => filter.staticDblDistance || filter.signalGuardAtr !== undefined ? value.toFixed(2) + '%' : qualityFilterValueText(value)), state, status:skipped && skipped<entries.length ? status+' · 跳过 '+skipped : status, detail: details.join('\n') };
+  return { value: qualityTableRange(values, value => filter.staticDblDistance || filter.signalGuardAtr !== undefined ? value.toFixed(2) + '%' : qualityFilterValueText(value) + (isAtrPriceFilter(filter) ? '%' : '')), state, status:skipped && skipped<entries.length ? status+' · 跳过 '+skipped : status, detail: details.join('\n') };
 }

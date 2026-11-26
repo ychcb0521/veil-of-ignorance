@@ -5,7 +5,7 @@ import { FishPanel } from '@/components/FishPanel';
 import type { QualityBatchLock } from '@/lib/fish/qualityBatchScope';
 import { importQualityFish, separateQualityFilters, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, qualityRunSamples } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
-import { BSS_DEF, CBA_DEF, CBI2_DEF, definitionKey } from '@/lib/deepDig/features';
+import { ATR_PRICE_PCT_DEF, BSS_DEF, CBA_DEF, CBI2_DEF, definitionKey } from '@/lib/deepDig/features';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { RouteLoadBoundary } from '@/components/RouteLoadBoundary';
 import { STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
@@ -575,9 +575,41 @@ it('saves an ATR percentage from the static filter settings', () => {
   fireEvent.change(screen.getByLabelText('买入条件 1 ATR 周期（根）'), { target: { value: '7' } });
   fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
   const [filter] = vi.mocked(s.setFilters).mock.calls[0][0];
+  expect(filter.direction).toBe('<');
   expect(filter.snapshot).toMatchObject({ interval: '15m', unit: '%', statistic: 'ATRP' });
   expect(JSON.parse(filter.snapshot.definitionKey!)[0]).toContain('atr(H, L, C, 7) / C * 100');
 });
+it('shows the ATR filter judgment beside its percent without consuming the three signal readings',async()=>{
+  const {makeQualityBuyFilter,makeQualitySignalMetrics}=await import('@/lib/fish/qualityFilters');
+  const {qualityFilterReadingKey}=await import('@/lib/fish/quality');
+  const {readQualityTableSheet}=await import('@/lib/fish/qualityTableExport');
+  const s=state(), key='atr-price-pct-v1:ATRP', filter=makeQualityBuyFilter(key,'<',3);
+  const metrics=makeQualitySignalMetrics([key,'atr-price-pct-v1:avg_ATRP','atr-price-pct-v1:avg_ATRP_2'],[ATR_PRICE_PCT_DEF]);
+  s.study=separateQualityFilters({...s.study,buyFilters:[filter],signalMetrics:metrics,filterReadings:[]});
+  const view=render(<FishQuality state={s}/>);
+  expect(screen.getAllByTestId('quality-signal-reading-column')).toHaveLength(3);
+  expect(screen.getByRole('columnheader',{name:/是否满足.*< 3%/})).toBeVisible();
+  const firstRow=()=>within(screen.getAllByTestId('quality-fish-row')[0]);
+  expect(firstRow().getByTestId('quality-atr-status')).toHaveTextContent('待计算');
+  const row=qualityComparisonRows(s.study)[0], readingKey=qualityFilterReadingKey(row,filter);
+  for (const [value,expected] of [[2.4,'满足'],[3,'不满足'],[4,'不满足']] as const) {
+    s.study={...s.study,filterReadings:[{key:readingKey,value}]};
+    view.rerender(<FishQuality state={s}/>);
+    expect(firstRow().getByTestId('quality-atr-status').textContent).toBe(expected);
+    expect(firstRow().getByTestId('quality-filter-cell').textContent).toBe(value+'%');
+    const table=screen.getByTestId('quality-fish-table').querySelector('table')!;
+    const sheet=readQualityTableSheet(table,{selectedOnly:false}),idx=sheet.columns.findIndex(c=>c.header==='波动率占比（%）');
+    expect(sheet.rows[0].slice(idx-1,idx+1)).toEqual([expected,value+'%']);
+    expect(table.tHead!.rows[2].cells.length).toBe(table.querySelectorAll('col').length);
+  }
+  s.study={...s.study,filterReadings:[{key:readingKey,error:'行情缺失'}],buyFilters:[makeQualityBuyFilter(key,'>',3)]};
+  view.rerender(<FishQuality state={s}/>);
+  expect(firstRow().getByTestId('quality-atr-status')).toHaveTextContent('缺数据');
+  expect(firstRow().getByTestId('quality-filter-cell').textContent).toBe('—');
+  fireEvent.click(screen.getByRole('button',{name:'买入过滤条件'}));
+  expect(screen.getByLabelText('买入条件 1 方向')).toHaveValue('>');
+});
+
 it('saves standalone conditions and shows their judgments without masking selling results', async () => {
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
   const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
