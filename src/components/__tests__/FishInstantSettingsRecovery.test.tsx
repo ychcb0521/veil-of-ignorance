@@ -76,7 +76,7 @@ it('shows the settled balance without issuing a new account request when opening
 
 it('closes after a confirmed save while background synchronization is still pending', async () => {
   const save = vi.fn().mockResolvedValue(undefined);
-  const instantMonitor = {restoreStatus:'ready', save, pendingCloud:true} as const;
+  const instantMonitor = {restoreStatus:'ready', settings:undefined, save, pendingCloud:true} as const;
   render(view(setup({instantPreferenceStatus:'ready', instantMonitor})));
   openAfter();
   fireEvent.click(screen.getByRole('button',{name:'保存设置'}));
@@ -87,7 +87,7 @@ it('closes after a confirmed save while background synchronization is still pend
 
 it('keeps the dialog and restores the save button when persistence fails', async () => {
   const save = vi.fn().mockRejectedValue(new Error('本机和云端暂未确认保存，请保留页面并重试。'));
-  const instantMonitor = {restoreStatus:'ready', save, pendingCloud:false} as const;
+  const instantMonitor = {restoreStatus:'ready', settings:undefined, save, pendingCloud:false} as const;
   render(view(setup({instantPreferenceStatus:'ready', instantMonitor})));
   openAfter();
   fireEvent.click(screen.getByRole('button',{name:'保存设置'}));
