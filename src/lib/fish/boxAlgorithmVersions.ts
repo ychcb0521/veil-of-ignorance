@@ -161,6 +161,7 @@ export const BOX_K_EXECUTION_VERSIONS = Object.freeze([
   {id:'holding-dbl5-binance-trade-grid-v2',since:'2026-11-17',summary:'持仓箱体止损支持币安 BULLAUSDT 新旧挂单混合成交。仅在原报价校验失败时按 0.000001 精确校验原始价格，适用于已保存的 5 分钟和 1 小时 DBL-5 箱体规则。真实行情缺口继续报错。'},
   {id:'selected-l0-limited-drawdown-v1',since:'2026-11-26',summary:'盈亏比与盈亏比止盈按首仓名义金额乘首仓限制静态最大回撤比例计算风险金额。'},
   {id:'selected-l0-dbl5-execution-line-v1',since:'2026-11-26',summary:'盈亏比与盈亏比止盈使用开仓时低于买入价的最近 DBL-5 执行线，按首仓数量乘价差计算风险金额。'},
+  {id:'holding-dbl5-binance-trade-grid-v4',since:'2026-11-26',summary:'持仓历史回放在箱体止损或加仓报价校验失败时，按币安公告生效区间重读原始成交价，并以当期合约格点计算保护价。'},
   {id:'holding-dbl5-binance-trade-grid-v3',since:'2026-11-26',summary:'持仓回放在原校验失败后按币安公告恢复 ON、币安人生与 SOON 的历史报价精度。FIL 仅接受逐笔成交已核验的例外价格，保护价继续使用合约报价精度。'},
   {id:'holding-box-stop-guard-regime-v2',since:'2026-11-13',summary:'DBL-5 防守线可按上涨期实线或震荡期虚线建立与更新硬止损 K。其他线型出现时沿用已有 K，尚无 K 时等待。沿用冻结的防守线算法、冗余、K 更新与成交确认设置。'},
   {id:'breakeven-floor-v2',since:'2026-11-15',summary:'保本底线跟随实际触发加仓的位置 K，按 F 定量；逐笔冻结卖出 K 与 F。防守线按配置收盘或触价，其他位置按触价。'},

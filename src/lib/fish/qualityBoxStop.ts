@@ -17,7 +17,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import type { QualityHoldingVeto } from './qualityVeto';
 import type { QualityTrigger } from './qualityIntrabar';
 
-import { BOX_STOP_INVALID_DATA } from './qualityBoxMarketRepair';
+import { boxStopDataError } from './qualityBoxMarketRepair';
 import {POST_MIRROR_PROTECTION_LABEL} from './qualityPostMirrorProtection';
 import {mirrorHardStopStageLabel} from './qualityMirrorHardStopStages';
 
@@ -211,7 +211,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
         const rows=r.readZero?bars.map(()=>({data_valid:true} as Dbl5Row)):r.rule.structure.algorithm==='dbl5'?out.DBL5_details:out.SBS5M_details;
         if(!rows||rows.length!==bars.length)throw Error('箱体硬止损缺少结构读数');
         rows.forEach((row,i)=>{
-          if(!row.data_valid)throw Error(BOX_STOP_INVALID_DATA);
+          if(!row.data_valid)throw boxStopDataError(o.row.symbol,bars[i].openTime,row.reason_codes);
           if(r.readZero&&bars[i].DBL5_closed===false)throw Error('急拉线-0 K 基准不能读取尚未收盘的5分钟线');
           r.atr=advanceChartAtr(r.atr,bars[i]);
           const at=bars[i].openTime+r.step;
@@ -247,7 +247,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
             return;
           }
           const tick=reference?bars[i].DBL5_order_tick_size??(r.readZero?dbl5TickAt(o.row.symbol,bars[i].openTime,bars[i].DBL5_tick_size??bars[i].ATI6H_tick_size??bars[i].PRS6H_tick_size,bars[i].PRS6H_data_source):(row as Dbl5Row).tick_size):undefined;
-          if(reference&&tick==null)throw Error(BOX_STOP_INVALID_DATA);
+          if(reference&&tick==null)throw boxStopDataError(o.row.symbol,bars[i].openTime);
           const line=reference?structureAdditionK({basePrice:base,buffer:r.rule.structure.buffer,bufferUnit:r.rule.structure.bufferUnit,tickSize:String(tick)},r.atr.value)?.k??NaN:base-(r.rule.structure.bufferUnit==='atr'?r.rule.structure.buffer*r.atr.value:base*r.rule.structure.buffer/100);
           if(!(line>0)||!Number.isFinite(line))throw Error('箱体硬止损 K 无效，请检查冗余');
           r.latestLine={line,at};

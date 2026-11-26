@@ -1,4 +1,6 @@
 import { dbl5PriceTicks, dbl5TickRule } from '@/lib/dbl5m';
+import { formatUTC8 } from '../timeFormat';
+import { historicalBoxTickWindows } from './qualityBoxHistoricalTicks';
 import { DBL5_TICK_CHANGES } from '@/lib/dbl5mMarketRules';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -6,10 +8,36 @@ import type { FishReconstructionLoader } from './reconstruction';
 export const BOX_MARKET_REPAIR_VERSION = 'holding-dbl5-binance-trade-grid-v1' as const;
 export const BULLA_BOX_MARKET_REPAIR_VERSION = 'holding-dbl5-binance-trade-grid-v2' as const;
 export const HISTORICAL_BOX_MARKET_REPAIR_VERSION = 'holding-dbl5-binance-trade-grid-v3' as const;
-export type BoxMarketRepairVersion = typeof BOX_MARKET_REPAIR_VERSION | typeof BULLA_BOX_MARKET_REPAIR_VERSION | typeof HISTORICAL_BOX_MARKET_REPAIR_VERSION;
+export const ARCHIVED_BOX_TICK_VERSION = 'holding-dbl5-binance-trade-grid-v4' as const;
+export type BoxMarketRepairVersion = typeof ARCHIVED_BOX_TICK_VERSION | typeof BOX_MARKET_REPAIR_VERSION | typeof BULLA_BOX_MARKET_REPAIR_VERSION | typeof HISTORICAL_BOX_MARKET_REPAIR_VERSION;
 export const BOX_STOP_INVALID_DATA = '箱体硬止损行情或报价精度无效，不能跳过缺口';
 
 export const BOX_ADDITION_INVALID_DATA = '箱体加仓行情或历史报价精度无效，不能作为加仓依据';
+
+export function boxStopDataError(symbol: string, at: number, reasons?: readonly string[]) {
+  return Error(`${BOX_STOP_INVALID_DATA} · ${symbol} ${formatUTC8(at)} · ${reasons?.join('、') || '缺少有效报价精度'}`);
+}
+
+export const isBoxStopDataError = (reason?: string) =>
+  reason === BOX_STOP_INVALID_DATA || !!reason?.startsWith(BOX_STOP_INVALID_DATA + ' · ');
+
+/** Replay-only retry. Both stop and addition must observe the same historical order grid. */
+export function archivedBoxMarketRepair(load: FishReconstructionLoader, symbol: string): FishReconstructionLoader | undefined {
+  const windows = historicalBoxTickWindows(symbol);
+  if (!windows) return;
+  const read: FishReconstructionLoader = async (row, from, cut, plan, signal) => {
+    const bars = await load(row, from, cut, plan, signal);
+    if (row.symbol !== symbol || (row.exchange ?? 'binance') !== 'binance' || row.market === 'us_stock' || !plan.compiled.usesDbl5) return bars;
+    return bars.map(bar => {
+      if (bar.PRS6H_data_source !== 'binance-usdm' || (bar.PRS6H_symbol && bar.PRS6H_symbol !== symbol) || !bar.DBL5_prices) return bar;
+      const rule = windows.find(w => w.from <= bar.openTime && bar.openTime + plan.step <= w.until);
+      return rule ? { ...bar, DBL5_tick_size: rule.executionTick, DBL5_order_tick_size: rule.orderTick } : bar;
+    });
+  };
+  return Object.assign(((...args) => load(...args)) as FishReconstructionLoader, {
+    boxStopMarketLoad: read, boxAdditionMarketLoad: read, turingInitialization: load.turingInitialization,
+  });
+}
 
 const rules = {
   RAVEUSDT: { ...DBL5_TICK_CHANGES[0], version: BOX_MARKET_REPAIR_VERSION },

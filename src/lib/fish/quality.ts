@@ -45,7 +45,7 @@ import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorP
 
 import { staticDblDistancePct } from './dblDistancePct';
 import { DBL5_SELL_VERSION, isDbl5Sell, dbl5SellAsBox, initialDbl5RiskVetoes } from './qualityDbl5Sell';
-import { BOX_ADDITION_INVALID_DATA, BOX_STOP_INVALID_DATA, qualityBoxMarketRepair, type BoxMarketRepairVersion } from './qualityBoxMarketRepair';
+import { ARCHIVED_BOX_TICK_VERSION, archivedBoxMarketRepair, BOX_ADDITION_INVALID_DATA, isBoxStopDataError, qualityBoxMarketRepair, type BoxMarketRepairVersion } from './qualityBoxMarketRepair';
 
 import { QUALITY_NOTIONAL, qualityPositionIdentity, qualityPositionSize, type QualityPositionManagement } from './qualityPositionManagement';
 
@@ -1079,17 +1079,29 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
 }
 export async function evaluateQualitySampleWithMarketRepair(sample: QualitySample, group: QualityGroup, hours: number, now: number,
   load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult, initialNotional=qualityPositionSize(group).notional, liveAt?:number,continueAfterMirrorMarker=false): Promise<QualityResult> {
-  const repair = qualityBoxMarketRepair(load, sample.source.symbol);
-  if (repair && previous?.boxMarketRepair === repair.version) {
-    const result = await evaluateQualitySample(sample, group, hours, now, repair.load, signal, previous, initialNotional,liveAt,continueAfterMirrorMarker);
-    return { ...result, boxMarketRepair: repair.version };
+  const evaluate = (reader: FishReconstructionLoader, prior?: QualityResult) =>
+    evaluateQualitySample(sample, group, hours, now, reader, signal, prior, initialNotional, liveAt, continueAfterMirrorMarker);
+  const archived = !sample.binanceEntry && liveAt == null && (sample.source.exchange ?? 'binance') === 'binance' && sample.source.market !== 'us_stock'
+    ? archivedBoxMarketRepair(load, sample.source.symbol) : undefined;
+  if (archived && previous?.boxMarketRepair === ARCHIVED_BOX_TICK_VERSION) {
+    return { ...await evaluate(archived, previous), boxMarketRepair: ARCHIVED_BOX_TICK_VERSION };
   }
-  const original = await evaluateQualitySample(sample, group, hours, now, load, signal, previous, initialNotional,liveAt,continueAfterMirrorMarker);
-  if (!repair || original.status !== 'error') return original;
-  if (original.reason !== BOX_STOP_INVALID_DATA && !(repair.load.boxAdditionMarketLoad && original.reason === BOX_ADDITION_INVALID_DATA)) return original;
-  const recovered = await evaluateQualitySample(sample, group, hours, now, repair.load, signal, sample.binanceEntry ? previous : undefined, initialNotional,liveAt,continueAfterMirrorMarker);
+  const repair = qualityBoxMarketRepair(load, sample.source.symbol);
+  const resumeRepair = repair && previous?.boxMarketRepair === repair.version;
+  const original = resumeRepair
+    ? { ...await evaluate(repair.load, previous), boxMarketRepair: repair.version }
+    : await evaluate(load, previous);
+  const eligible = (r: QualityResult) => r.status === 'error' && (isBoxStopDataError(r.reason) || r.reason === BOX_ADDITION_INVALID_DATA);
+  if (!eligible(original)) return original;
+  if (repair && !resumeRepair && (isBoxStopDataError(original.reason) || repair.load.boxAdditionMarketLoad)) {
+    const recovered = await evaluate(repair.load, sample.binanceEntry ? previous : undefined);
+    if (recovered.status === 'open' || recovered.status === 'closed') return { ...recovered, boxMarketRepair: repair.version };
+    if (!eligible(recovered)) return recovered;
+  }
+  if (!archived) return original;
+  const recovered = await evaluate(archived);
   return recovered.status === 'open' || recovered.status === 'closed'
-    ? { ...recovered, boxMarketRepair: repair.version } : original;
+    ? { ...recovered, boxMarketRepair: ARCHIVED_BOX_TICK_VERSION } : recovered;
 }
 
 export interface QualityProgress { done: number; total: number; current: string; waitingUntil?: number; matched?: number }

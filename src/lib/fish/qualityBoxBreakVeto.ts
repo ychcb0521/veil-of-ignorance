@@ -9,7 +9,7 @@ import type {TradeSignal} from '../signalLibrary';
 import type {HistoryVetoResult} from './qualityVetoHistory';
 import {validateFishBars,FishError} from './shared';
 import {screeningTimeSlice} from './screeningYield';
-import {BOX_STOP_INVALID_DATA} from './qualityBoxMarketRepair';
+import {boxStopDataError} from './qualityBoxMarketRepair';
 
 /** Reuse frozen native DBL-5 outputs. This adapter never produces a sell trigger or changes sizing. */
 export function createBoxBreakVetoReader(rule:QualityAdditionEntryVeto,o:{entry:number;row:TradeSignal;load:FishReconstructionLoader;signal:AbortSignal}) {
@@ -33,7 +33,7 @@ export function createBoxBreakVetoReader(rule:QualityAdditionEntryVeto,o:{entry:
     const rows=out.DBL5_details;
     if(!rows||rows.length!==bars.length)throw Error('箱体断裂否决缺少原生结构读数');
     for(let i=0;i<rows.length;i++){
-     if(!rows[i].data_valid)throw Error(BOX_STOP_INVALID_DATA);
+     if(!rows[i].data_valid)throw boxStopDataError(o.row.symbol,bars[i].openTime,rows[i].reason_codes);
      const closedAt=bars[i].openTime+step;
      if(firstBreakAt==null&&closedAt>o.entry&&rows[i].darvas_5m_guard_broken)firstBreakAt=closedAt;
     }

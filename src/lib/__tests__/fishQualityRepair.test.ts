@@ -32,7 +32,7 @@ it('replaces old formula results once, preserves original evidence and keeps sta
   expect(data).toHaveLength(1); expect(data[0].campaign.final_realized_pnl).toBe(-5);
   expect(next.results).toHaveLength(1); expect(next.results[0].key).toBe(task.key);
   const sheets=buildQualitySheets(next,[row]);
-  expect(sheets[1].rows).toHaveLength(1); expect(sheets[1].rows[0][13]).toBe(-5);
+  expect(sheets[1].rows).toHaveLength(1); expect(sheets[1].rows[0][sheets[1].columns.findIndex(c => c.header === '收益率 %')]).toBe(-5);
   expect(sheets[2].name).toBe('纠错记录'); expect(sheets[2].rows.some(r=>r[6]===-60&&r[8]===-5)).toBe(true);
   expect(applyQualityRepair(next,prepared.batch.id,task,resultFor(task),T+202*M)).toBe(next);
   expect(study).toEqual(before);
@@ -105,7 +105,7 @@ it('replaces a same-formula close-confirmed campaign with the new timing identit
  expect(b.supersededBy).toBe(task.key);expect(next.campaignRuns!.find(r=>r.result.key===task.key)!.supersededBy).toBeUndefined();
  expect(qualityCampaignDataFromStudy('owner',next,'sell')).toHaveLength(1);
  const sheets=buildQualitySheets(next,[row]);
- expect(sheets[1].columns[32].header).toBe('卖出时机');expect(sheets[1].rows[0][32]).toBe('盘中达标 · 1分钟复原');
+ expect(sheets[1].rows[0][sheets[1].columns.findIndex(c => c.header === '卖出时机')]).toBe('盘中达标 · 1分钟复原');
  expect(sheets[2].rows.some(r=>r[12]==='原周期收盘确认'&&r[13]==='盘中达标 · 1分钟复原')).toBe(true);
 });
 
