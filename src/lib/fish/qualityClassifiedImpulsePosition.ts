@@ -56,7 +56,7 @@ export function createClassifiedImpulsePositionReader(o:{row:TradeSignal;entry:n
      const early=plus.get(point.at)?.early_impulse_event;if(early)origins.set(early.impulse_id,early);
      const line=point.current;if(!line?.available||line.mainClass!==position.mainClass||line.case==null||line.at!==point.at||point.at<=o.entry)return;
      const origin=origins.get(line.lineId),bar=bars[i],base=native.get(point.at);if(!origin||!base?.data_valid)throw Error('急拉分类位置缺少该线冻结起点或原生精度证据');
-     const tick=dbl5TickAt(o.row.symbol,bar.openTime,base.tick_size,bar.PRS6H_data_source);if(tick==null)throw Error('急拉分类位置缺少历史报价精度');
+     const tick=bar.DBL5_order_tick_size??dbl5TickAt(o.row.symbol,bar.openTime,base.tick_size,bar.PRS6H_data_source);if(tick==null)throw Error('急拉分类位置缺少历史报价精度');
      // v3 uses the origin low, matching the unclassified 1115 K. Frozen v1/v2 bases remain executable.
      const basePrice=position.version===CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION?line.price:origin.impulse_origin_low;
      const selected=structureAdditionK({basePrice,buffer:position.bufferAtr,bufferUnit:'atr',tickSize:String(tick)},line.frozenAtr);if(!selected)throw Error('急拉分类位置 K 无效');

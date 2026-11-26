@@ -23,7 +23,7 @@ export interface ResearchBar {
   ATI6H_tick_size?:number|null;
   /** Strict native evidence amounts alongside the unchanged legacy normalized columns. */
   ATI6H_quoteVolume?:number|null; ATI6H_takerBuyQuoteVolume?:number|null;
-  DBL5_tick_size?:string|number|null; DBL5_closed?:boolean; DBL5_prices?:{open:string;high:string;low:string;close:string};
+  DBL5_tick_size?:string|number|null; DBL5_order_tick_size?:string; DBL5_closed?:boolean; DBL5_prices?:{open:string;high:string;low:string;close:string};
   SBS5M_tick_size?:number|null; SBS5M_closed?:boolean;
   PRS6H_tick_size?:number|null; PRS6H_closed?:boolean; PRS6H_symbol?:string; PRS6H_data_source?:string;
   openTime: number;

@@ -246,7 +246,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
             options.onRawReference(base, r.atr.value, r.rule.structure.buffer, at, r.v.id);
             return;
           }
-          const tick=reference?(r.readZero?dbl5TickAt(o.row.symbol,bars[i].openTime,bars[i].DBL5_tick_size??bars[i].ATI6H_tick_size??bars[i].PRS6H_tick_size,bars[i].PRS6H_data_source):(row as Dbl5Row).tick_size):undefined;
+          const tick=reference?bars[i].DBL5_order_tick_size??(r.readZero?dbl5TickAt(o.row.symbol,bars[i].openTime,bars[i].DBL5_tick_size??bars[i].ATI6H_tick_size??bars[i].PRS6H_tick_size,bars[i].PRS6H_data_source):(row as Dbl5Row).tick_size):undefined;
           if(reference&&tick==null)throw Error(BOX_STOP_INVALID_DATA);
           const line=reference?structureAdditionK({basePrice:base,buffer:r.rule.structure.buffer,bufferUnit:r.rule.structure.bufferUnit,tickSize:String(tick)},r.atr.value)?.k??NaN:base-(r.rule.structure.bufferUnit==='atr'?r.rule.structure.buffer*r.atr.value:base*r.rule.structure.buffer/100);
           if(!(line>0)||!Number.isFinite(line))throw Error('箱体硬止损 K 无效，请检查冗余');

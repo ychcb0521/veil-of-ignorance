@@ -45,7 +45,7 @@ import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorP
 
 import { staticDblDistancePct } from './dblDistancePct';
 import { DBL5_SELL_VERSION, isDbl5Sell, dbl5SellAsBox, initialDbl5RiskVetoes } from './qualityDbl5Sell';
-import { BOX_STOP_INVALID_DATA, qualityBoxMarketRepair, type BoxMarketRepairVersion } from './qualityBoxMarketRepair';
+import { BOX_ADDITION_INVALID_DATA, BOX_STOP_INVALID_DATA, qualityBoxMarketRepair, type BoxMarketRepairVersion } from './qualityBoxMarketRepair';
 
 import { QUALITY_NOTIONAL, qualityPositionIdentity, qualityPositionSize, type QualityPositionManagement } from './qualityPositionManagement';
 
@@ -1065,7 +1065,8 @@ export async function evaluateQualitySampleWithMarketRepair(sample: QualitySampl
     return { ...result, boxMarketRepair: repair.version };
   }
   const original = await evaluateQualitySample(sample, group, hours, now, load, signal, previous, initialNotional,liveAt,continueAfterMirrorMarker);
-  if (!repair || original.status !== 'error' || original.reason !== BOX_STOP_INVALID_DATA) return original;
+  if (!repair || original.status !== 'error') return original;
+  if (original.reason !== BOX_STOP_INVALID_DATA && !(repair.load.boxAdditionMarketLoad && original.reason === BOX_ADDITION_INVALID_DATA)) return original;
   const recovered = await evaluateQualitySample(sample, group, hours, now, repair.load, signal, sample.binanceEntry ? previous : undefined, initialNotional,liveAt,continueAfterMirrorMarker);
   return recovered.status === 'open' || recovered.status === 'closed'
     ? { ...recovered, boxMarketRepair: repair.version } : original;
