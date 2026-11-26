@@ -1466,32 +1466,32 @@ it('saves a saved plan as a named template and creates a new plan from a templat
   render(<FishQuality state={s}/>); fireEvent.click(screen.getByLabelText('持仓监测条件'));
   // 存为模板：已保存的方案可存，弹出命名框
   fireEvent.click(screen.getByLabelText('把卖出算法 1 存为模板'));
-  fireEvent.change(screen.getByLabelText('模板名称'), { target: { value: '我的模板' } }); fireEvent.click(screen.getByRole('button', { name: '保存模板' }));
+  fireEvent.change(screen.getByLabelText('模板名称'), { target: { value: '我的模板' } }); fireEvent.click(screen.getByText('保存模板', {selector:'button'}));
   expect(s.savePlanTemplate).toHaveBeenCalledWith(a.id, '我的模板');
   // 有未保存修改时不能存（模板保存的是已保存的设置）
   fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'), { target: { value: '.3' } });
   expect(screen.getByLabelText('把卖出算法 1 存为模板')).toBeDisabled();
   // 从模板新建：新方案带上模板的全部参数，保存时一起写入
   const count = s.study.sellPlans!.length;
-  fireEvent.click(screen.getByRole('button', { name: /从模板新建/ }));
+  fireEvent.click(screen.getByText('模板库 · 从模板新建', {selector:'button'}));
   expect(within(screen.getByTestId('plan-template-list')).getByText('好组合')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '用模板 好组合 新建方案' }));
+  fireEvent.click(screen.getByLabelText('用模板 好组合 新建方案'));
   expect(screen.getByTestId('sell-plan-draft-count')).toHaveTextContent(`${count + 1} 套`);
   expect(screen.getByLabelText('镜像平衡减仓卖出百分比')).toHaveValue(67);
-  fireEvent.click(screen.getByRole('button', { name: '保存全部方案' }));
+  fireEvent.click(screen.getByText('保存全部方案', {selector:'button'}));
   const saved = vi.mocked(s.setSellPlans).mock.calls.at(-1)![0], made = saved.at(-1)!;
   expect(made.id).not.toBe(a.id); expect(made.label).toBe('好组合');
   expect(made).toMatchObject({ rule: { threshold: .45 }, mirrorTakeProfit: { gainPct: 2.5, sellPct: 67 }, holdingVetoes: [{ kind: 'static-drawdown', threshold: 5, enabled: true }] });
-  fireEvent.click(screen.getByRole('button', { name: /从模板新建/ }));
-  fireEvent.click(screen.getByRole('button', { name: '用模板 好组合 新建方案' }));
+  fireEvent.click(screen.getByText('模板库 · 从模板新建', {selector:'button'}));
+  fireEvent.click(screen.getByLabelText('用模板 好组合 新建方案'));
   fireEvent.change(screen.getByLabelText('镜像平衡减仓卖出百分比'), { target: { value: '68' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存全部方案' }));
+  fireEvent.click(screen.getByText('保存全部方案', {selector:'button'}));
   const modified = vi.mocked(s.setSellPlans).mock.calls.at(-1)![0].at(-1)!;
   expect(modified.label).toMatch(/^监测_\d{8}_[A-Z]+$/);
   expect(modified.mirrorTakeProfit?.sellPct).toBe(68);
   // 删除要再确认一次
-  fireEvent.click(screen.getByRole('button', { name: /从模板新建/ })); fireEvent.click(screen.getByRole('button', { name: '删除模板 好组合' }));
-  expect(s.deletePlanTemplate).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: '确认删除模板 好组合' }));
+  fireEvent.click(screen.getByText('模板库 · 从模板新建', {selector:'button'})); fireEvent.click(screen.getByLabelText('删除模板 好组合'));
+  expect(s.deletePlanTemplate).not.toHaveBeenCalled(); fireEvent.click(screen.getByLabelText('确认删除模板 好组合'));
   expect(s.deletePlanTemplate).toHaveBeenCalledWith(activeQualityPlanTemplates(s.study)[0].id);
 },30_000);
 
