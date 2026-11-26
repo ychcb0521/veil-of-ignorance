@@ -146,23 +146,22 @@ export function readLocalInstantCampaignJobs(owner: string) {
 export async function readLatestLocalInstantReplay(owner: string) {
   let latest: InstantReplayEntry | undefined;
   await readInstantJobs(owner, job => {
-    if (job?.input && (job.snapshot || job.opened || 'sell' in job.input)) {
-      latest = laterInstantReplayEntry(latest, screenedReplayEntry(job.input.source, job.input.buyAt));
-    }
+    const closed = job?.snapshot ?? (job?.input && 'sell' in job.input && (job.opened || job.input.opened) ? job.input : undefined);
+    if (closed) latest = laterInstantReplayEntry(latest, screenedReplayEntry(closed.source, closed.sell.at));
     return false;
   });
   return latest;
 }
 
 export async function readLatestCloudInstantReplay(owner: string, signal: AbortSignal) {
-  const { data, error } = await table().select('buyAt:value->buyAt,source:value->source')
+  const { data, error } = await table().select('closedAt:value->sell->at,source:value->source')
     .eq('user_id', owner).gte('key', KEY_START).lt('key', KEY_END)
-    .order('value->>buyAt', { ascending: false, nullsFirst: false }).limit(16).setHeader(INSTANT_CAMPAIGN_HEADER, '1')
+    .order('value->sell->at', { ascending: false, nullsFirst: false }).limit(16).setHeader(INSTANT_CAMPAIGN_HEADER, '1')
     .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8000)]));
   if (error) throw Error(error.message);
   let latest: InstantReplayEntry | undefined;
-  for (const row of (data ?? []) as { buyAt: number; source: InstantPositionInput['source'] }[]) {
-    latest = laterInstantReplayEntry(latest, screenedReplayEntry(row.source, row.buyAt));
+  for (const row of (data ?? []) as { closedAt: number; source: InstantPositionInput['source'] }[]) {
+    latest = laterInstantReplayEntry(latest, screenedReplayEntry(row.source, row.closedAt));
   }
   return latest;
 }

@@ -90,10 +90,14 @@ it('keeps a manually entered replay time when a screened fish arrives later', ()
   expect(start).toHaveBeenCalledWith(Date.parse('2026-10-19T09:10:11+08:00'));
 });
 
-it('defaults to the newest closed instant trade over an older open position', () => {
+it('keeps the open position ahead of a later archive and falls back to the archive when flat', () => {
   mocks.recentArchive.mockReturnValue({ symbol: 'CLOSEDUSDT', at: SCREENED_AT + 60_000 });
   const selectDefault = vi.fn();
-  render(<InstantPositionsContext.Provider value={{ positions: [screenedPosition('OLDERUSDT', SCREENED_AT)] }}>
+  const view = render(<InstantPositionsContext.Provider value={{ positions: [screenedPosition('FARTCOINUSDT', SCREENED_AT)] }}>
+    <TimeControl {...control().props} status="stopped" currentSimulatedTime={0} onSelectDefaultReplaySymbol={selectDefault}/>
+  </InstantPositionsContext.Provider>);
+  expect(selectDefault).toHaveBeenLastCalledWith('FARTCOINUSDT');
+  view.rerender(<InstantPositionsContext.Provider value={{ positions: [] }}>
     <TimeControl {...control().props} status="stopped" currentSimulatedTime={0} onSelectDefaultReplaySymbol={selectDefault}/>
   </InstantPositionsContext.Provider>);
   expect(selectDefault).toHaveBeenLastCalledWith('CLOSEDUSDT');

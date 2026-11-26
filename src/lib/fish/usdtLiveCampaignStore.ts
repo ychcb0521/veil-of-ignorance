@@ -32,21 +32,21 @@ export async function readLatestLocalUsdtReplay(owner: string) {
   let latest: InstantReplayEntry | undefined;
   await readUsdtCampaigns(owner, saved => {
     const campaign = saved?.campaign;
-    latest = laterInstantReplayEntry(latest, binanceReplayEntry(campaign?.symbol, campaign?.openedAt));
+    latest = laterInstantReplayEntry(latest, binanceReplayEntry(campaign?.symbol, campaign?.closedAt));
     return false;
   });
   return latest;
 }
 
 export async function readLatestCloudUsdtReplay(owner: string, signal: AbortSignal) {
-  const { data, error } = await table().select('symbol:value->campaign->symbol,openedAt:value->campaign->openedAt')
+  const { data, error } = await table().select('symbol:value->campaign->symbol,closedAt:value->campaign->closedAt')
     .eq('user_id', owner).gte('key', CLOUD_START).lt('key', CLOUD_END)
-    .order('value->campaign->>openedAt', { ascending: false, nullsFirst: false }).limit(4).setHeader(INSTANT_CAMPAIGN_HEADER, '1')
+    .order('value->campaign->closedAt', { ascending: false, nullsFirst: false }).limit(4).setHeader(INSTANT_CAMPAIGN_HEADER, '1')
     .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8000)]));
   if (error) throw Error(error.message);
   let latest: InstantReplayEntry | undefined;
-  for (const row of (data ?? []) as { symbol: string; openedAt: number }[]) {
-    latest = laterInstantReplayEntry(latest, binanceReplayEntry(row.symbol, row.openedAt));
+  for (const row of (data ?? []) as { symbol: string; closedAt: number }[]) {
+    latest = laterInstantReplayEntry(latest, binanceReplayEntry(row.symbol, row.closedAt));
   }
   return latest;
 }

@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { beginCloseReviewQuiet, toast } from '@/lib/notificationCenter';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { latestInstantReplaySymbol } from '@/lib/fish/latestScreenedReplaySymbol';
+import { laterInstantReplayEntry, latestOpenHolding, latestSimulationClose } from '@/lib/fish/latestScreenedReplaySymbol';
 import { useLatestInstantReplay } from '@/hooks/useLatestInstantReplay';
 import {
   type TradeSignal, type SignalSortKey,
@@ -263,10 +263,13 @@ export function TimeControl({
   const instant = useScreenedInstantPositions();
   const openScreenedPositions = instant?.positions;
   const openBinanceCampaigns = instant?.usdtLive?.openCampaigns;
-  const { admitted, localSales } = fishQuality.cdaTracking ?? {};
+  const livePositions = instant?.usdtLive?.snapshot?.positions;
+  const liveHistories = instant?.usdtLive?.histories;
   const recentArchive = useLatestInstantReplay(user?.id, status === 'stopped' && !replayDateEdited.current);
-  const replaySymbol = useMemo(() => latestInstantReplaySymbol(recentArchive, openScreenedPositions, admitted, localSales, openBinanceCampaigns),
-    [recentArchive, openScreenedPositions, admitted, localSales, openBinanceCampaigns]);
+  const currentHolding = useMemo(() => latestOpenHolding(ctx.positionsMap, openScreenedPositions, openBinanceCampaigns, livePositions, liveHistories),
+    [ctx.positionsMap, openScreenedPositions, openBinanceCampaigns, livePositions, liveHistories]);
+  const lastSimulation = useMemo(() => latestSimulationClose(ctx.tradeHistory), [ctx.tradeHistory]);
+  const replaySymbol = currentHolding?.symbol ?? laterInstantReplayEntry(lastSimulation, recentArchive)?.symbol;
   useEffect(() => {
     if (status !== 'stopped') replayDateEdited.current = true;
     if (replayDateEdited.current || !replaySymbol) return;
