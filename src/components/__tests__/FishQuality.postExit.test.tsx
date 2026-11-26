@@ -20,13 +20,19 @@ it('adds exactly ten columns per expanded sub-algorithm, aligns all header/body 
  expect(screen.queryAllByTestId('quality-post-exit-header')).toHaveLength(0);expect(screen.getAllByTestId('quality-post-exit-folded')).toHaveLength(2);
  fireEvent.click(screen.getByRole('button',{name:'展开'+a.label+'卖后反事实'}));
  expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(10);expect(screen.getAllByTestId('quality-post-exit-value')).toHaveLength(20);
- expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan','23');
+ expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan','25');
  expect(screen.getByRole('button',{name:'展开'+b.label+'卖后反事实'})).toHaveAttribute('aria-expanded','false');
- for(const row of screen.getAllByTestId('quality-fish-row'))expect(within(row).getAllByRole('cell')).toHaveLength(31);
+ for(const row of screen.getAllByTestId('quality-fish-row'))expect(within(row).getAllByRole('cell')).toHaveLength(screen.getByTestId('quality-fish-table').querySelectorAll('col').length);
  expect(s.postExit.request).toHaveBeenCalledWith([a.id],expect.any(Array),true);
  fireEvent.click(screen.getByRole('button',{name:'展开'+b.label+'卖后反事实'}));expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(20);
  fireEvent.click(screen.getByRole('button',{name:'收起'+a.label+'卖后反事实'}));expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(10);
  expect(screen.getAllByTestId('quality-post-exit-header').every(x=>x.dataset.sellPlan===b.id)).toBe(true);
+ vi.mocked(s.postExit.request).mockClear();
+ fireEvent.click(screen.getByRole('button',{name:'折叠卖出方案 '+b.label}));
+ expect(screen.queryAllByTestId('quality-post-exit-header')).toHaveLength(0);
+ expect(s.postExit.request).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'展开卖出方案 '+b.label}));
+ expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(10);
 });
 it('sorts new numeric columns in both directions and exports all ten measurements even while folded',()=>{
  const s=state(),plan=s.study.sellPlans![0];render(<FishQuality state={s}/>);

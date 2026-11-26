@@ -64,16 +64,29 @@ it('runs static filtering and holding monitoring on only checked imported inform
  const plan=freezeQualityPlan({...base,rule:{metric:base.metric,direction:'<' as const,threshold:.5}}),frozen=structuredClone(plan);
  const filter=makeQualityBuyFilter('state:state','>',.7);
  const read=vi.spyOn(workspaceStore,'readQualityWorkspace').mockResolvedValue(info);
- const prepare=vi.spyOn(executionStore,'loadQualityWorkspaceExecution').mockImplementation(async()=>({...info,sellPlans:[plan],sellPlansConfigured:true,independentFilters:true,buyFilters:[filter],workspaceExecution:1}));
+ const prepare=vi.spyOn(executionStore,'loadQualityWorkspaceExecution').mockImplementation(async()=>({...info,sellPlans:[plan,{...plan,id:'same-seller-copy'}],sellPlansConfigured:true,independentFilters:true,buyFilters:[filter],workspaceExecution:1}));
  const persist=vi.spyOn(executionStore,'saveExecutableQualityStudy').mockResolvedValue(true);
  const tasks:QualityRunOptions[]=[],run=vi.fn(async(options:QualityRunOptions)=>{tasks.push(options);});
  try{
   const h=renderHook(()=>useFishQuality('working-only',[],run,[],[],false,[],true,false));await flush();
   expect(h.result.current.ready).toBe(true);expect(h.result.current.workspace!.archiveReady).toBe(false);
+  act(()=>h.result.current.setMonitorPlanCollapsed('same-seller-copy',true));
   await act(async()=>h.result.current.runStaticSettings());await flush();
   expect(tasks.some(task=>task.task==='filter')).toBe(true);
   await act(async()=>h.result.current.start(false,undefined,false,'signal'));await flush(600);
   expect(tasks.length).toBeGreaterThan(1);expect(tasks.every(task=>qualityRunSamples(task.study).every(row=>row.source.symbol==='PICKED'))).toBe(true);
+  const sellers=(task:QualityRunOptions)=>task.study.sellPlans!.map(p=>p.id);
+  expect(sellers(tasks.find(t=>t.task==='filter')!)).toEqual([plan.id,'same-seller-copy']);
+  expect(sellers(tasks.find(t=>t.task==='monitor')!)).toEqual([plan.id]);
+  expect(h.result.current.study.sellPlans).toHaveLength(2);
+  act(()=>h.result.current.setMonitorPlanCollapsed(plan.id,true));
+  const count=tasks.length;
+  await act(async()=>h.result.current.start(false,undefined,false,'signal'));
+  await act(async()=>h.result.current.restart('signal'));await flush();
+  expect(tasks).toHaveLength(count);
+  act(()=>h.result.current.setMonitorPlanCollapsed('same-seller-copy',false));
+  await act(async()=>h.result.current.restart('signal'));await flush();
+  expect(sellers(tasks.at(-1)!)).toEqual(['same-seller-copy']);
   expect(storage.load).not.toHaveBeenCalled();expect(storage.save).not.toHaveBeenCalled();expect(persist).toHaveBeenCalled();expect(plan).toEqual(frozen);
   h.unmount();
  }finally{read.mockRestore();prepare.mockRestore();persist.mockRestore();}

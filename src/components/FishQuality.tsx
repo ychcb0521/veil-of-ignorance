@@ -100,7 +100,6 @@ const ruleText = (plan: QualityGroup) => qualityRuleText(plan);
 const isLibrary = (row: QualitySample) => isSignalLibraryOrigin(row.origin);
 /** Mirror execution and detector labels always occupy independent columns. */
 /** Original seller columns plus an independent post-sale group: folded=1 column, expanded=10. 2026-11-01 删掉镜像平衡减仓后重复的「加仓次数」列（卖出列里已有）；2026-11-02 入场读数挪到「买前过滤」；新增独立「镜像时间」，8 列。 */
-const qualitySellSpan = (plans: readonly QualityGroup[],expanded:ReadonlySet<string>) => plans.reduce((n,p)=>n+7+(expanded.has(p.id)?10:1),0);
 const hasSource = (row: QualitySample,source:QualityOrigin) => qualityOrigins(row).includes(source);
 // 【用户反馈】2026-10-26「表头显示 793，但表中完全没这么多」：原来每页 50 条、框只有约 9 行高，要翻 16 页。
 // 只渲染可见窗口；数据行统一高度，遇到多行内容时只增高，不用新窗口首行反向缩小估计。
@@ -646,7 +645,11 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   const skippedBy = (plan: QualityGroup, row: QualitySample) => { const f = archivedFor(row,plan)?.filterStatus ?? filterStatus.get(plan.id)?.get(row.signalId ?? row.id); return f && f.state !== 'pass' ? f : undefined; };
   const [monitorPlanId, setMonitorPlanId] = useState<string | null>(null);
   const filterCount = activeStandaloneBuyFilters(study).length, vetoCount = (study.sellPlans ?? []).reduce((n, p) => n + activeHoldingVetoes(p.holdingVetoes).length + (p.mirrorTakeProfit?.enabled ? 1 : 0) + (p.addition?.enabled ? 1 : 0)+(p.vetoStages?.length??0), 0);
-  const displayPlans = useMemo(()=>[...(study.sellPlans ?? []),...importedMonitor.plans],[study.sellPlans,importedMonitor.plans]);
+  const displayPlans = useMemo(() => {
+    const active = study.sellPlans ?? [];
+    const ids = new Set(active.map(p => p.id));
+    return [...active, ...importedMonitor.plans.filter(p => !ids.has(p.id))];
+  }, [study.sellPlans, importedMonitor.plans]);
   const plansForSort = displayPlans;
   const runScopeRows = useMemo(() => lockedBatch ? narrowed : narrowed.filter(r => !month || signalMonthKey(qualitySignalTime(r.source)) === month), [lockedBatch, narrowed, month]);
   const mergeCabinSignals = (lockedBatch?.groupBySignal ?? (!!workspace || origin === 'fish')) && !detectorExpanded;
@@ -724,11 +727,34 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   }, [narrowed]);
   const months = [...new Set(batch.map(r => signalMonthKey(qualitySignalTime(r.source))))].sort().reverse();
   const planName=(plan:QualityGroup)=>templateNames.forPlan(plan)?.name??plan.label;
-  const sellVariables = qualityVariables(displayPlans).map(variable=>({...variable,
-    label:variable.levels.some(plan=>templateNames.forPlan(plan))?[...new Set(variable.levels.map(planName))].join(' / '):variable.label}));
+  const [viewCollapsedPlans, setViewCollapsedPlans] = useState<string[]>([]);
+  const localFolding = archiveView || !state.setMonitorPlanCollapsed;
+  const foldedIds = localFolding ? viewCollapsedPlans : state.collapsedMonitorPlans;
+  const foldedPlans = useMemo(() => new Set(foldedIds), [foldedIds]);
+  const hasRunnablePlan = study.sellPlans?.some(p => !foldedPlans.has(p.id));
+  const planColumns = (id: string) => foldedPlans.has(id) ? 1 : postExitOpen.has(id) ? 17 : 8;
+  const togglePlan = (id: string) => {
+    if (localFolding) setViewCollapsedPlans(ids => ids.includes(id) ? ids.filter(key => key !== id) : [...ids, id]);
+    else state.setMonitorPlanCollapsed!(id, !foldedPlans.has(id));
+  };
+  const planHeadings = new Map<string,string>();
+  const nameCounts = new Map<string,number>();
+  for (const p of displayPlans) {
+    let name = planName(p);
+    if (importedMonitor.plans.includes(p) && !name.endsWith('（归档）')) name += '（归档）';
+    nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+    planHeadings.set(p.id, name);
+  }
+  const ordinals = new Map<string,number>();
+  for (const [id, name] of planHeadings) {
+    if (nameCounts.get(name)! < 2) continue;
+    const number = (ordinals.get(name) ?? 0) + 1;
+    ordinals.set(name, number);
+    planHeadings.set(id, name + '（' + number + '）');
+  }
   const staticTemplateName=study.independentFilters&&(!archiveView||archiveKind==='filter')
     ? templateNames.forFilter(activeStandaloneBuyFilters(study),signalMetrics,study.turingStaticSettings?.plan.label)?.name : undefined;
-  const plans = sellVariables.flatMap(v => v.levels), groups = study.groups.filter(g => batch.some(r => r.detectorId === g.id));
+  const plans = displayPlans, groups = study.groups.filter(g => batch.some(r => r.detectorId === g.id));
   // 隐藏只作用于组合表里的运行结果：过滤读数与入场读数 / 持仓监测各列；探测相关列照常显示
   // 【用户要求】2026-11-02 入场读数与探测值重复，整列删除；过滤读数清除后（或还没跑过）整列不显示，有读数才出现；
   // 隐藏「买前过滤」时整组（探测值、探测算法、捕捞过程、过滤读数）都不显示
@@ -751,7 +777,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   const detectorChoices = useMemo(() => qualityDetectorChoices(groups), [groups]), chosenChoices = detectorChoices.filter(c => c.ids.some(id => activeAlgorithms.includes(id)));
   const requestPostExit=state.postExit?.request;
   const postExitPlanIds = !archiveView && open && ready && !hideMonitor && sortedRows.length && requestPostExit
-    ? postExitExpanded.filter(id => plans.some(p => p.id === id)) : [];
+    ? postExitExpanded.filter(id => !foldedPlans.has(id) && plans.some(p => p.id === id)) : [];
   const postExitScopeKey=JSON.stringify([postExitPlanIds,sortedRows.map(r=>r.signalId??r.id)]);
   const requestObservations=(retry=false)=>{if(postExitPlanIds.length)requestPostExit?.(postExitPlanIds,sortedRows.map(r=>r.signalId??r.id),retry);};
   useEffect(()=>{if(archiveView||!open||!ready||!postExitPlanIds.length)return;requestObservations();const timer=setInterval(()=>requestObservations(),60000);return()=>clearInterval(timer);},[open,ready,postExitScopeKey,study.results,requestPostExit]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -837,13 +863,13 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
     ...shownSignalMetrics.flatMap(metric => isDrawdownPreview(metric) ? [stretch(124), stretch(96)] : [stretch(124)]),
     ...(showScreening ? [stretch(144, 4), 90, stretch(138), 68] : []),
     ...(showParallel ? [stretch(144, 4), 90, stretch(138), 68] : []),
-    ...shownPlans.flatMap(p => [stretch(320, 2), 96, 88, 88, 96, 88, 88, ...(postExitOpen.has(p.id) ? [132, ...Array(9).fill(116)] : [118])]),
+    ...shownPlans.flatMap(p => foldedPlans.has(p.id) ? [158] : [stretch(320, 2), 96, 88, 88, 96, 88, 88, ...(postExitOpen.has(p.id) ? [132, ...Array(9).fill(116)] : [118])]),
     28,
   ];
   const tableMinWidth = columns.reduce((sum, column) => sum + (typeof column === 'number' ? column : column.width), 0);
   const stretchWeight = columns.reduce((sum, column) => sum + (typeof column === 'number' ? 0 : column.weight), 0);
   const [archiveTableWidth,setArchiveTableWidth]=useState(0);
-  const rowLayoutKey=JSON.stringify([entryExpanded,labelExpanded,postExitExpanded,detectorExpanded,plans.map(p=>p.id),archiveView ? [archiveTableWidth,tableMinWidth] : null]),priorRowLayout=useRef(rowLayoutKey),pendingTableScroll=useRef<{top:number;left:number}>();
+  const rowLayoutKey=JSON.stringify([entryExpanded,labelExpanded,postExitExpanded,foldedIds,detectorExpanded,plans.map(p=>p.id),archiveView ? [archiveTableWidth,tableMinWidth] : null]),priorRowLayout=useRef(rowLayoutKey),pendingTableScroll=useRef<{top:number;left:number}>();
   const tableRef = useRef<HTMLDivElement>(null), [rowPx, setRowPx] = useState(ui?.rowPx ?? ROW_PX), [viewPx, setViewPx] = useState(0);
   const toggleTableHeight = () => {
     if (tableMaximized) {
@@ -1058,6 +1084,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             </td>);
           })()}
           {shownPlans.map(p => {
+            if (foldedPlans.has(p.id)) return <td key={p.id} className="border-l border-t border-border/40 bg-muted/10"/>;
             if(entries.length > 1) return <Fragment key={p.id}><MergedEntryCells entries={entries.map(member => ({result:resultFor(member,p),skipped:skippedBy(p,member)}))} phase={phase} planId={p.id} plan={p} expand={() => expandDetectors(true)}/><PostExitCells plan={p} expanded={postExitOpen.has(p.id)} entries={entries.map(member=>({row:member,result:resultFor(member,p),skipped:!!skippedBy(p,member),frozenReading:frozenPostExit(member,p)}))} readings={postExitReadings} onExpand={()=>togglePostExit(p.id)}/></Fragment>;
             const f = skippedBy(p, row), skipped = f && f.state !== 'pass', result = resultFor(row,p);
             return <Fragment key={p.id}><td className={`${cell} border-l border-t border-border/40`}>{skipped ? <span className="text-[9px] text-muted-foreground/60" title={f.detail}>{f.state === 'fail' ? '未买入' : f.state === 'pending' ? '待判断' : '买入过滤缺数据'}</span> : filtersOn && !hasQualityExit(p) ? <span className="text-[9px] text-muted-foreground/60">待设卖出</span> : <ResultCell plan={p} result={result} section="sell" onClick={() => setDetailId(members[0].id)} onOpenCampaign={archiveView ? onArchiveCampaign : rememberReturn}/>}</td>{phase === 'sell' && <><td className={`${cell} ${wrapCell} text-right border-t border-border/40 font-mono tabular-nums ${!skipped && (qualityDrawdownPct(result,'static')??0)>0?'text-destructive':'text-muted-foreground'}`} data-testid="quality-static-drawdown" data-sell-plan={p.id}>{pct(skipped?null:qualityDrawdownPct(result,'static')).replace(/^\+/, '')}</td><td className={`${cell} ${wrapCell} text-right border-t border-border/40 font-mono tabular-nums ${signed(skipped?null:qualityPeakPct(result))}`} data-testid="quality-peak-gain" data-sell-plan={p.id} title={skipped?f.detail:'持仓价格路径的峰值涨幅，与该笔交易战役读取同一份结果'}>{pct(skipped?null:qualityPeakPct(result))}</td><QualitySalePriceChangeCell plan={p} entries={[{result,skipped}]}/><td className={`${cell} ${wrapCell} text-right border-t border-border/40`} data-testid="quality-half-mirror" data-sell-plan={p.id}><QualityHalfMirrorCell plan={p} result={result} skipped={skipped?f.detail:undefined}/></td><td className={`${cell} ${wrapCell} text-right border-t border-border/40 font-mono tabular-nums text-muted-foreground`} data-testid="quality-mirror-time" data-sell-plan={p.id}><QualityMirrorTimeCell result={result} skipped={skipped?f.detail:undefined}/></td></>}{phase === 'sell' && <td className={`${cell} ${wrapCell} text-right border-t border-border/40 font-mono tabular-nums ${result?.status === 'open' ? 'text-foreground/80' : 'text-muted-foreground'}`} data-testid="quality-held-time" data-sell-plan={p.id} title={skipped ? f.detail : result?.status === 'open' ? '仍在持有：算到最近一次估值' : result?.reason}>{skipped || !(result?.status === 'closed' || result?.status === 'open') ? '—' : heldText(result.heldHours)}</td>}<PostExitCells plan={p} expanded={postExitOpen.has(p.id)} entries={[{row,result,skipped:!!skipped,frozenReading:frozenPostExit(row,p)}]} readings={postExitReadings} onExpand={()=>togglePostExit(p.id)}/></Fragment>; })}
@@ -1224,12 +1251,12 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
               : resumeMonitoring ? <button type="button" className={qualitySplitPrimaryAction} disabled={!ready || !!state.archiving}
                 title="沿用本轮已冻结的信号、方案和监测起点" onClick={() => void resumeMonitoring()}><RefreshCw aria-hidden className="h-3 w-3"/>继续监测</button>
               : <MonitorTimePicker onChoose={basis => void state.start(false, undefined, false, basis)}
-                trigger={<button type="button" className={qualitySplitPrimaryAction} disabled={!ready || !!state.archiving || !selectedCount || !plans.length}
-                  title={!selectedCount && outsideSelection ? `勾选的 ${outsideSelection.count} 条都在当前筛选外（${outsideSelection.text}）：点筛选栏右侧「切到包含勾选的筛选」` : selectedCount ? `为已勾选的 ${selectedCount} 条信号选择监测起点` : '当前筛选下没有已勾选的信号'}>
+                trigger={<button type="button" className={qualitySplitPrimaryAction} disabled={!ready || !!state.archiving || !selectedCount || !hasRunnablePlan}
+                  title={!hasRunnablePlan ? '请先展开一个可运行的卖出方案' : !selectedCount && outsideSelection ? `勾选的 ${outsideSelection.count} 条都在当前筛选外（${outsideSelection.text}）：点筛选栏右侧「切到包含勾选的筛选」` : selectedCount ? `为已勾选的 ${selectedCount} 条信号选择监测起点` : '当前筛选下没有已勾选的信号'}>
                   <RefreshCw aria-hidden className="h-3 w-3"/>开始监测
                 </button>}/>}
             <MonitorTimePicker restart running={running} onChoose={basis => void state.restart(basis)}
-              trigger={<button type="button" aria-label="开始监测的其他方式" title="从头重新计算" disabled={!ready || !!state.archiving || !selectedCount || !plans.length}
+              trigger={<button type="button" aria-label="开始监测的其他方式" title={hasRunnablePlan ? '从头重新计算' : '请先展开一个可运行的卖出方案'} disabled={!ready || !!state.archiving || !selectedCount || !hasRunnablePlan}
                 className={`${qualitySplitMenuAction} ${running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}>
                 <ChevronDown aria-hidden className="h-3 w-3"/>
               </button>}/>
@@ -1346,7 +1373,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             {filterSpan>0 && <><th colSpan={filterSpan} className="relative border-l border-border/40 px-2 py-1.5 font-medium" data-testid="quality-filter-group">静态过滤{staticTemplateName&&<span className="ml-2">{staticTemplateName}</span>}</th></>}
             {showScreening&&<th colSpan={4} className="relative border-l border-border/40 px-2 py-1.5 font-medium" data-testid="quality-screening-group">动态筛选</th>}
             {showParallel && <th colSpan={4} className="relative border-l border-border/40 px-2 py-1.5 font-medium">平行宇宙</th>}
-            {shownPlans.length > 0 && <th colSpan={qualitySellSpan(shownPlans,postExitOpen)} className="relative border-l border-border/40 px-2 py-1.5 font-medium" data-testid="quality-monitor-group">持仓监测</th>}
+            {shownPlans.length > 0 && <th colSpan={shownPlans.reduce((sum,p)=>sum+planColumns(p.id),0)} className="relative border-l border-border/40 px-2 py-1.5 font-medium" data-testid="quality-monitor-group">持仓监测</th>}
             <th aria-hidden="true"/>
           </tr>
           <tr className="bg-muted/20" data-testid="quality-algorithm-variables">
@@ -1359,7 +1386,18 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             {!!shownSignalMetrics.length && <th colSpan={signalSpan} className="border-l border-border/40 px-2 py-1 font-normal">静态计算时点</th>}
             {showScreening&&<th colSpan={4} className="relative border-l border-border/40 px-2 py-1 font-normal text-muted-foreground/60">冻结方案与首次满足结果</th>}
             {showParallel && <th colSpan={4} className="relative border-l border-border/40 px-2 py-1 font-normal text-muted-foreground/60">冻结方案与信号触发结果</th>}
-            {shownPlans.length>0 && sellVariables.map(v => <th key={v.id} colSpan={qualitySellSpan(v.levels,postExitOpen)} className="relative border-l border-border/40 px-2 py-1.5 font-normal" aria-label={`卖出变量 ${v.label}`}>{v.label}{v.levels.length > 1 && <span className="ml-2 text-muted-foreground/50">{v.levels.length} 个水平</span>}</th>)}
+            {shownPlans.map(p => {
+              const folded = foldedPlans.has(p.id), name = planHeadings.get(p.id)!;
+              const archived = archiveView || importedMonitor.plans.includes(p);
+              const disabled = !archived && (running || !!state.archiving);
+              const hint = disabled ? '本轮方案已确定，暂停后可调整' : archived ? '切换归档结果的显示范围' : folded ? '展开，参与下一轮监测' : '折叠，跳过下一轮监测';
+              return <th key={p.id} colSpan={planColumns(p.id)} scope="colgroup" className="border-l border-border/40 px-2 py-1.5 text-left font-normal" aria-label={`卖出方案 ${name}`}>
+                <span className="inline-flex max-w-full items-center gap-1"><span className="break-words">{name}</span>
+                  <button type="button" aria-label={`${folded?'展开':'折叠'}卖出方案 ${name}`} aria-expanded={!folded} title={hint} disabled={disabled} onClick={()=>togglePlan(p.id)}
+                    className="inline-flex shrink-0 items-center rounded p-1 text-muted-foreground/50 hover:bg-muted hover:text-foreground focus-visible:text-foreground disabled:opacity-40">
+                    {folded ? <EyeOff aria-hidden className="h-3 w-3"/> : <Eye aria-hidden className="h-3 w-3"/>}
+                  </button></span></th>;
+            })}
             <th aria-hidden="true"/>
           </tr>
           <tr className="bg-muted/40">
@@ -1403,7 +1441,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             <th key={key} className={`${cell} border-l border-border/40 font-medium`} aria-sort={ariaSort(key)} title={title}>
               {sortButton(key, label)}
             </th>)}
-          {shownPlans.map(p => <Fragment key={p.id}><th className={`${cell} border-l border-border/40 font-medium`} data-testid="quality-sell-column" aria-sort={sort === `sell:${p.id}` ? ascending ? 'ascending' : 'descending' : 'none'}><span className={`${SELL_PARTS} font-medium`} data-testid="quality-sell-parts"><button type="button" className="text-left hover:text-foreground" aria-label={`按${planName(p)}加仓次数排序`} onClick={()=>changeSort(`addition:${p.id}`)}>加仓次数{arrow(`addition:${p.id}`)}</button><button type="button" className="text-left hover:text-foreground" title="与交易战役同口径：几何仓位 M＝(1 − αf) × ∏(1 + αₖ)，αf 为首次加仓前已卖出的首仓比例（镜像平衡减仓），αₖ＝第 k 次加仓币数 ÷ 加仓前持币数；没有加仓时已卖出的计入镜像，仍持有的记 1。" aria-label={`按${planName(p)}几何仓位排序`} onClick={()=>changeSort(`geometric:${p.id}`)}>几何仓位{arrow(`geometric:${p.id}`)}</button><button type="button" className="text-left hover:text-foreground" title="与交易战役同口径：G＝(F − Kₘ) ÷ (E − K初)，F 最终卖出价、Kₘ 最后一次加仓的止损线、E 首次买入价、K初 优先由组合算法起始阶段的限制静态最大回撤得出；只算有加仓且已卖出的持仓。" aria-label={`按${planName(p)}相对涨幅排序`} onClick={()=>changeSort(`relative:${p.id}`)}>相对涨幅{arrow(`relative:${p.id}`)}</button><button type="button" className="text-left hover:text-foreground" title="与交易战役同口径：盈亏比＝已实现净盈亏 ÷ 初始最大预期亏损 L₀，单位 R；L₀ 取自本轮方案的首仓风险设置；只算已卖出的持仓。" aria-label={`按${planName(p)}盈亏比排序`} onClick={()=>changeSort(`payoff:${p.id}`)}>盈亏比{arrow(`payoff:${p.id}`)}</button></span></th>{phase === 'sell' && <><th className={`${cell} text-right font-medium`} aria-sort={ariaSort(`static:${p.id}`)} title="相对买入价到持仓最低价的最大跌幅，至少为 0%。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}静态最大回撤排序`} onClick={()=>changeSort(`static:${p.id}`)}>静态最大回撤{arrow(`static:${p.id}`)}</button></th><th className={`${cell} text-right font-medium`} aria-sort={ariaSort(`peak:${p.id}`)} title="与交易战役同口径：持仓期间相对买入价的最大有利价格涨幅，读取该轮冻结结果；不等于组合收益。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}峰值涨幅排序`} onClick={()=>changeSort(`peak:${p.id}`)}>峰值涨幅{arrow(`peak:${p.id}`)}</button></th><th className={`${cell} text-right font-medium`} data-testid="quality-price-change-header" aria-sort={ariaSort(`price-change:${p.id}`)} title="与交易战役「首仓涨跌幅」同口径：（最终卖出价 ÷ 首次买入价 − 1）×100%，首仓从买入到实际完成卖出的涨跌幅。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}首仓涨幅排序`} onClick={()=>changeSort(`price-change:${p.id}`)}>首仓涨幅{arrow(`price-change:${p.id}`)}</button></th><th className={`${cell} text-right font-medium`} aria-sort={ariaSort(`mirror:${p.id}`)} title="开仓至镜像平衡减仓成交时的实际涨幅 =（镜像成交价 ÷ 开仓价 − 1）× 100%；不乘卖出比例，不含余仓后续涨跌。未触发不记作零涨幅。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}镜像平衡减仓实际涨幅排序`} onClick={()=>changeSort(`mirror:${p.id}`)}>镜像平衡减仓{arrow(`mirror:${p.id}`)}</button></th><th className={`${cell} text-right font-medium`} data-testid="quality-mirror-time-header" data-sell-plan={p.id} aria-sort={ariaSort(`mirror-time:${p.id}`)} title="首次建仓至镜像平衡减仓实际成交的时长；只读取已保存成交，不随加仓重新计时。未成交或时间缺失显示 —。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}镜像时间排序`} onClick={()=>changeSort(`mirror-time:${p.id}`)}>镜像时间{arrow(`mirror-time:${p.id}`)}</button></th></>}{/* 【用户要求】2026-11-02 持仓监测里的「探测标签」删除（买前过滤已有） */}{phase === 'sell' && <th className={`${cell} text-right font-medium`} aria-sort={ariaSort(`held:${p.id}`)} title="买入到卖出的时长；还在持有的算到最近一次估值。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}持仓时间排序`} onClick={() => changeSort(`held:${p.id}`)}>持仓时间{arrow(`held:${p.id}`)}</button></th>}<PostExitHeaders plan={p} expanded={postExitOpen.has(p.id)} toggle={()=>togglePostExit(p.id)} sort={sort} ascending={ascending} onSort={changeSort}/></Fragment>)}
+          {shownPlans.map(p => foldedPlans.has(p.id) ? <th key={p.id} className={`${cell} border-l border-border/40 text-left font-normal text-muted-foreground/60`}>已折叠</th> : <Fragment key={p.id}><th className={`${cell} border-l border-border/40 font-medium`} data-testid="quality-sell-column" aria-sort={sort === `sell:${p.id}` ? ascending ? 'ascending' : 'descending' : 'none'}><span className={`${SELL_PARTS} font-medium`} data-testid="quality-sell-parts"><button type="button" className="text-left hover:text-foreground" aria-label={`按${planName(p)}加仓次数排序`} onClick={()=>changeSort(`addition:${p.id}`)}>加仓次数{arrow(`addition:${p.id}`)}</button><button type="button" className="text-left hover:text-foreground" title="与交易战役同口径：几何仓位 M＝(1 − αf) × ∏(1 + αₖ)，αf 为首次加仓前已卖出的首仓比例（镜像平衡减仓），αₖ＝第 k 次加仓币数 ÷ 加仓前持币数；没有加仓时已卖出的计入镜像，仍持有的记 1。" aria-label={`按${planName(p)}几何仓位排序`} onClick={()=>changeSort(`geometric:${p.id}`)}>几何仓位{arrow(`geometric:${p.id}`)}</button><button type="button" className="text-left hover:text-foreground" title="与交易战役同口径：G＝(F − Kₘ) ÷ (E − K初)，F 最终卖出价、Kₘ 最后一次加仓的止损线、E 首次买入价、K初 优先由组合算法起始阶段的限制静态最大回撤得出；只算有加仓且已卖出的持仓。" aria-label={`按${planName(p)}相对涨幅排序`} onClick={()=>changeSort(`relative:${p.id}`)}>相对涨幅{arrow(`relative:${p.id}`)}</button><button type="button" className="text-left hover:text-foreground" title="与交易战役同口径：盈亏比＝已实现净盈亏 ÷ 初始最大预期亏损 L₀，单位 R；L₀ 取自本轮方案的首仓风险设置；只算已卖出的持仓。" aria-label={`按${planName(p)}盈亏比排序`} onClick={()=>changeSort(`payoff:${p.id}`)}>盈亏比{arrow(`payoff:${p.id}`)}</button></span></th>{phase === 'sell' && <><th className={`${cell} text-right font-medium`} aria-sort={ariaSort(`static:${p.id}`)} title="相对买入价到持仓最低价的最大跌幅，至少为 0%。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}静态最大回撤排序`} onClick={()=>changeSort(`static:${p.id}`)}>静态最大回撤{arrow(`static:${p.id}`)}</button></th><th className={`${cell} text-right font-medium`} aria-sort={ariaSort(`peak:${p.id}`)} title="与交易战役同口径：持仓期间相对买入价的最大有利价格涨幅，读取该轮冻结结果；不等于组合收益。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}峰值涨幅排序`} onClick={()=>changeSort(`peak:${p.id}`)}>峰值涨幅{arrow(`peak:${p.id}`)}</button></th><th className={`${cell} text-right font-medium`} data-testid="quality-price-change-header" aria-sort={ariaSort(`price-change:${p.id}`)} title="与交易战役「首仓涨跌幅」同口径：（最终卖出价 ÷ 首次买入价 − 1）×100%，首仓从买入到实际完成卖出的涨跌幅。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}首仓涨幅排序`} onClick={()=>changeSort(`price-change:${p.id}`)}>首仓涨幅{arrow(`price-change:${p.id}`)}</button></th><th className={`${cell} text-right font-medium`} aria-sort={ariaSort(`mirror:${p.id}`)} title="开仓至镜像平衡减仓成交时的实际涨幅 =（镜像成交价 ÷ 开仓价 − 1）× 100%；不乘卖出比例，不含余仓后续涨跌。未触发不记作零涨幅。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}镜像平衡减仓实际涨幅排序`} onClick={()=>changeSort(`mirror:${p.id}`)}>镜像平衡减仓{arrow(`mirror:${p.id}`)}</button></th><th className={`${cell} text-right font-medium`} data-testid="quality-mirror-time-header" data-sell-plan={p.id} aria-sort={ariaSort(`mirror-time:${p.id}`)} title="首次建仓至镜像平衡减仓实际成交的时长；只读取已保存成交，不随加仓重新计时。未成交或时间缺失显示 —。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}镜像时间排序`} onClick={()=>changeSort(`mirror-time:${p.id}`)}>镜像时间{arrow(`mirror-time:${p.id}`)}</button></th></>}{/* 【用户要求】2026-11-02 持仓监测里的「探测标签」删除（买前过滤已有） */}{phase === 'sell' && <th className={`${cell} text-right font-medium`} aria-sort={ariaSort(`held:${p.id}`)} title="买入到卖出的时长；还在持有的算到最近一次估值。"><button type="button" className="hover:text-foreground" aria-label={`按${planName(p)}持仓时间排序`} onClick={() => changeSort(`held:${p.id}`)}>持仓时间{arrow(`held:${p.id}`)}</button></th>}<PostExitHeaders plan={p} expanded={postExitOpen.has(p.id)} toggle={()=>togglePostExit(p.id)} sort={sort} ascending={ascending} onSort={changeSort}/></Fragment>)}
           <th className={`${cell} font-medium`} aria-label="跳转"/>
         </tr></thead><tbody>{padTop > 0 && <tr aria-hidden style={{ height: padTop }}/>}{visible.map((row,vi)=>renderRow(row,first+vi))}{padBottom > 0 && <tr aria-hidden style={{ height: padBottom }}/>}</tbody></table></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{lockedBatch ? '本批记录已不可用。解除锁定后可重新选择。' : allRows.length ? <>没有匹配的标的。{emptyByDetector && <span className="ml-1" data-testid="quality-empty-detector-filter">探测算法筛选{chosenChoices.length ? `（${chosenChoices.map(choiceText).join('、')}）` : ''}把它们全滤掉了{isSignalLibraryOrigin(origin) ? '：' + QUALITY_SOURCE_NAMES[origin] + '自己的信号没有探测算法' : ''}。<button type="button" className="ml-1 text-primary hover:underline" onClick={() => setAlgorithms([])}>清除探测算法筛选</button></span>}</> : workspace ? '组合表为空。请打开「来源」，勾选记录后导入。' : '暂无可评估的信号。'}</div>}
       {rows.length > 0 && <p className="text-right text-[10px] tabular-nums text-muted-foreground" data-testid="quality-row-count">{selectedRowCount > 0 && <span className="font-medium text-primary" data-testid="quality-selected-row-count">已选 {selectedRowCount} 行 · </span>}共 {rows.length} 行 · {countSignals(rows)} 条信号{mergeCabinSignals ? ' · 同一信号已合并' : !detectorExpanded ? ' · 已合并探测明细' : ''}{sortedRows.length < batch.length ? `（筛选自 ${countSignals(batch)} 条信号）` : ''}</p>}

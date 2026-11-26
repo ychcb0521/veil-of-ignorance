@@ -53,6 +53,14 @@ import { beginQualityFilterRound, finishQualityFilterRound, preserveQualityFilte
 import { archiveQualityMonitorStudy, adoptQualityMonitorHistory, beginQualityMonitorRound, captureQualityMonitorResult, finishQualityMonitorRound, recoverQualityMonitorRounds, type QualityMonitorCapture } from '@/lib/fish/qualityMonitorLibrary';
 import {migrateQualitySourceRows,type QualityRunTiming} from '@/lib/fish/quality';
 
+const monitorFoldKey = (owner?: string) => 'veil:collapsed-monitor-plans:' + (owner ?? 'anonymous');
+function readCollapsedMonitorPlans(owner?: string): string[] {
+  try {
+    const ids: unknown = JSON.parse(localStorage.getItem(monitorFoldKey(owner)) ?? '[]');
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+  } catch { return []; }
+}
+
 function sameQualityResearch(left: FishQualityStudy, right: FishQualityStudy): boolean {
   if (left === right) return true;
   const differs = (a: FishQualityStudy, b: FishQualityStudy) =>
@@ -142,6 +150,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const [studyReadWarning, setStudyReadWarning] = useState('');
   const [warning, setWarning] = useState(''), [error, setError] = useState('');
   const current = useRef(study), account = useRef(owner), generation = useRef(0), controller = useRef<AbortController | null>(null);
+  const [collapsedMonitorPlans, setCollapsedMonitorPlans] = useState(() => readCollapsedMonitorPlans(owner));
+  const collapsedPlansRef = useRef(collapsedMonitorPlans);
   // Settings have their own small, account-scoped store. Do not wait for the
   // historical research archive, or write a partial study back while it loads.
   const settingsStudy = useMemo(() => applySavedQualityPlans({
@@ -193,7 +203,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const scoped = (s: FishQualityStudy): FishQualityStudy => lockedBatchRef.current ? { ...s, selectedRowIds: lockedBatchRef.current.rowIds } : scopeRef.current ? { ...s, selectedRowIds: (s.selectedRowIds ?? []).filter(id => scopeRef.current!.has(id)) } : s;
   const monitorFinalizer = useRef<((state: 'complete' | 'paused' | 'failed', render?: boolean, reason?: string) => Promise<void>) | null>(null);
   // Updates to an old account must never appear in or save into the newly selected one.
-  if (account.current !== owner) { markPause('切换了账号'); void monitorFinalizer.current?.('paused', false, takePause()); account.current = owner; historicalLoaded.current=false; scopeRef.current = null; const nextBatch = workspaceMode ? null : readQualityBatchLock(owner); lockedBatchRef.current = nextBatch; setLockedBatchState(nextBatch); screeningScope.current = nextBatch ?? {}; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
+  if (account.current !== owner) { markPause('切换了账号'); void monitorFinalizer.current?.('paused', false, takePause()); account.current = owner; collapsedPlansRef.current = readCollapsedMonitorPlans(owner); setCollapsedMonitorPlans(collapsedPlansRef.current); historicalLoaded.current=false; scopeRef.current = null; const nextBatch = workspaceMode ? null : readQualityBatchLock(owner); lockedBatchRef.current = nextBatch; setLockedBatchState(nextBatch); screeningScope.current = nextBatch ?? {}; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
   const change = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy,persistPlans=true) => {
     const previous=current.current;
     let next = preserveQualitySourceRatings(previous,preserveSourceDeletions(previous,apply(previous)));
@@ -377,10 +387,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (!paused) {
       if (usesScreening) change(s => withQualityScreeningEntries(s, screeningLibrary.current, screeningScope.current));
       if (!qualityRunSamples(scoped(current.current)).length || automatic && !selectionApproved.current && !mode) return;
-      if (current.current.sellPlans && !current.current.sellPlans.length) return;
+      if (current.current.sellPlans && !current.current.sellPlans.some(p => !collapsedPlansRef.current.includes(p.id))) return;
     }
     const monitorInput = (study: FishQualityStudy) => {
       const input = { ...scoped(study), monitorTimeBasis: timeBasis, monitorTimeBasisByRow: undefined };
+      if (input.sellPlans && collapsedPlansRef.current.length) {
+        input.sellPlans = input.sellPlans.filter(plan => !collapsedPlansRef.current.includes(plan.id));
+      }
       return counterfactualTimes ? withCounterfactualTimes(input, counterfactualTimes) : input;
     };
     const runInput = monitorInput(current.current);
@@ -399,7 +412,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (mode && mode !== 'restart' && !qualityFilterNeedsData(runInput, mode)) { setProgress(null); setError(''); return; }
     // Deep dig edits must affect the next run, including a previously complete cached trade.
     // Archive first so refreshing the active formula never rewrites an older trial's provenance.
-    if (!paused) change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
+    if (!paused) change(s => syncQualitySellDefinitions(archiveQualityStudy(s), undefined, collapsedPlansRef.current));
     const epoch = generation.current, revision = intentRevision.current, aborter = new AbortController(); controller.current = aborter;
     const frozen = paused
       ? { ...paused.frozen, results: [...paused.capture.results.values()], filterReadings: [...paused.capture.readings.values()] }
@@ -737,12 +750,27 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     controller.current = null;
     setRunning(false);
   }, []);
+  const setMonitorPlanCollapsed = useCallback((id: string, collapsed: boolean) => {
+    const ids = collapsedPlansRef.current;
+    if (ids.includes(id) === collapsed || archiveLock.current) return;
+    if (current.current.sellPlans?.some(p => p.id === id)) {
+      if (controller.current) return;
+      // A paused round has frozen its plan set. Start a fresh round after changing that set.
+      cancel('调整了本轮参与监测的卖出方案');
+      setProgress(null);
+    }
+    const next = collapsed ? [...ids, id] : ids.filter(key => key !== id);
+    collapsedPlansRef.current = next;
+    setCollapsedMonitorPlans(next);
+    try { localStorage.setItem(monitorFoldKey(account.current), JSON.stringify(next)); } catch { /* session state stays usable */ }
+  }, [cancel]);
   /** Parameter saves pause the obsolete batch; only an explicit Start approves another run. */
   const pauseForSettings = useCallback(() => {
     cancel('保存了监测设置（保存设置会先暂停当前一轮）'); setProgress(null);
   },[cancel]);
   const restart = useCallback(async (requestedBasis?: QualityMonitorTimeBasis) => {
     if(!readyRef.current||archiveLock.current)return;
+    if (current.current.sellPlans && !current.current.sellPlans.some(p => !collapsedPlansRef.current.includes(p.id))) return;
     const timeBasis = requestedBasis ?? current.current.monitorTimeBasis;
     let counterfactualTimes: CounterfactualTimes | undefined;
     if (timeBasis === 'counterfactual') {
@@ -1228,9 +1256,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       } : undefined);
     },
     resume: async (roundId: string) => { if (canResumeScreening(roundId)) await preEntry.resume(roundId, current.current); } };
-  return {requestStudyArchive,runParallelUniverse:run,monitorSettings:{study:readyRef.current?study:settingsStudy,ready:readyRef.current||savedPlansReady},...(studyReadWarning ? {studyReadWarning} : {}),retryStudyLoad,templateCatalog,workspace: workspaceMode ? {sources:workspaceSources,informationReady:!!workspaceInformation.study,archiveReady:ready&&!study.workspaceExecution,importInformation:importWorkspaceInformation,importRows:importWorkspaceRows,removeRows:removeWorkspaceRows,saveMonitoring:saveWorkspaceMonitoring,saveFiltering:saveWorkspaceFiltering} : undefined,signalValues,saveStaticSettings,runStaticSettings,cancelSignalValues,lockedBatch,setLockedBatch,canResumeScreening,setSourceQuality, preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,purgeMonitorEntries,purgeDirectorySource,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : workspaceInformation.study ?? newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, resumeMonitoring: monitorBatch.current?.paused && canResumeBatch(monitorBatch.current.frozen) ? () => start(false, undefined, true) : undefined, resumeFiltering: filterBatch.current?.paused && canResumeBatch(filterBatch.current.frozen) ? () => startFilter(true) : undefined, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
+  return {collapsedMonitorPlans,setMonitorPlanCollapsed,requestStudyArchive,runParallelUniverse:run,monitorSettings:{study:readyRef.current?study:settingsStudy,ready:readyRef.current||savedPlansReady},...(studyReadWarning ? {studyReadWarning} : {}),retryStudyLoad,templateCatalog,workspace: workspaceMode ? {sources:workspaceSources,informationReady:!!workspaceInformation.study,archiveReady:ready&&!study.workspaceExecution,importInformation:importWorkspaceInformation,importRows:importWorkspaceRows,removeRows:removeWorkspaceRows,saveMonitoring:saveWorkspaceMonitoring,saveFiltering:saveWorkspaceFiltering} : undefined,signalValues,saveStaticSettings,runStaticSettings,cancelSignalValues,lockedBatch,setLockedBatch,canResumeScreening,setSourceQuality, preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,purgeMonitorEntries,purgeDirectorySource,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : workspaceInformation.study ?? newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, resumeMonitoring: monitorBatch.current?.paused && canResumeBatch(monitorBatch.current.frozen) ? () => start(false, undefined, true) : undefined, resumeFiltering: filterBatch.current?.paused && canResumeBatch(filterBatch.current.frozen) ? () => startFilter(true) : undefined, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
 }
-type CompleteFishQualityState=Omit<ReturnType<typeof useFishQuality>,'setSourceQuality'|'retryStudyLoad'|'monitorSettings'|'runParallelUniverse'>&Partial<Pick<ReturnType<typeof useFishQuality>,'setSourceQuality'|'retryStudyLoad'|'monitorSettings'|'runParallelUniverse'>>;
+type CompleteFishQualityState=Omit<ReturnType<typeof useFishQuality>,'collapsedMonitorPlans'|'setMonitorPlanCollapsed'|'setSourceQuality'|'retryStudyLoad'|'monitorSettings'|'runParallelUniverse'>&Partial<Pick<ReturnType<typeof useFishQuality>,'collapsedMonitorPlans'|'setMonitorPlanCollapsed'|'setSourceQuality'|'retryStudyLoad'|'monitorSettings'|'runParallelUniverse'>>;
 type AutomationMonitorFields = 'automaticState' | 'automaticLibrary' | 'automaticReady' | 'instantReady' | 'instantLoadError' | 'missingCheckpoint' | 'startAutomatic' | 'pauseAutomatic' | 'automaticRunning' | 'automaticError' | 'savedLibrary' | 'saveWorkspaceScreening' | 'savingWorkspaceDraft';
 type QualityPreEntryView = Omit<CompleteFishQualityState['preEntry'], AutomationMonitorFields> & Partial<Pick<CompleteFishQualityState['preEntry'], AutomationMonitorFields>>;
 export type FishQualityState=Omit<CompleteFishQualityState,'requestStudyArchive'|'templateCatalog'|'workspace'|'signalValues'|'saveStaticSettings'|'runStaticSettings'|'cancelSignalValues'|'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'purgeMonitorEntries'|'purgeDirectorySource'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'> & Partial<Pick<CompleteFishQualityState,'templateCatalog'|'signalValues'|'saveStaticSettings'|'runStaticSettings'|'cancelSignalValues'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'purgeMonitorEntries'|'purgeDirectorySource'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'>> & { workspace?: Omit<NonNullable<CompleteFishQualityState['workspace']>,'archiveReady'|'informationReady'|'importInformation'> & Partial<Pick<NonNullable<CompleteFishQualityState['workspace']>,'archiveReady'|'informationReady'|'importInformation'>>; workspaceTuringSource?: { onOpenChange: (open: boolean) => void; loading: boolean; error?: string; retry: () => void }; requestWorkspace?:()=>void; requestStudyArchive?:()=>void; requestScreeningArchive?:()=>void; instantPreferenceStatus?: 'loading'|'ready'|'error'; retryInstantPreferences?:()=>void; preEntry?: QualityPreEntryView; cdaTracking?: FishCdaTracking; instantPosition?: ReturnType<typeof import('./useInstantPositionSettings').useInstantPositionSettings>; instantMonitor?: ReturnType<typeof import('./useInstantMonitorSettings').useInstantMonitorSettings>; automaticScreening?: { paused: boolean; pending: number; screeningPending?: boolean; waitingReason?: string; awaitingMail: number; storageIssue: boolean; attemptIssue?: string; settings?: PreEntrySettings; saveSettings?: (plans: QualityGroup[], hours: number) => Promise<void>; setAutoPaused: (paused: boolean) => void } };

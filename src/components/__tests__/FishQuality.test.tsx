@@ -1037,6 +1037,29 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 });
 
 
+it('separates matching sellers and collapses only the selected plan’s columns',()=>{
+  const s=state(), original=s.study.sellPlans![0];
+  s.study.sellPlans=[original,{...original,id:'copy',label:'独立副本'}];
+  render(<FishQuality state={s}/>);
+  const group=screen.getByTestId('quality-monitor-group') as HTMLTableCellElement;
+  const table=screen.getByTestId('quality-fish-table').querySelector('table')!;
+  const checkWidths=()=>expect(table.tHead!.rows[2].cells.length).toBe(table.tBodies[0].rows[0].cells.length);
+  expect(screen.getByRole('columnheader',{name:'卖出方案 独立副本'})).toBeVisible();
+  expect(screen.queryByText('2 个水平')).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'折叠卖出方案 独立副本'}));
+  expect(group.colSpan).toBe(9);
+  expect(screen.queryByRole('button',{name:'按独立副本盈亏比排序'})).toBeNull();
+  checkWidths();
+  fireEvent.click(screen.getByRole('button',{name:'折叠卖出方案 '+original.label}));
+  expect(group.colSpan).toBe(2);
+  expect(screen.getByRole('button',{name:'开始监测'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'展开卖出方案 独立副本'}));
+  checkWidths();
+  expect(screen.getByRole('button',{name:'按独立副本盈亏比排序'})).toBeVisible();
+  expect(screen.getByRole('button',{name:'开始监测'})).toBeEnabled();
+  expect(s.setSellPlans).not.toHaveBeenCalled();
+});
+
 it('keeps the actual drawdown and removes the threshold column from the combination table and export', async () => {
   const s = state(); render(<FishQuality state={s}/>);
   expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', '16');
