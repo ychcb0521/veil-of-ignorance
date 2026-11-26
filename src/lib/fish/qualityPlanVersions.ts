@@ -17,7 +17,7 @@ import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryC
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
 import { DOUBLE_DROP_VERSION } from './qualityDoubleDrop';
-import { LOWER_WICK_VETO_VERSION, VETO_HISTORY_VERSION, GUARD_DISTANCE_VETO_VERSION, BOX_BREAK_VETO_VERSION, additionVetoIdentity, validateAdditionVetoes, isFiveMinuteShapeVeto } from './qualityAdditionVeto';
+import { INDICATOR_ENTRY_VETO_VERSION, LOWER_WICK_VETO_VERSION, VETO_HISTORY_VERSION, GUARD_DISTANCE_VETO_VERSION, BOX_BREAK_VETO_VERSION, additionVetoIdentity, validateAdditionVetoes, isFiveMinuteShapeVeto } from './qualityAdditionVeto';
 import { compatibleHoldingParameterOrder, compatibleAdditionParameterOrder } from './qualityPlanParameterCompatibility';
 import { freezePreEntryThreeStage, threeStageFingerprint, stableEntryJson, PRE_ENTRY_OPTIONAL_STAGES_VERSION, PRE_ENTRY_SIGNAL_ANCHOR_VERSION } from './preEntryThreeStage';
 import { ENTRY_STALL_TURN_5M_VERSION, PULLBACK_NEW_HIGH_5M_VERSION } from './preEntryStallTurn5m';
@@ -98,6 +98,8 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   const sharedVetoes=[...(plan.preEntryThreeStage?.additionVetoes??[]),...(plan.preEntryConditions?.entryVetoes??[]),...(plan.addition?.enabled?[plan.addition,...(plan.addition.rounds??[]),...(plan.addition.alternativeRounds??[])].flatMap(r=>r.entryVetoes??[]):[])].filter(v=>v.enabled);
   const historicalVetoes=sharedVetoes.filter(v=>v.historyHours!=null&&!isFiveMinuteShapeVeto(v));
   if(historicalVetoes.length)out.push({key:'veto-history',part:'一票否决',name:'独立历史扫描范围',version:VETO_HISTORY_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(historicalVetoes)),summary:'按每次判断时点向前回看，包含入选和持仓之前的行情；影线与插针扫描整个历史窗口，高震荡检查窗口内观测，急跌检查窗口内分钟线；未收复高点锁定不因重筛或窗口滑动清除。旧范围另行保留。'});
+  const indicators=sharedVetoes.filter(v=>v.kind==='indicator');
+  if(indicators.length)out.push({key:'shared-indicator-veto',part:'共用一票否决',name:'算法否决',version:INDICATOR_ENTRY_VETO_VERSION+' · 参数 #'+shortFishHash(stableEntryJson(additionVetoIdentity(indicators))),summary:'按各算法冻结的周期和公式读取最近已收盘值。任一条件成立即跳过当前候选。'});
   const distances=sharedVetoes.filter(v=>v.kind==='guard-distance');
   if(distances.length)out.push({key:'shared-guard-distance',part:'共用一票否决',name:distances.some(v=>v.guardDistance?.parameters.timeframe==='1h')?'距 DBL-5 防守线过远（按所选周期）':'距 DBL-5 防守线过远',version:[...new Set(distances.map(v=>v.guardDistance?.version??GUARD_DISTANCE_VETO_VERSION))].join(' · ')+' · 参数 #'+shortFishHash(stableEntryJson(additionVetoIdentity(distances))),summary:'候选时点最近的 1 分钟收盘价高出所选周期防守线超过 N 倍原生 ATR(14) 即否决；缺有效读数时暂不放行。'});
   const shapeVetoes=sharedVetoes.filter(isFiveMinuteShapeVeto);

@@ -380,7 +380,7 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,di
           <span>此历史方案的{c.stallTurn.version==='entry-stall-turn-v1'?'原1分钟':'原5分钟'}规则{c.stallTurn.enabled?'仍已启用':'已关闭'}，保存时保留原参数。</span>
           <button type="button" className={button} onClick={createFiveMinuteStallCopy}>使用共用5分钟规则（另存副本）</button>
         </p>}
-        <FishQualityEntryVetoEditor entry allowDoubleDrop draft={vetoDrafts[active.id]??vetoDraftOf(c.additionVetoes)} setDraft={draft=>setVetoDrafts({...vetoDrafts,[active.id]:draft})}/>
+        <FishQualityEntryVetoEditor definitions={definitions} entry allowDoubleDrop draft={vetoDrafts[active.id]??vetoDraftOf(c.additionVetoes)} setDraft={draft=>setVetoDrafts({...vetoDrafts,[active.id]:draft})}/>
         {c.sellRules.map((rule,i)=>{
           const put=(p:Partial<EntrySellRule>)=>patch({sellRules:c.sellRules.map((r,j)=>j===i?{...r,...p}:r)});
           return <div className="space-y-2 rounded border border-border/60 p-2" key={rule.id}>

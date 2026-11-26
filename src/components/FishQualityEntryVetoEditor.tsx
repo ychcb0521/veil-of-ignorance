@@ -1,3 +1,5 @@
+import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { FishIndicatorEntryVetoFields } from './FishIndicatorEntryVetoFields';
 import {FishQualityBoxStopEditor} from './FishQualityBoxStopEditor';
 import { Fragment, type InputHTMLAttributes } from 'react';
 import { ADDITION_VETO_LABELS, guardDistanceConfig, isFiveMinuteShapeVeto, defaultBoxBreakVeto } from '@/lib/fish/qualityAdditionVeto';
@@ -11,10 +13,12 @@ function VetoNumberInput(props:InputHTMLAttributes<HTMLInputElement>){
 }
 
 /** Shared parameter rows: holding additions and pre-entry filtering use the same controls. */
-export function FishQualityEntryVetoEditor({draft,setDraft,enabled=true,entry=false,allowDoubleDrop=false}:{draft:AdditionVetoDraft;setDraft:(draft:AdditionVetoDraft)=>void;enabled?:boolean;entry?:boolean;allowDoubleDrop?:boolean}){
+export function FishQualityEntryVetoEditor({draft,setDraft,enabled=true,entry=false,allowDoubleDrop=false,definitions=[]}:{definitions?:readonly DeepDigFeatureDef[];draft:AdditionVetoDraft;setDraft:(draft:AdditionVetoDraft)=>void;enabled?:boolean;entry?:boolean;allowDoubleDrop?:boolean}){
  const labels={...ADDITION_VETO_LABELS,...(entry?{'fast-drop':'筛选期间急跌','box-break':'筛选期间箱体断裂'}:{})};
  return (
-   <div className="space-y-2"><p className="text-[10px] leading-relaxed text-muted-foreground">每项独立勾选，任一成立即否决。动态筛选与加仓共用；使用历史回看的新条件默认 6 小时。</p><div className={entry?"screening-veto-list":"grid grid-cols-1 items-start gap-x-4 gap-y-3 text-[12px] sm:grid-cols-[12rem_minmax(0,1fr)]"}>
+   <div className="space-y-2"><p className="text-[10px] leading-relaxed text-muted-foreground">每项独立勾选，任一成立即否决。动态筛选与加仓共用；使用历史回看的新条件默认 6 小时。</p>
+   <FishIndicatorEntryVetoFields definitions={definitions} rows={draft?.indicators??[]} enabled={enabled} onChange={indicators=>setDraft({...draft,indicators})}/>
+   <div className={entry?"screening-veto-list":"grid grid-cols-1 items-start gap-x-4 gap-y-3 text-[12px] sm:grid-cols-[12rem_minmax(0,1fr)]"}>
    {SHARED_VETO_DRAFT_KEYS.filter(kind=>!entry||allowDoubleDrop||kind!=='double-drop').map(key=>{
     const kind=key==='guard-distance-1h'?'guard-distance':key,hourly=key==='guard-distance-1h';
     const labelText=kind==='guard-distance'?(hourly?'距 DBL-5-1h 防守线过远':'距 DBL-5-5mins 防守线过远'):labels[kind];

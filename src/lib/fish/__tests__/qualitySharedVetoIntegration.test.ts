@@ -1,3 +1,9 @@
+import { ATR_PRICE_PCT_DEF } from '@/lib/deepDig/features';
+import { makeQualityBuyFilter } from '../qualityFilters';
+import { createIndicatorEntryVetoReader } from '../qualityIndicatorEntryVeto';
+import { findQualityAddition } from '../qualityAdditionScan';
+import { compileFishProgram } from '../algorithm';
+import { INDICATOR_ENTRY_VETO_VERSION } from '../qualityAdditionVeto';
 import {it,expect} from 'vitest';
 import {ADDITION_VETO_DEFAULTS,ADDITION_VETO_KINDS,guardDistanceConfig,type AdditionEntryVetoKind} from '@/lib/fish/qualityAdditionVeto';
 import {evaluateQualitySample,type QualityGroup,type QualitySample} from '@/lib/fish/quality';
@@ -46,7 +52,8 @@ function fixture(kind:AdditionEntryVetoKind):FishReconstructionLoader{return asy
 // Box-break counts only events AFTER entry, so it has its own post-entry native-event fixtures.
 const cases=[...ADDITION_VETO_KINDS.filter(kind=>kind!=='box-break').map(kind=>({kind,timeframe:'5m' as const})),{kind:'guard-distance' as const,timeframe:'1h' as const}];
 for(const lane of ['primary','attack'] as const)for(const {kind,timeframe} of cases)it(lane+' '+kind+' '+timeframe+' vetoes the real holding addition and screening gate while preserving the saved template',async()=>{
- const rule={...ADDITION_VETO_DEFAULTS[kind],enabled:true,...(kind==='guard-distance'?{atr:.5,guardDistance:guardDistanceConfig(undefined,undefined,timeframe)}:{historyHours:6})};
+ const atr=makeQualityBuyFilter('atr-price-pct-v1:ATRP','>',2,true,[ATR_PRICE_PCT_DEF]);
+ const rule={...ADDITION_VETO_DEFAULTS[kind],enabled:true,...(kind==='indicator'?{indicator:{...atr,version:INDICATOR_ENTRY_VETO_VERSION,direction:'>=' as const}}:kind==='guard-distance'?{atr:.5,guardDistance:guardDistanceConfig(undefined,undefined,timeframe)}:{historyHours:6})};
  const base:QualityGroup={id:'g',label:'原始资产',metric:'raw',snapshot,execution:'intrabar-1m',mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},rule:{metric:'raw',direction:'<',threshold:0},addition:{...defaultQualityAddition(),maxRounds:1,enabled:true,source:'custom',condition:{id:'add',label:'价格',metric:'raw',direction:'>',threshold:90,enabled:true,snapshot},entryVetoes:[rule]}};
  if(lane==='attack'){const attack={source:'custom' as const,stricterPct:10,condition:base.addition!.condition,entryVetoes:[rule]};base.addition={...base.addition!,entryVetoes:[],rounds:[{...attack,condition:{...attack.condition!,threshold:1000},entryVetoes:[]}],alternativeRounds:[attack],attackFromRound:1};}
  const plan=freezeQualityPlan(base),saved=saveQualityPlanTemplate(newQualityStudy(T),plan,'资产-'+kind,T),original=JSON.stringify(saved.planTemplates),copy=qualityPlanFromTemplate({...saved.planTemplates![0],plan:saved.planTemplates![0].plan!},'独立副本');
@@ -60,6 +67,39 @@ for(const lane of ['primary','attack'] as const)for(const {kind,timeframe} of ca
  const gate=createPreEntryGate({conditions:{...emptyPreEntryConditions(),entryVetoes:[rule]},start:T,row:signal,load,signal:new AbortController().signal});
  expect((await gate(T+M)).blocked).toBeTruthy();
  expect(JSON.stringify(saved.planTemplates)).toBe(original);
+});
+
+it.each([true,false])('keeps the other lane eligible at the same minute (primary veto=%s)',async primaryVeto=>{
+ const indicator={version:INDICATOR_ENTRY_VETO_VERSION,label:'价格',metric:'raw',snapshot,direction:'>=' as const,threshold:90};
+ const blocked=[{kind:'indicator' as const,enabled:true,indicator}];
+ const round={source:'custom' as const,stricterPct:0,condition:{id:'add',enabled:true,label:'价格',snapshot,metric:'raw',direction:'>' as const,threshold:90}};
+ const g:QualityGroup={id:'race',label:'同刻加仓',metric:'raw',snapshot,execution:'intrabar-1m',rule:{metric:'raw',direction:'<',threshold:0},
+  mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},addition:{...defaultQualityAddition(),enabled:true,maxRounds:1,...round,
+   rounds:[{...round,entryVetoes:primaryVeto?blocked:[]}],alternativeRounds:[{...round,entryVetoes:primaryVeto?[]:blocked}]}};
+ const result=await evaluateQualitySample(row,g,0,T+4*M,fixture('indicator'),new AbortController().signal);
+ expect(result.additionFill?.lane).toBe(primaryVeto?'attack':'structure');
+ const plan=freezeQualityPlan(g);
+ expect(plan.frozenVersions?.find(v=>v.key==='shared-indicator-veto')?.version).toContain(INDICATOR_ENTRY_VETO_VERSION);
+ const reordered=JSON.parse(JSON.stringify(plan,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).reverse()):v));
+ expect(planVersionChanges(reordered)).toEqual([]);
+});
+
+it('waits for a later candidate after a veto and uses only the latest closed bar',async()=>{
+ const controller=new AbortController();
+ const base={label:'候选收盘价',snapshot,metric:'raw',direction:'>' as const,threshold:105,version:INDICATOR_ENTRY_VETO_VERSION};
+ const rule={kind:'indicator' as const,enabled:true,indicator:base};
+ const load:FishReconstructionLoader=async(_row,from,to,p)=>Array.from({length:(to-from)/p.step},(_,i)=>{
+   const openTime=from+i*p.step,close=openTime===T?110:100;
+   return {openTime,open:close,close,low:close-1,high:close+1,volume:1,quoteVolume:close,takerBuyVolume:.5,takerBuyQuoteVolume:close/2};
+ });
+ const reader=createIndicatorEntryVetoReader([rule],{row:signal,load,signal:controller.signal});
+ expect((await reader(T)).hit).toBeUndefined();
+ expect((await reader(T+M)).hit?.kind).toBe('indicator');
+ expect((await reader(T+2*M)).hit).toBeUndefined();
+ const plan=compileFishProgram(def,{statistic:'raw',threshold:90,direction:'>',constraints:[]});
+ const fill=await findQualityAddition({row:signal,entry:T,end:T+4*M,candidates:[{plan,label:'价格',scale:1,metric:'raw',direction:'>',threshold:90}],
+   entryVetoes:[rule],notional:100,load,signal:controller.signal});
+ expect(fill?.at).toBe(T+2*M);
 });
 
 it('uses the native closed guard and ATR with a strict one-sided threshold', async () => {

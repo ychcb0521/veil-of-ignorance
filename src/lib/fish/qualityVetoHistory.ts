@@ -1,3 +1,4 @@
+import { createIndicatorEntryVetoReader } from './qualityIndicatorEntryVeto';
 import { advanceChartAtr, type ChartAtrState } from '../atr';
 import type { ResearchBar } from '../deepRsa/window';
 import type { TradeSignal } from '../signalLibrary';
@@ -24,7 +25,9 @@ export function createVetoHistoryReader(o:VetoHistoryOptions){
  const shapes=o.rules.filter(v=>v.enabled&&isFiveMinuteShapeVeto(v));
  const distances=o.rules.filter(v=>v.enabled&&v.kind==='guard-distance');
  const breaks=o.rules.filter(v=>v.enabled&&v.kind==='box-break');
- if(!shapes.length&&!distances.length&&!breaks.length)return createLegacyVetoHistoryReader(o);
+ const indicators=o.rules.filter(v=>v.enabled&&v.kind==='indicator');
+ const readIndicators=createIndicatorEntryVetoReader(indicators,o);
+ if(!shapes.length&&!distances.length&&!breaks.length&&!indicators.length)return createLegacyVetoHistoryReader(o);
  validateAdditionVetoes(shapes);
  const original=createLegacyVetoHistoryReader({...o,rules:o.rules.filter(v=>!isFiveMinuteShapeVeto(v)&&v.kind!=='guard-distance'&&v.kind!=='box-break')});
  const readers=shapes.map(v=>{const common={row:o.row,load:o.load,signal:o.signal,origin:o.entry};return {rule:v,read:v.kind==='stall-turn'?createEntryStallTurn5mReader({...common,condition:{...defaultEntryStallTurn5m(),historyHours:v.historyHours!,riseMinutes:v.riseMinutes!,risePct:v.risePct!,stallMinutes:v.stallMinutes!,maxProgressPct:v.maxProgressPct!,turnMinutes:v.turnMinutes!,pullback:undefined}}):createPullbackNewHigh5mReader({...common,historyHours:v.historyHours!,pct:v.pct!})};});
@@ -43,7 +46,8 @@ export function createVetoHistoryReader(o:VetoHistoryOptions){
    if(result.hit)return result;
    if(!pending.pending&&result.pending)pending=result;
   }
-  return pending;
+  const indicator=await readIndicators(at);
+  return indicator.hit || indicator.pending && !pending.pending ? indicator : pending;
  };
 }
 function createLegacyVetoHistoryReader(o:VetoHistoryOptions){

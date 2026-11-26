@@ -2,6 +2,7 @@ import {isClassifiedImpulsePositionVersion,createClassifiedImpulsePositionReader
 import {mirrorHardStopActive,mirrorHardStopRange} from './qualityMirrorHardStopStages';
 import { DBL5_PROFILES } from '@/lib/dbl5m';
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger,calculateHoldingLedgerAddition} from './qualityHoldingLedger';
+import { createIndicatorEntryVetoReader } from './qualityIndicatorEntryVeto';
 import { createAdditionIncreaseReader } from './qualityAdditionIncrease';
 import { createImpulseAdditionReader } from './qualityImpulseAddition';
 import { createVetoHistoryReader } from './qualityVetoHistory';
@@ -86,6 +87,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  };
  let after=Math.max(o.entry,o.since-MINUTE,independent?o.entry:halfMirror!.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
  const readIncrease=createAdditionIncreaseReader(o);
+ const indicatorReaders=new Map<readonly QualityAdditionEntryVeto[],ReturnType<typeof createIndicatorEntryVetoReader>>();
  let readImpulse:ReturnType<typeof createImpulseAdditionReader>|undefined;
  let readClassified:ReturnType<typeof createClassifiedImpulsePositionReader>|undefined;
  let positionAttempts:{at:number;ids:Set<string>}|undefined;
@@ -308,14 +310,24 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
     if(!reason)return readings;
     skip({at,round:roundNo,kind:'indicator-increase',label:'指标读数未较上次成交增大',reading:reason,...(support==null?{}:{support})});
    }:undefined;
+   const rules=rule.entryVetoes;
+   const allowCandidate=rules?.some(v=>v.enabled&&v.kind==='indicator') ? async(at:number)=>{
+    let read=indicatorReaders.get(rules);
+    if(!read){read=createIndicatorEntryVetoReader(rules,o);indicatorReaders.set(rules,read);}
+    const result=await read(at);
+    if(!result.hit&&!result.pending)return true;
+    vetoed.push({at,round:roundNo,...(result.hit??{kind:'indicator-pending',label:'算法否决待判定',reading:result.pending!})});
+    return false;
+   }:undefined;
    if(position==='native'&&!rule.structure)return findQualityAdditionTrigger({...o,candidates:rule.candidates,required:rule.required,
-    after:start,end,priceAt,checkIncrease:check,...(gain?{priceGate:gain}:{})});
+    after:start,end,priceAt,allowCandidate,checkIncrease:check,...(gain?{priceGate:gain}:{})});
    let cursor=start;
    while(cursor<end){
     const classified=position==='class1'||position==='class2'?rule.classifiedImpulsePositions?.find(p=>p.mainClass===(position==='class1'?1:2)):undefined;
     const hit=classified?await (readClassified??=createClassifiedImpulsePositionReader(o))(classified,cursor,end,fills,gain,onSkip):position==='impulse'?await (readImpulse??=createImpulseAdditionReader(o))(rule.impulsePosition!,cursor,end,gain):
       position==='impulse1115'?await readStructure.impulse1115(cursor,end,fills,gain,onSkip):
         await readStructure(rule.structure!,cursor,end,fills,gain,onSkip);
+    if(hit&&allowCandidate&&!await allowCandidate(hit.at)){cursor=hit.at;continue;}
     if(!hit||!check)return hit;
     const readings=await check(hit.at,hit.structureEvidence?.supportPrice);
     if(readings)return {...hit,indicatorIncrease:readings};
@@ -374,7 +386,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    }
   }
   // A rejected later lane is speculative once an earlier lane wins.
-  if(hit)for(let i=vetoed.length-1;i>=0;i--)if(vetoed[i].round===roundNo&&vetoed[i].at>hit.at&&['box-break','box-break-pending'].includes(vetoed[i].kind))vetoed.splice(i,1);
+  if(hit)for(let i=vetoed.length-1;i>=0;i--)if(vetoed[i].round===roundNo&&vetoed[i].at>hit.at&&['box-break','box-break-pending','indicator','indicator-pending'].includes(vetoed[i].kind))vetoed.splice(i,1);
   if(hit?.structureEvidence&&Number.isNaN(hit.price)){
    const price=priceAt.get(hit.at);
    if(!(price!>0)||!Number.isFinite(price))throw Error('缺少位置加仓下一分钟开盘价');
@@ -396,14 +408,14 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    else{const last=since.at(-1)?.bar.close;vetoed.push({at:hit.at,round:roundNo,kind:'pullback',label:'冲高回落：未收复最高点前不再加仓',reading:`锁住时持仓最高 ${+pullbackLock.peak.toPrecision(8)}，尚未收复${last!=null?`（最新收盘 ${+last.toPrecision(8)}）`:''}`,lockPeak:pullbackLock.peak,lockAt:pullbackLock.at});after=hit.at;continue;}
   }
   if(round.entryVetoes?.some(v=>v.enabled)){
-   if(round.entryVetoes.some(v=>v.enabled&&v.kind!=='guard-distance'&&v.kind!=='box-break')){
+   if(round.entryVetoes.some(v=>v.enabled&&v.kind!=='indicator'&&v.kind!=='guard-distance'&&v.kind!=='box-break')){
     await readAtr(hit.at);const cut=Math.floor(hit.at/STEP)*STEP,s=readAtr.series().filter(x=>x.bar.openTime+STEP<=cut);
-    const legacyVetoes=round.entryVetoes.filter(v=>v.historyHours==null&&v.kind!=='guard-distance'&&v.kind!=='box-break'),minutes=additionVetoesNeedMinutes(legacyVetoes)?await minutesUntil(hit.at):undefined;
+    const legacyVetoes=round.entryVetoes.filter(v=>v.historyHours==null&&v.kind!=='indicator'&&v.kind!=='guard-distance'&&v.kind!=='box-break'),minutes=additionVetoesNeedMinutes(legacyVetoes)?await minutesUntil(hit.at):undefined;
     const veto=evaluateAdditionVetoes(legacyVetoes,s.map(x=>x.bar),s.map(x=>x.atr),o.entry,minutes);
     if(veto){const {lockPeak,...hitText}=veto;if(lockPeak!=null)pullbackLock={peak:lockPeak,at:cut};vetoed.push({at:hit.at,round:roundNo,...hitText,...(lockPeak!=null?{lockPeak,lockAt:cut}:{})});after=hit.at;continue;}
    }
    if(round.entryVetoes.some(v=>v.enabled&&(v.kind!=='box-break'&&(v.historyHours!=null||v.kind==='guard-distance')))){
-    let history=historyReaders.get(round.entryVetoes);if(!history){history=createVetoHistoryReader({rules:round.entryVetoes.filter(v=>v.kind!=='box-break'),entry:o.entry,row:o.row,load:o.load,signal:o.signal});historyReaders.set(round.entryVetoes,history);}
+    let history=historyReaders.get(round.entryVetoes);if(!history){history=createVetoHistoryReader({rules:round.entryVetoes.filter(v=>v.kind!=='box-break'&&v.kind!=='indicator'),entry:o.entry,row:o.row,load:o.load,signal:o.signal});historyReaders.set(round.entryVetoes,history);}
     const minute=o.prices[(hit.at-MINUTE-(o.prices[0]?.openTime??hit.at))/MINUTE];
     const result=await history(hit.at,minute);
     if(result.hit||result.pending){

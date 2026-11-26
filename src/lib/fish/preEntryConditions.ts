@@ -47,7 +47,7 @@ export function preEntryConditionsVersion(plan: QualityGroup, legacyBoxBreakOrde
   // Only the new opt-in condition uses this canonical format. Arrays and every
   // parameter remain intact; all earlier templates retain their exact serializer.
   const payload=[value,plan.buyFilters,boxes];
-  const serialized=boxBreak||reference||channels?JSON.stringify(payload,(_k,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item):JSON.stringify(payload);
+  const serialized=value?.entryVetoes.some(v=>v.kind==='indicator')||boxBreak||reference||channels?JSON.stringify(payload,(_k,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item):JSON.stringify(payload);
   return PRE_ENTRY_CONDITIONS_VERSION + (channels?' · holding-box-stop-independent-channels-v1':boxBreak?' · '+BOX_BREAK_VETO_VERSION:reference?' · '+BOX_STOP_REFERENCE_VERSION:'') + ' · 参数 #' + shortFishHash(serialized);
 }
 

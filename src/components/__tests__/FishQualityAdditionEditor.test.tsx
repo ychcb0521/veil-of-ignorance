@@ -3,6 +3,7 @@ import { cleanup,fireEvent,render,screen } from '@testing-library/react';
 import { afterEach,expect,it } from 'vitest';
 import { useState } from 'react';
 import { additionDraft,parseAdditionDraft,parseAdditionSellStages,FishQualityAdditionEditor,GuardLineNotes,BreakevenFloorNotes } from '../FishQualityAdditionEditor';
+import { SHARED_VETO_DRAFT_KEYS } from '@/lib/fish/qualityEntryVetoDraft';
 import { additionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
@@ -12,7 +13,7 @@ import { defaultStructureAddition } from '@/lib/fish/qualityAdditionStructure';
 import type {VetoStagesDraft} from '../FishQualityVetoStagesEditor';
 afterEach(cleanup);
 // The original editor regressions intentionally exercise the preserved legacy scope.
-function Editor({initial=defaultQualityAddition()}:{initial?:QualityAdditionRule}){const [draft,setDraft]=useState(()=>{const d=additionDraft(initial);for(const r of [d,...d.otherRounds])for(const v of Object.values(r.entryVetoes))v.historyHours=undefined;return d;});return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft} onRemoveRound={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r);document.querySelector('[data-stages]')!.textContent=JSON.stringify(parseAdditionSellStages(draft,BUILTIN_FEATURES)??null)}}>验证保存</button><output/><pre data-stages/></>}
+function Editor({initial=defaultQualityAddition()}:{initial?:QualityAdditionRule}){const [draft,setDraft]=useState(()=>{const d=additionDraft(initial);for(const r of [d,...d.otherRounds])for(const key of SHARED_VETO_DRAFT_KEYS)r.entryVetoes[key]!.historyHours=undefined;return d;});return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft} onRemoveRound={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r);document.querySelector('[data-stages]')!.textContent=JSON.stringify(parseAdditionSellStages(draft,BUILTIN_FEATURES)??null)}}>验证保存</button><output/><pre data-stages/></>}
 const save=()=>{fireEvent.click(screen.getByRole('button',{name:'验证保存'}));return JSON.parse(document.querySelector('output')!.textContent!);};
 const tab=(n:number)=>fireEvent.click(screen.getByRole('tab',{name:`第 ${n} 次`}));
 it('defaults new addition vetoes to six history hours and independently edits or restores their original scope',()=>{

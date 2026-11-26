@@ -464,9 +464,9 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    <p>被否决的加仓会记在结果里（悬停卖出列可看时间与原因）。</p></div>}>
    {/* 【用户要求】2026-11-03 回放里的三组否决做成预设，点一下设好当前这一次加仓（之后仍可手改） */}
    <div className="flex flex-wrap items-center gap-1.5 text-[10.5px] text-muted-foreground" data-testid="addition-veto-presets"><span>回放预设</span>
-    {VETO_PRESETS.map(p=><button key={p.name} type="button" disabled={!d.enabled} title={p.detail} aria-label={`否决预设 ${p.name}`} className="rounded border border-border/60 px-2 py-0.5 hover:bg-muted disabled:opacity-40" onClick={()=>{const base=d.entryVetoes??vetoDraftOf(),next={...base};for(const [kind,v] of Object.entries(p.set) as [AdditionEntryVetoKind,Partial<VetoFieldDraft>|false][])next[kind]={...base[kind],...(v===false?{enabled:false}:{enabled:true,...v})};patch({entryVetoes:next});}}>{p.name}</button>)}
+    {VETO_PRESETS.map(p=><button key={p.name} type="button" disabled={!d.enabled} title={p.detail} aria-label={`否决预设 ${p.name}`} className="rounded border border-border/60 px-2 py-0.5 hover:bg-muted disabled:opacity-40" onClick={()=>{const base=d.entryVetoes??vetoDraftOf(),next={...base};for(const [kind,v] of Object.entries(p.set) as [Exclude<AdditionEntryVetoKind,'indicator'>,Partial<VetoFieldDraft>|false][])next[kind]={...base[kind],...(v===false?{enabled:false}:{enabled:true,...v})};patch({entryVetoes:next});}}>{p.name}</button>)}
     <FishQualityInfo label="否决预设说明"><div className="space-y-1.5 text-[11px]"><p>「组合算法1」44 场回放（基准约 +5590；去掉最赚 2 笔后基准约 +230）：</p><ul className="list-disc space-y-0.5 pl-4">{VETO_PRESETS.map(p=><li key={p.name}><span className="font-medium">{p.name}</span>：{p.detail}</li>)}</ul><p className="text-muted-foreground">预设只改冲高回落、冲高回落·仅ATR、长上影线三项，其他否决保持原样；只作用于当前选中的这一次加仓。</p></div></FishQualityInfo></div>
-   <FishQualityEntryVetoEditor draft={d.entryVetoes??vetoDraftOf()} setDraft={entryVetoes=>patch({entryVetoes})} enabled={d.enabled}/>
+   <FishQualityEntryVetoEditor definitions={defs} draft={d.entryVetoes??vetoDraftOf()} setDraft={entryVetoes=>patch({entryVetoes})} enabled={d.enabled}/>
   </Part>
   <Part title="位置" role="必要充分 · 达到即加仓" testId="addition-timing" info={<div className="space-y-3">
    <InfoBlock title="指标 · S / T / K">
