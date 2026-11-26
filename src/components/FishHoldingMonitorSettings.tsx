@@ -309,15 +309,14 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
     if (position) setPositions(current => ({ ...current, [copy.id]: { ...position } }));
     if(copy.router){copy.router=structuredClone(controllers.current[source.id]?.current?.build()??copy.router);return;}
     setDrafts(current=>({...current,[copy.id]:{base:monitorBaseKey(copy),draft:structuredClone(forPlan(source))}}));
-  }} extraDirty={extraDirty} prepare={merge} renderBeforePlans={items=>{
-    const active=items.find(p=>p.id===activeId)??items[0];
-    if(instant||!active||isLegacyQualityPlan(active))return null;
+  }} extraDirty={extraDirty} prepare={merge} renderPlanEntry={plan=>{
+    if(instant||isLegacyQualityPlan(plan))return null;
     return <section aria-label="拒绝开仓" className="mb-3 space-y-2 rounded-md border border-border/60 p-3">
       <h4 className="text-xs font-medium">拒绝开仓 · 首仓一票否决</h4>
-      <p className="text-[11px] text-muted-foreground">{active.label} · 首仓前检查最近已收盘的指标值，任一启用条件命中即跳过该信号。</p>
+      <p className="text-[11px] text-muted-foreground">首仓前检查最近已收盘的指标值，任一启用条件命中即跳过该信号。</p>
       <FishIndicatorEntryVetoFields definitions={definitions} enabled={settingsReady}
-        rows={entryDrafts[active.id]??indicatorVetoDrafts(active.firstEntryVetoes)??[]}
-        onChange={rows=>setEntryDrafts(current=>({...current,[active.id]:rows}))}/>
+        rows={entryDrafts[plan.id]??indicatorVetoDrafts(plan.firstEntryVetoes)??[]}
+        onChange={rows=>setEntryDrafts(current=>({...current,[plan.id]:rows}))}/>
     </section>;
   }} renderHolding={view=>{
     const planName=view.displayName;

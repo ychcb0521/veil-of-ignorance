@@ -1778,12 +1778,15 @@ it('configures a same-signal percentage threshold from the legacy combination-ta
   expect(s.study.signalReadings![0]).toEqual(raw);
 });
 
-it('configures an independent ATRP first-entry veto at the start of holding settings',()=>{
+it('configures an independent ATRP first-entry veto inside its own plan card',()=>{
  const s=state();render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
- const section=screen.getByText('拒绝开仓 · 首仓一票否决').closest('section')!;
- expect(section.compareDocumentPosition(screen.getByTestId('quality-sell-plans-editor')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ const card=screen.getByTestId('sell-plan-draft-0');
+ const section=within(card).getByRole('region',{name:'拒绝开仓'});
+ expect(section.compareDocumentPosition(within(card).getByLabelText('卖出算法 1 门槛')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
  fireEvent.change(within(section).getByLabelText('添加算法否决'),{target:{value:'atr-price-pct-v1:ATRP'}});
  fireEvent.change(within(section).getByLabelText('算法否决 1 阈值'),{target:{value:'3.25'}});
  fireEvent.click(screen.getByText('保存到「状态 S 原始值」'));
  expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({firstEntryVetoes:[expect.objectContaining({enabled:true,indicator:expect.objectContaining({metric:'ATRP',threshold:3.25,direction:'>='})})]})]));
+ const saved=vi.mocked(s.setSellPlans).mock.calls.at(-1)![0];
+ expect(saved.filter(p=>p.firstEntryVetoes?.length).map(p=>p.id)).toEqual([s.study.sellPlans![0].id]);
 }, 30000);

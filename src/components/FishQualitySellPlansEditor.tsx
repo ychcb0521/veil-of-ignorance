@@ -110,7 +110,7 @@ export function TemplatePicker({ actions, disabled, onUse, purpose='sell', allow
     <FishQualityTemplateArchive owner={actions.owner} purpose={purpose} restore={browseOnly?undefined:actions.restore}/>
   </PopoverContent></Popover>;
 }
-export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderBeforePlans, renderHolding, onSelectPlan, onCopyPlan, templates, recoverablePlans,readOnly = false, embedded = false, onDirtyChange, purpose = 'sell', singlePlan = false, templateName }: {
+export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderPlanEntry, renderHolding, onSelectPlan, onCopyPlan, templates, recoverablePlans,readOnly = false, embedded = false, onDirtyChange, purpose = 'sell', singlePlan = false, templateName }: {
   purpose?: 'sell' | 'entry';
   singlePlan?: boolean;
   templateName?:QualityTemplateName;
@@ -122,7 +122,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   readOnly?: boolean;
   /** A branch is one editable plan; its parent owns save, copy and run actions. */
   embedded?: boolean; onDirtyChange?: (dirty: boolean) => void;
-  onSelectPlan?: (id: string) => void; prepare?: (plans: QualityGroup[]) => QualityGroup[]; extraDirty?: boolean; renderBeforePlans?: (plans:QualityGroup[])=>ReactNode; renderHolding?: (view: SellPlansDraftView) => ReactNode;
+  onSelectPlan?: (id: string) => void; prepare?: (plans: QualityGroup[]) => QualityGroup[]; extraDirty?: boolean; renderPlanEntry?: (plan:QualityGroup)=>ReactNode; renderHolding?: (view: SellPlansDraftView) => ReactNode;
 }) {
   const action = purpose === 'entry' ? '筛选' : '卖出';
   const names=useQualityTemplateNames();
@@ -349,7 +349,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
       急拉线冗余 ATR
       <input type="number" min={0} step="any" className={field+' w-24'} value={value ?? '0'} onChange={event=>update(event.target.value)}/>
     </label>;
-  return <>{renderBeforePlans?.(preview)}<fieldset disabled={readOnly} className="contents"><section className="mb-3 space-y-2 border-b border-border/60 pb-3" data-testid={embedded ? "quality-branch-sell-plans-editor" : "quality-sell-plans-editor"}>
+  return <><fieldset disabled={readOnly} className="contents"><section className="mb-3 space-y-2 border-b border-border/60 pb-3" data-testid={embedded ? "quality-branch-sell-plans-editor" : "quality-sell-plans-editor"}>
     <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-medium">{renderHolding ? (purpose === 'entry' ? '① 筛选算法' : '① 组合算法') : `${action}算法`} <span className="text-muted-foreground" data-testid={embedded ? "branch-sell-plan-draft-count" : "sell-plan-draft-count"}>{drafts.length} 套</span></h4>
       {!readOnly && !embedded && !singlePlan && <><button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, purpose === 'entry' ? '>' : '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增{action}算法</button>{templates && <TemplatePicker actions={templates} disabled={!ready} onUse={fromTemplate}/>}</>}</div>
     {!readOnly && !embedded && <p className="text-[10.5px] leading-relaxed text-muted-foreground">{purpose === 'entry' ? '筛选算法与启用的确认条件在同一分钟满足，且无否决时，纳入观察并保存到入选库。' : '每套方案独立监测，可选特征值、公式变量、方向和门槛。下方监测方案随增删、改名即时对应；保存后更新表格；全部调整完成后点击「开始监测」运行已勾选信号，历史轮次保留。'}</p>}
@@ -373,6 +373,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
       {!readOnly && !embedded && !singlePlan && <><button type="button" disabled={!ready} aria-label={`复制${action}算法 ` + (i + 1)} title={purpose==='entry'?'复制整套筛选算法和确认条件':'复制整套方案：含当前填写的组合算法、加仓、镜像平衡减仓和一票条件'} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" onClick={() => duplicate(d, i)}><Copy className="h-3.5 w-3.5" /></button>
         <button type="button" aria-label={`删除${action}算法 ` + (i + 1)} className="rounded p-1 text-muted-foreground hover:text-destructive" onClick={() => change(drafts.filter(x => x.id !== d.id))}><X className="h-3.5 w-3.5" /></button></>}</div>
       {alias&&!readOnly&&<p className="text-[10.5px] text-muted-foreground">原名：{alias.originalName}</p>}
+      {renderPlanEntry?.(preview[i])}
       {baseOf(d)?.router ? <p className="text-[10.5px] text-muted-foreground">条件分支方案：在下方修改两个分支的卖出、镜像、加仓与止损设置。</p> : <fieldset disabled={isLegacyQualityPlan(baseOf(d))} className="contents">
       {sellerFields(`${action}算法 ${i+1}`, d.choice, d.direction, d.threshold, d.time, mainSnapshot,
         (choice, direction, threshold, time) => patch(d.id, { choice, direction, threshold, time, bands: choice === d.choice ? d.bands : undefined }), false, d.bands, bands => patch(d.id, {bands}))}
