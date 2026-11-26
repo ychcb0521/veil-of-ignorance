@@ -124,7 +124,7 @@ it('routes the authenticated instant query through the same-origin gateway with 
  expect(url).toBe(site+'/instant-campaign-api?'+new URL(upstream).searchParams.toString());
  expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer fixture');
  expect(new Headers(init?.headers).get(INSTANT_CAMPAIGN_HEADER)).toBeNull();
- expect(init).toMatchObject({cache:'no-store',credentials:'omit'});
+ expect(init).toMatchObject({cache:'no-store',credentials:'same-origin'});
  await fetch(upstream,{headers:{apikey:'fixture'}});
  expect(fetcher.mock.calls[1][0]).toBe(upstream);
  const config=JSON.parse(readFileSync('vercel.json','utf8'));

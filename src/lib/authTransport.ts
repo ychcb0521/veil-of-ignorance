@@ -31,6 +31,11 @@ export async function boundedAuthAction<T>(action:()=>Promise<T>, timeoutMs=AUTH
   finally { clearTimeout(timer!); }
 }
 export function createAuthFetch(fetcher:typeof fetch=(input,init)=>fetch(input,init),timeoutMs=AUTH_REQUEST_TIMEOUT_MS,siteOrigin=productionAuthOrigin()):typeof fetch {
+  let campaignRetryAt = 0;
+  const challengeResponse = () => Response.json({
+    code: 'SITE_VERIFICATION_REQUIRED',
+    message: '站点安全验证待完成。可在新标签页打开本站完成验证，随后会自动重试。',
+  }, { status: 403 });
   return async(input,init)=>{
     const url=typeof input==='string'?input:input instanceof URL?input.href:input.url;
     const parsed = new URL(url);
@@ -46,8 +51,26 @@ export function createAuthFetch(fetcher:typeof fetch=(input,init)=>fetch(input,i
       const gateway = instantCampaignGatewayUrl(url, siteOrigin);
       if (gateway) {
         if(libraryRead)return fetchLibraryRead(fetcher,input,{...init,headers},gateway);
+        if (Date.now() < campaignRetryAt) {
+          (init?.signal ?? (input instanceof Request ? input.signal : undefined))?.throwIfAborted();
+          return challengeResponse();
+        }
         const request = input instanceof Request ? new Request(gateway, input) : gateway;
-        return fetcher(request, { ...init, headers, cache: 'no-store', credentials: 'omit' });
+        // Let the browser include its existing same-site verification cookie.
+        const response = await fetcher(request, { ...init, headers, cache: 'no-store', credentials: 'same-origin' });
+        const challenged = response.headers.get('x-vercel-mitigated') === 'challenge';
+        if (challenged || /\btext\/html\b/i.test(response.headers.get('content-type') ?? '')) {
+          void response.body?.cancel().catch(() => undefined);
+          if (challenged) {
+            const delay = Number(response.headers.get('retry-after'));
+            campaignRetryAt = Date.now() + 1000 * (delay > 0 && Number.isFinite(delay) ? Math.min(delay, 300) : 30);
+            return challengeResponse();
+          }
+          return Response.json({ message: '云端同步接口返回了网页，请稍后重试。' }, {
+            status: response.ok ? 502 : response.status,
+          });
+        }
+        return response;
       }
       return fetcher(input, { ...init, headers });
     }

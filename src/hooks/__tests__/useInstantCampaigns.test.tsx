@@ -44,3 +44,34 @@ it('retries reading existing archive jobs after a storage failure without waitin
     vi.useRealTimers();
   }
 });
+
+it('keeps the frozen sale for retry and clears a stale warning after another tab completes it', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('indexedDB', {});
+  const snapshot = { id:'fish-instant-sei', source:{symbol:'SEIUSDT'}, sell:{at:2000} };
+  const jobs = vi.mocked(readPendingInstantCampaignJobs);
+  jobs.mockResolvedValue([{input:snapshot,snapshot}] as Awaited<ReturnType<typeof readPendingInstantCampaignJobs>>);
+  const sync = vi.mocked(syncInstantCampaign);
+  sync.mockClear().mockRejectedValueOnce(new Error('<!DOCTYPE html><html>' + 'x'.repeat(5000)))
+    .mockRejectedValueOnce(new Error('站点安全验证待完成'));
+  const tracking: FishCdaTracking = {
+    enabled:true, active:0, awaitingMail:0, alerts:new Map(), error:'', saving:false, setEnabled:vi.fn(),
+  };
+  const view = renderHook(() => useInstantCampaigns('fixture-owner', tracking, true));
+  try {
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(view.result.current.issue).toMatch(/^SEIUSDT · 战役待同步（云端接口返回了网页/);
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(sync).toHaveBeenCalledTimes(2);
+    expect(sync).toHaveBeenLastCalledWith('fixture-owner',snapshot,expect.any(AbortSignal));
+    expect(view.result.current.issue).toContain('站点安全验证待完成');
+    jobs.mockResolvedValue([]);
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    expect(view.result.current.issue).toBe('');
+    expect(sync).toHaveBeenCalledTimes(2);
+  } finally {
+    view.unmount();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});

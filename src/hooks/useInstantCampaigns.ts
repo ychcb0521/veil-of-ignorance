@@ -4,6 +4,13 @@ import { readOpenInstantPositions, readPendingInstantCampaignJobs, saveInstantCa
 import { buildPageInstantCampaign, openPageInstantPosition } from './useFish';
 import type { FishCdaTracking } from './useFishCdaTracking';
 
+function campaignIssueDetail(error: unknown): string {
+  if (!(error instanceof Error)) return '';
+  const message = error.message.trim();
+  if (/<!doctype\s+html|<html\b|<script\b/i.test(message)) return '云端接口返回了网页，稍后会自动重试。';
+  return message.length > 180 ? message.slice(0, 180) + '…' : message;
+}
+
 export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTracking, autoPositions = false) {
   const executions = useRef(cda.monitorResults);
   executions.current = cda.monitorResults;
@@ -39,7 +46,7 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
     let running = false, requested = false, needsRetry = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const seen = new Set<string>();
-    const retryAt = new Map<string, number>();
+    const retries = new Map<string, { at: number; issue: string }>();
 
     const process = async () => {
       for (const input of latest.current) {
@@ -49,23 +56,24 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
         if ('sell' in input) await saveInstantCampaignInput(owner, input);
         else await saveInstantPosition(owner, input);
         seen.add(key);
-        retryAt.delete(input.id);
+        retries.delete(input.id);
       }
       if (navigator.onLine === false) return;
-      const errors: string[] = [];
       const jobs = await readPendingInstantCampaignJobs(owner, autoPositions);
+      const pending = new Set(jobs.map(job => job.input.id));
+      for (const id of retries.keys()) if (!pending.has(id)) retries.delete(id);
       // Record new positions before attempting potentially slow cloud writes for earlier sales.
       jobs.sort((a, b) => Number('sell' in a.input) - Number('sell' in b.input));
       for (const job of jobs) {
         if (signal.aborted) return;
-        if ((retryAt.get(job.input.id) ?? 0) > Date.now()) continue;
+        if ((retries.get(job.input.id)?.at ?? 0) > Date.now()) continue;
         let snapshot = job.snapshot;
         try {
           if (!('sell' in job.input)) {
             if (!autoPositions || job.opened) continue;
             const opened = await openPageInstantPosition(job.input, signal);
             if (!signal.aborted) await saveInstantPosition(owner, job.input, opened);
-            retryAt.delete(job.input.id);
+            retries.delete(job.input.id);
             continue;
           }
           if (!snapshot) {
@@ -74,15 +82,16 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
             snapshot = await saveInstantCampaignSnapshot(owner, frozen);
           }
           if (!signal.aborted) await syncInstantCampaign(owner, snapshot, signal);
-          retryAt.delete(job.input.id);
+          retries.delete(job.input.id);
         } catch (error) {
           if (signal.aborted) return;
-          retryAt.set(job.input.id, Date.now() + 30_000);
-          errors.push(job.input.source.symbol + (snapshot ? ' · 战役待同步' : 'sell' in job.input ? ' · 战役待生成' : ' · 等待开仓价')
-            + (error instanceof Error ? '（' + error.message + '）' : ''));
+          const detail = campaignIssueDetail(error);
+          const issue = job.input.source.symbol + (snapshot ? ' · 战役待同步' : 'sell' in job.input ? ' · 战役待生成' : ' · 等待开仓价')
+            + (detail ? '（' + detail + '）' : '');
+          retries.set(job.input.id, { at: Date.now() + 30_000, issue });
         }
       }
-      if (!signal.aborted) setIssue(previous => errors[0] ?? (retryAt.size ? previous : ''));
+      if (!signal.aborted) setIssue(retries.values().next().value?.issue ?? '');
     };
 
     const tick = () => {
@@ -97,18 +106,19 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
       void work.catch(error => {
         if (!signal.aborted) {
           needsRetry = true;
-          setIssue(error instanceof Error ? '即时交易 · ' + error.message : '即时交易等待重试');
+          const detail = campaignIssueDetail(error);
+          setIssue(detail ? '即时交易 · ' + detail : '即时交易等待重试');
         }
       }).finally(() => {
         running = false;
         if (signal.aborted) return;
         if (requested) { requested = false; tick(); }
-        else if (needsRetry || retryAt.size || latest.current.some(input => !seen.has(input.id + ('sell' in input ? ':sold' : ':admitted')))) {
+        else if (needsRetry || retries.size || latest.current.some(input => !seen.has(input.id + ('sell' in input ? ':sold' : ':admitted')))) {
           retryTimer = setTimeout(tick, 30_000);
         }
       });
     };
-    const online = () => { retryAt.clear(); tick(); };
+    const online = () => { retries.clear(); tick(); };
     wake.current = tick;
     window.addEventListener('online', online);
     window.addEventListener('focus', tick);

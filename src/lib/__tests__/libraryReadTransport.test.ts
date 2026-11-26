@@ -105,3 +105,45 @@ it('bounds a stalled shard body and honours user cancellation without retrying i
   controller.abort(); await rejected; expect(stoppedFetcher).toHaveBeenCalledOnce();
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it('keeps a challenged campaign queued and resumes the same gateway after its cooldown', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('<html>Vercel Security Checkpoint</html>', {
+    status: 403, headers: { 'content-type': 'text/html', 'x-vercel-mitigated': 'challenge', 'retry-after': '45' },
+  })).mockResolvedValueOnce(new Response(null, { status: 201 }));
+  const client = createClient(AUTH_BACKEND_ORIGIN, 'fixture', {
+    global: { fetch: createAuthFetch(fetcher, 30000, site) },
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+  const save = () => client.from('user_sim_state').upsert({user_id:'alice', key:'campaign', value:{}},
+    {onConflict:'user_id,key', ignoreDuplicates:true}).setHeader(INSTANT_CAMPAIGN_HEADER, '1');
+  const blocked = await save();
+  expect(blocked.error).toMatchObject({code:'SITE_VERIFICATION_REQUIRED', message:expect.stringContaining('安全验证')});
+  expect(blocked.error?.message).not.toContain('<html>');
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect((await save()).error?.code).toBe('SITE_VERIFICATION_REQUIRED');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect((await save()).error).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  for (const [url, init] of fetcher.mock.calls) {
+    expect(new URL(String(url)).origin).toBe(site);
+    expect(init?.credentials).toBe('same-origin');
+    expect(new Headers(init?.headers).get('prefer')).toContain('resolution=ignore-duplicates');
+  }
+});
+
+it('rejects an HTML success page as a failed archive response and preserves structured permission errors', async () => {
+  const fetcher = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response('<html>app</html>', {headers:{'content-type':'text/html'}}))
+    .mockResolvedValueOnce(reply(403, '{"code":"42501","message":"permission denied"}'));
+  const fetch = createAuthFetch(fetcher, 30000, site);
+  const init = {headers:{...headers,[INSTANT_CAMPAIGN_HEADER]:'1'}};
+  const page = await fetch(AUTH_BACKEND_ORIGIN+'/rest/v1/user_sim_state', init);
+  expect(page.status).toBe(502);
+  expect((await page.json()).message).toContain('云端同步接口');
+  const denied = await fetch(AUTH_BACKEND_ORIGIN+'/rest/v1/user_sim_state', init);
+  expect(denied.status).toBe(403);
+  expect(await denied.json()).toMatchObject({code:'42501',message:'permission denied'});
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
