@@ -51,7 +51,10 @@ export function useInstantMonitorSettings(owner: string | undefined) {
         if (inFlight.current === item) inFlight.current = undefined;
       }
     };
-    const onOnline = () => { void syncPending(); };
+    const onOnline = () => { void syncPending().catch(() => undefined); };
+    const cloudRetry = setInterval(() => {
+      if (navigator.onLine !== false) onOnline();
+    }, 30_000);
     window.addEventListener('online', onOnline);
 
     const startingRaw = readPersistedStateRaw(key);
@@ -82,7 +85,7 @@ export function useInstantMonitorSettings(owner: string | undefined) {
     });
     read();
     return () => {
-      active = false; clearTimeout(retry);
+      active = false; clearTimeout(retry); clearInterval(cloudRetry);
       unsubscribe();
       window.removeEventListener('online', onOnline);
       window.removeEventListener('storage', onStorage);
@@ -116,21 +119,32 @@ export function useInstantMonitorSettings(owner: string | undefined) {
     pending.current = item;
     setPendingOwner(owner);
     inFlight.current = item;
-    try {
-      const confirmed = await pushSimStateImmediately(owner, FISH_INSTANT_MONITOR_KEY, settings, syncOptions);
+    const cloudSave = pushSimStateImmediately(owner, FISH_INSTANT_MONITOR_KEY, settings, syncOptions).then(confirmed => {
       if (confirmed) {
         if (pending.current === item) {
           pending.current = undefined;
           setPendingOwner(undefined);
         }
         void localBackup.then(() => markBackupSynced(owner, backup));
-        return;
       }
-      if (readPersistedStateRaw(key) !== backup.raw) return;
-      if (savedLocally || await localBackup) return 'local' as const;
+      return confirmed;
+    }, () => false).finally(() => {
+      if (inFlight.current === item) inFlight.current = undefined;
+    });
+
+    // Either durable destination can acknowledge the save while the other is stalled.
+    const localSave = savedLocally ? Promise.resolve(true) : localBackup;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const confirmed = await Promise.race([
+        localSave.then(success => success || cloudSave),
+        cloudSave.then(success => success || localSave),
+        new Promise<false>(resolve => { timeout = setTimeout(() => resolve(false), 20_000); }),
+      ]);
+      if (confirmed && readPersistedStateRaw(key) === backup.raw) return;
       throw new Error('本机和云端暂未确认保存，请保留页面并重试。');
     } finally {
-      if (inFlight.current === item) inFlight.current = undefined;
+      clearTimeout(timeout);
     }
   }, [owner]);
   return { restoreStatus: restore?.owner !== owner || !restore ? 'loading' as const : restore.ok ? 'ready' as const : 'error' as const, settings: saved.owner === owner ? saved.settings : undefined, save, pendingCloud: !!owner && pendingOwner === owner };

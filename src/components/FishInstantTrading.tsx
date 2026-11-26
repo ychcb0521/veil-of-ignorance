@@ -1,7 +1,7 @@
 import { FishUsdtPositions } from './FishUsdtPositions';
 import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
 import type {QualityTemplateName} from '@/lib/fish/qualityTemplateNames';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { BriefcaseBusiness, Clock3, Filter, Pause, Pickaxe, Play, Settings2, Zap } from 'lucide-react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import type { FishQualityState } from '@/hooks/useFishQuality';
@@ -38,7 +38,11 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [localOnly, setLocalOnly] = useState(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const templates = activeQualityPlanTemplates({planTemplates:state.study.planTemplates ?? state.templateCatalog})
     .filter(template => template.entryHours == null && !template.plan.preEntryThreeStage && !template.plan.preEntryConditions);
   const template = templates.find(value => value.id === id);
@@ -50,21 +54,17 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
   const save = async (plan?: QualityGroup) => {
     if (!monitor || id && !choice || issue) return;
     setError('');
-    setLocalOnly(false);
     setSaving(true);
     try {
-      const outcome = await monitor.save(plan && choice ? { ...choice, plan, name: plan.label } : choice);
-      if (outcome === 'local') setLocalOnly(true);
-      else done();
+      await monitor.save(plan && choice ? { ...choice, plan, name: plan.label } : choice);
+      if (mounted.current) done();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '持仓监测设置保存失败');
+      if (mounted.current) setError(cause instanceof Error ? cause.message : '持仓监测设置保存失败');
     } finally {
-      setSaving(false);
+      if (mounted.current) setSaving(false);
     }
   };
-  const saveNotice = saving ? '正在等待云端确认保存…' : localOnly
-    ? monitor?.pendingCloud ? '设置已保存到本机，云端暂未确认。可再次保存重试。' : '云端已确认保存'
-    : '';
+  const saveNotice = saving ? '正在确认保存…' : '';
   if (editing && choice) return <FishConditionSettings dialog imageExport title="即时交易 · 买后设置" description="编辑本次选用的工作副本，应用于保存后新入选的持仓。">
     <button className="px-4 pt-3 text-xs text-primary" type="button" disabled={saving}
       onClick={() => setEditing(false)}>返回模板选择</button>
@@ -147,7 +147,9 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
       monitorTemplates={activeQualityPlanTemplates({ planTemplates: state.study.planTemplates ?? state.templateCatalog })}/>}
   </div>}
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
-    status={automatic && <>
+    status={<>
+      {state.instantMonitor?.pendingCloud && <span role="status">买后设置 · 云端同步中</span>}
+      {automatic && <>
       {needsSettings && <span>请先保存买前设置</span>}
       {screening && holding && <span role="status" className={qualityRowItem}><Filter aria-hidden className="h-3 w-3"/>筛选中</span>}
       {state.preEntry?.automaticRunning && screening && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
@@ -155,6 +157,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
       {screeningIssue && <span role="alert" className="text-destructive">{screeningIssue}</span>}
       {live?.archiveIssue && <span role="status">实盘战役 · {live.archiveIssue}</span>}
       {automatic.storageIssue && <span role="alert" className="text-destructive">本机队列暂未保存，正在重试，请保留页面</span>}
+      </>}
     </>}>
     <button type="button" className={automatic?.paused ? qualityPrimaryAction : qualityPauseAction} disabled={!automatic}
       onClick={() => automatic?.setAutoPaused(!automatic.paused)}>
