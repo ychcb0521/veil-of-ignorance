@@ -38,6 +38,50 @@ async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:P
 }
 beforeEach(()=>{mocked.events=[T+5*M,T+10*M];mocked.broken=[];});
 function retryPlan(){const p=plan();p.preEntryThreeStage=retryPreEntryThreeStage(p.preEntryThreeStage!);return p;}
+function intersectionPlan(algorithms:EntryMarketCondition[],guardIndex=0,guardEnabled=false) {
+  const p=retryPlan();
+  p.preEntryThreeStage=signalAnchoredPreEntryThreeStage(p.preEntryThreeStage!);
+  p.preEntryThreeStage.steps = {required:false,admission:true,exclusion:false};
+  p.preEntryThreeStage.admission={guardEnabled,algorithms,combination:{version:'entry-admission-priority-v1',join:'all',guardIndex}};
+  return p;
+}
+it('only checks followers at fresh lead events and cannot cash a failed event on resume',async()=>{
+  const a=condition('A',100),b=condition('B',110),p=intersectionPlan([a,b]);
+  const load=loader([105,115,95,115]);
+  const first=await run(p,{load,end:T+2*M,automatic:true});
+  expect(first.matchedAt).toBeUndefined();
+  expect(first.threeStage?.readings.map(r=>r.id)).toEqual(['A']);
+  const full=await run(p,{load});
+  expect(full).toMatchObject({matchedAt:T+4*M,threeStage:{admission:{join:'all',met:['A','B']}}});
+  expect((await run(p,{load,old:first,automatic:true})).threeStage).toEqual(full.threeStage);
+  const swapped=await run(intersectionPlan([b,a]),{load});
+  expect(swapped).toMatchObject({matchedAt:T+2*M,threeStage:{admission:{met:['B','A']}}});
+  p.preEntryThreeStage!.admission!.combination!.join='any';
+  expect(await run(p,{load})).toMatchObject({matchedAt:T+M,threeStage:{admission:{join:'any',met:['A']}}});
+});
+it('requires the native guard event at the exact evaluation minute in either position',async()=>{
+  const a=condition('A',100),load=loader([105,105,105,105,105,95,105]);
+  expect(await run(intersectionPlan([a],0,true),{load})).toMatchObject({matchedAt:T+5*M,threeStage:{admission:{met:['原生防守线新事件','A']}}});
+  expect((await run(intersectionPlan([a],1,true),{load})).matchedAt).toBeUndefined();
+  mocked.events=[T+7*M];
+  expect(await run(intersectionPlan([a],1,true),{load})).toMatchObject({matchedAt:T+7*M,threeStage:{admission:{met:['A','原生防守线新事件']}}});
+});
+it('uses the first enabled event and accepts inclusive range endpoints on a follower',async()=>{
+  const disabled={...condition('停用',500),enabled:false};
+  const b={...condition('B',0,'>','raw=sma(C,2)'),range:{min:105,max:105}};
+  const p=intersectionPlan([disabled,condition('A',100),b]);
+  expect(await run(p,{load:loader([101,109,99,111])})).toMatchObject({matchedAt:T+4*M,threeStage:{admission:{met:['A','B']}}});
+});
+it('includes the join and the native guard position in the frozen plan identity',()=>{
+  const frozen=freezeQualityPlan(intersectionPlan([condition('A',100),condition('B',110)],1,true));
+  expect(planVersionChanges(frozen)).toEqual([]);
+  for (const change of [{join:'any' as const},{guardIndex:0}]) {
+    const copy=structuredClone(frozen);
+    Object.assign(copy.preEntryThreeStage!.admission!.combination!,change);
+    expect(planVersionChanges(copy).length).toBeGreaterThan(0);
+  }
+  expect(planVersionChanges(frozen)).toEqual([]);
+});
 function stateOnlyPlan(){const p=retryPlan();p.preEntryThreeStage!.admission={guardEnabled:false,algorithms:[condition('状态 S',.8,'>','raw=C/100')]};return p;}
 it('waits at the archive origin and starts a 5-minute intrabar indicator at its first complete period', async () => {
  const old=stateOnlyPlan();

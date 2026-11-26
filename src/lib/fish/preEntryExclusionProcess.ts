@@ -17,7 +17,7 @@ export function recordEntryRestart(process:EntryExclusionProcess,at:number,attem
  const entries=process.entries.map(e=>e.kind==='observation'&&!e.endedAt?{...e,endedAt:at,nextStatus:'pending' as const}:e);
  return {...process,entries:[...entries,{kind:'restart',from:at,through:at,count:1,reason:`第 ${attempt} 次观察：重建起点 ${formatUTC8(at)}，首个新分钟结束后重新判断；原总截止时间 ${formatUTC8(end)} 不变。`}]};
 }
-export const entryProcessStageLabels:Record<EntryProcessStage,string>={necessary:'⓪ 必要条件',guard:'防守线新事件',admission:'① 并列准入（或）',exclusion:'② 排除门槛',first:'一阶门槛',second:'二阶门槛',data:'数据等待'};
+export const entryProcessStageLabels:Record<EntryProcessStage,string>={necessary:'⓪ 必要条件',guard:'防守线新事件',admission:'① 事件准入',exclusion:'② 排除门槛',first:'一阶门槛',second:'二阶门槛',data:'数据等待'};
 export const entryGuardKindLabels={first:'首次产生',rebuild:'断裂后重建',raise:'价格上移',lower:'价格下移','type-change':'实虚切换'} as const;
 const ruleKey=(reason:string)=>reason.split('：')[0];
 export function recordEntryEvidence(process:EntryExclusionProcess,e:EntryStageEvidence,indicatorIds:readonly string[]=[]):EntryExclusionProcess {

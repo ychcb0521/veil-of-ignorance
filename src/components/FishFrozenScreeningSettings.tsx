@@ -3,6 +3,7 @@ import { additionVetoLabel } from '@/lib/fish/qualityAdditionVeto';
 import { boxStopLabel } from '@/lib/fish/qualityBoxStop';
 import { preEntryConditionText } from '@/lib/fish/preEntryConditions';
 import { usesSignalTimeGate, usesTrackedGate, type EntryMarketCondition, type EntryMarketExpression } from '@/lib/fish/preEntryThreeStage';
+import { orderedAdmissionEvents } from '@/lib/fish/preEntryThreeStage';
 import { additionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import { holdingVetoLabel } from '@/lib/fish/qualityVeto';
 import { formatBeijingTime } from '@/lib/timeFormat';
@@ -54,6 +55,9 @@ export function FishFrozenScreeningSettings({ screening, label, templateName }: 
       </section>
       <section className="space-y-1 rounded border border-border/60 p-2">
         <h5 className="font-medium">事件准入{c.steps?.admission === false ? ' · 已跳过' : ''}</h5>
+        {c.admission?.combination && <p>{c.admission.combination.join==='all'
+          ? '交集 · '+orderedAdmissionEvents(c.admission).filter(event=>event?event.enabled:c.admission!.guardEnabled).map(event=>event?.label??'防守线事件').join(' → ')
+          : '并集 · 任一事件触发'}</p>}
         {(c.admission?.guardEnabled ?? true) && <p>{boxStopLabel(c.guard.rule)}</p>}
         <ul className="space-y-1">{c.admission?.algorithms.map(condition => <li key={condition.id}><ConditionText condition={condition}/></li>)}</ul>
         {!!screening.evidence?.admission?.met.length && <p>本次满足 {screening.evidence.admission.met.join('、')}</p>}

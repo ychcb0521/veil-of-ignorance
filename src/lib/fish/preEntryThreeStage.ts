@@ -44,12 +44,24 @@ export interface EntrySellRule {
   source?: { planId: string; label: string; versions: QualityGroup['frozenVersions'] };
 }
 export interface PreEntryStageSwitches { required: boolean; admission: boolean; exclusion: boolean }
+export const ENTRY_ADMISSION_PRIORITY_VERSION = 'entry-admission-priority-v1';
+export interface EntryAdmission {
+  guardEnabled: boolean;
+  algorithms: EntryMarketCondition[];
+  combination?: { version: typeof ENTRY_ADMISSION_PRIORITY_VERSION; join: 'any' | 'all'; guardIndex: number };
+}
+
+/** The native guard occupies a movable slot among the indicator conditions. */
+export function orderedAdmissionEvents(admission: EntryAdmission): (EntryMarketCondition | null)[] {
+  const events: (EntryMarketCondition | null)[] = [...admission.algorithms];
+  events.splice(admission.combination?.guardIndex ?? 0, 0, null);
+  return events;
+}
 
 export interface PreEntryThreeStage {
   version: PreEntryThreeStageVersion;
   observationBasis: 'scan-origin-v1'|'retry-origin-v2';
-  /** v7 only: native guard events and enabled algorithms are parallel OR routes. */
-  admission?:{guardEnabled:boolean;algorithms:EntryMarketCondition[]};
+  admission?:EntryAdmission;
   longDrawdown?:import('./preEntryLongDrawdown').EntryLongDrawdown;
   stallTurn?: EntryStallTurnRule;
   required: EntryMarketCondition[];
@@ -128,6 +140,10 @@ export function validatePreEntryThreeStage(c?: PreEntryThreeStage): asserts c is
   if(retry){
     if(!c.admission||typeof c.admission.guardEnabled!=='boolean'||!Array.isArray(c.admission.algorithms)||c.steps?.admission!==false&&!c.admission.guardEnabled&&!c.admission.algorithms.some(f=>f.enabled))throw Error('至少启用一条并列准入算法');
     c.admission.algorithms.forEach(f=>{unique(f.id);validateEntryCondition(f);});
+    const combination = c.admission.combination;
+    if (combination !== undefined && (combination?.version !== ENTRY_ADMISSION_PRIORITY_VERSION ||
+      !['all','any'].includes(combination.join) || !Number.isInteger(combination.guardIndex) ||
+      combination.guardIndex < 0 || combination.guardIndex > c.admission.algorithms.length)) throw Error('事件准入组合版本或优先顺序无效');
     if(c.longDrawdown?.enabled){unique('long-drawdown-v1');const d=c.longDrawdown;if(!Number.isFinite(d.hours)||d.hours<1/60||d.hours>8784||!Number.isFinite(d.pct)||d.pct<=0||d.pct>=100||!['current','maximum'].includes(d.mode))throw Error('长周期回撤须填写至少 1 分钟的有效回看时长和 0～100% 之间的回撤阈值');}
   }else if(c.admission!==undefined||c.longDrawdown!==undefined)throw Error('新准入与回撤条件须另存为 v7 新方案');
   c.required.forEach(f => { unique(f.id); validateEntryCondition(f); });

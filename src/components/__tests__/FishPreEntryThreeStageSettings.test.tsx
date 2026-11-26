@@ -120,6 +120,30 @@ it('explicitly copies the old plan into v7 with OR admission, state S default 0.
  fireEvent.click(screen.getByRole('button',{name:'添加事件'}));expect(screen.getByLabelText('准入算法 2 门槛')).toHaveValue(.8);fireEvent.change(screen.getByLabelText('准入算法 2 门槛'),{target:{value:'0.9'}});
  fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));const next=f.configure.mock.calls[0][0][0];expect(next.id).not.toBe(f.current.id);expect(next.preEntryThreeStage).toMatchObject({version:PRE_ENTRY_RETRY_VERSION,observationBasis:'retry-origin-v2',admission:{guardEnabled:true,algorithms:[{threshold:.8},{threshold:.9}]}});expect(next.preEntryThreeStage.hardVetoes).toEqual(f.current.preEntryThreeStage!.hardVetoes);expect(next.preEntryThreeStage.required).toEqual(f.current.preEntryThreeStage!.required);expect(f.configure.mock.calls[0][1]).toBe(12);expect(f.state.preEntry!.library).toEqual(before);expect(f.state.study.planTemplates).toEqual(templates);
 });
+it('saves and reopens intersection priority including the guard without editing the source plan',()=>{
+ const f=singleFixture(),before=structuredClone(f.current);
+ const draw=()=>render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
+ const view=draw();
+ fireEvent.click(screen.getByRole('button',{name:'配置事件准入（另存副本）'}));
+ expect(screen.getByLabelText('事件准入组合方式')).toHaveValue('any');
+ fireEvent.change(screen.getByLabelText('事件准入组合方式'),{target:{value:'all'}});
+ fireEvent.click(screen.getByRole('button',{name:'添加事件'}));
+ fireEvent.change(screen.getByLabelText('准入算法 2 门槛'),{target:{value:'0.9'}});
+ fireEvent.click(screen.getByRole('button',{name:'第 3 个准入事件上移'}));
+ fireEvent.click(screen.getByRole('button',{name:'第 2 个准入事件上移'}));
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));
+ const saved=f.configure.mock.calls[0][0][0];
+ expect(saved.preEntryThreeStage.admission).toMatchObject({algorithms:[{threshold:.9},{threshold:.8}],combination:{join:'all',guardIndex:1}});
+ expect(f.current).toEqual(before);
+ view.unmount();
+ f.state.preEntry!.library.settings!.plans=[saved];
+ draw();
+ expect(screen.getByLabelText('事件准入组合方式')).toHaveValue('all');
+ expect(screen.getByLabelText('事件准入优先顺序')).toHaveTextContent(/1\. 触发.*0\.9.*2\. 确认 · 防守线事件/);
+ fireEvent.click(screen.getByRole('button',{name:'准入算法 1 删除'}));
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));
+ expect(f.configure.mock.calls[1][0][0].preEntryThreeStage.admission.combination.guardIndex).toBe(0);
+});
 it('refuses a v7 plan with every admission route disabled',()=>{
  const f=singleFixture();render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
  fireEvent.click(screen.getByRole('button',{name:'配置事件准入（另存副本）'}));fireEvent.click(screen.getByLabelText('启用原生防守线准入'));fireEvent.click(screen.getByLabelText('准入算法 1 启用'));fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(screen.getByRole('alert')).toHaveTextContent('至少启用一条');expect(f.configure).not.toHaveBeenCalled();
@@ -227,7 +251,7 @@ it('creates a state-only independent copy when the saved guard admission is turn
 });
 it('gives every stage a subtle clickable help symbol without changing any saved configuration',()=>{
  const f=singleFixture(),before=structuredClone(f.state.preEntry!.library);render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
- for(const [stage,label,text] of [['three-stage-zero','必要条件使用说明','所有已启用的必要条件都满足'],['three-stage-first','事件准入使用说明','彼此是“或”的关系'],['three-stage-second','排除检查使用说明','硬性终止一旦成立立即排除']] as const){
+ for(const [stage,label,text] of [['three-stage-zero','必要条件使用说明','所有已启用的必要条件都满足'],['three-stage-first','事件准入使用说明','交集只取首位已启用事件的新触发时点'],['three-stage-second','排除检查使用说明','硬性终止一旦成立立即排除']] as const){
   const trigger=within(screen.getByTestId(stage)).getByRole('button',{name:label});expect(trigger.className).toContain('text-muted-foreground/35');expect(trigger).toHaveAttribute('title',label);fireEvent.click(trigger);expect(screen.getByText(new RegExp(text))).toBeInTheDocument();fireEvent.click(trigger);
  }
  expect(f.configure).not.toHaveBeenCalled();expect(f.state.preEntry!.library).toEqual(before);

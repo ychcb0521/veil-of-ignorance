@@ -1,3 +1,4 @@
+import { orderedAdmissionEvents } from './preEntryThreeStage';
 import {recordEntryEvidence,recordEntryStop,recordEntryRestart,type EntryProcessReading} from './preEntryExclusionProcess';
 import {createEntryLongDrawdownReader} from './preEntryLongDrawdown';
 import {createVersionedEntryStallTurnReader} from './preEntryStallTurnRule';
@@ -119,7 +120,7 @@ async function readSignalGate(row: TradeSignal, signalAt: number, required: Entr
  */
 export interface EntryStageEvidence {
   attempt?:{index:number;startedAt:number};
-  admission?:{join:'any';met:string[];skipped?:true};
+  admission?:{join:'any'|'all';met:string[];skipped?:true};
   at:number; zero?:EntryStageResult; first:EntryStageResult; second:EntryStageResult; third?:EntryStageResult;
   state:'waiting-data'|'zero-blocked'|'first-blocked'|'second-blocked'|'waiting-guard'|'matched';
   event?:EntryGuardEvent; line?:number; regime?:string;
@@ -136,12 +137,12 @@ export function decideThreeStage(at:number,first:EntryStageResult,second:EntrySt
   const state=waiting?'waiting-data':first.status==='blocked'?'first-blocked':first.status==='pending'?'waiting-data':second.status==='blocked'?'second-blocked':second.status==='pending'?'waiting-data':guard.event?'matched':'waiting-guard';
   return {at,first,second,third,state,...guard,readings:[]};
 }
-export function decideThreeStageV7(at:number,zero:EntryStageResult,second:EntryStageResult,guard:{event?:EntryGuardEvent;line?:number;regime?:string},met:string[],waiting=false,skipAdmission=false):EntryStageEvidence {
- const first:EntryStageResult=skipAdmission?{status:'pass',reason:'已跳过事件准入'}:met.length?{status:'pass',reason:'准入满足：'+met.join('、')}:{status:'pending',reason:'等待任一准入算法满足'};
+export function decideThreeStageV7(at:number,zero:EntryStageResult,second:EntryStageResult,guard:{event?:EntryGuardEvent;line?:number;regime?:string},met:string[],waiting=false,skipAdmission=false,join:'any'|'all'='any',pending?:string):EntryStageEvidence {
+ const first:EntryStageResult=skipAdmission?{status:'pass',reason:'已跳过事件准入'}:met.length?{status:'pass',reason:'准入满足：'+met.join('、')}:{status:'pending',reason:pending??'等待任一准入算法满足'};
  const state:EntryStageEvidence['state']=waiting?'waiting-data':zero.status==='blocked'?'zero-blocked':zero.status==='pending'?'waiting-data':second.status==='blocked'?'second-blocked':second.status==='pending'?'waiting-data':first.status==='pass'?'matched':'waiting-guard';
- return {at,zero,first,second,state,...guard,readings:[],admission:{join:'any',met,...(skipAdmission?{skipped:true as const}:{})}};
+ return {at,zero,first,second,state,...guard,readings:[],admission:{join,met,...(skipAdmission?{skipped:true as const}:{})}};
 }
-export const entryStageText=(e:EntryStageEvidence)=>e.state==='matched'?'三阶同刻通过，已进入入选库'+(e.admission?'；准入：'+e.admission.met.join('、'):''):e.state==='zero-blocked'?'⓪ 必要条件排除：'+e.zero?.reason:e.state==='first-blocked'?(e.zero?'① 防守线排除：'+e.first.reason:'一阶排除：'+e.first.reason):e.state==='second-blocked'?(e.zero?'② 排除门槛：':'二阶排除：')+e.second.reason:e.state==='waiting-data'?'等待数据：'+(e.zero?.status==='pending'?e.zero.reason:e.first.status==='pending'?e.first.reason:e.second.status==='pending'?e.second.reason:'零成交读数恢复中'):e.admission?'等待任一准入算法满足':'等待新防守线';
+export const entryStageText=(e:EntryStageEvidence)=>e.state==='matched'?'三阶同刻通过，已进入入选库'+(e.admission?'；准入：'+e.admission.met.join('、'):''):e.state==='zero-blocked'?'⓪ 必要条件排除：'+e.zero?.reason:e.state==='first-blocked'?(e.zero?'① 防守线排除：'+e.first.reason:'一阶排除：'+e.first.reason):e.state==='second-blocked'?(e.zero?'② 排除门槛：':'二阶排除：')+e.second.reason:e.state==='waiting-data'?'等待数据：'+(e.zero?.status==='pending'?e.zero.reason:e.first.status==='pending'?e.first.reason:e.second.status==='pending'?e.second.reason:'零成交读数恢复中'):e.admission?(e.first.reason??'等待任一准入算法满足'):'等待新防守线';
 
 export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishReconstructionLoader,now:number,signal:AbortSignal,onProgress:(p:QualityProgress)=>void,
   bounds?:{start?:(symbol:string)=>Promise<number|undefined>;end?:(symbol:string)=>Promise<number>}) {
@@ -243,7 +244,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
         && !(exclusionEnabled && (config.longDrawdown?.enabled || config.stallTurn?.enabled))) {
         const evidence = decideThreeStageV7(signalAt,
           {status:'pass', ...(!requiredEnabled ? {reason:'已跳过必要条件'} : {})},
-          {status:'pass', ...(!exclusionEnabled ? {reason:'已跳过排除检查'} : {})}, {}, [], false, true);
+          {status:'pass', ...(!exclusionEnabled ? {reason:'已跳过排除检查'} : {})}, {}, [], false, true,config.admission?.combination?.join);
         publish({status:'matched',cursor:signalAt,matchedAt:signalAt,entryTimeBasis:'signal',threeStage:evidence,detail:'已入选 · 跳过事件准入，采用原信号时间'});
         continue;
       }
@@ -262,6 +263,14 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       const guardReader:(at:number)=>Promise<{event?:EntryGuardEvent;line?:number;regime?:string}>=admissionEnabled&&(!retry||config.admission!.guardEnabled)?createPreEntryGuardReader({config,row,start:record.startTime,load,signal}):async()=>({});
       const confirmations=new Map<string,{count:number;lastAt?:number}>();
       const activeAdmissions = new Set<string>();
+      const admissionJoin = config.admission?.combination?.join ?? 'any';
+      const intersection = admissionJoin === 'all' && config.admission
+        ? orderedAdmissionEvents(config.admission).filter(c => c ? c.enabled : config.admission!.guardEnabled) : [];
+      const lead = intersection[0];
+      const followers = intersection.slice(1);
+      const followerIds = new Set(followers.flatMap(c => c ? [c.id] : []));
+      const regularReaders = readers.filter(r => !followerIds.has(r.condition.id));
+      const readerById = new Map(readers.map(r => [r.condition.id, r]));
       let pastMarketExclusion: { at: number; reason: string } | undefined;
       const longDrawdown=exclusionEnabled&&retry&&config.longDrawdown?.enabled?createEntryLongDrawdownReader({condition:config.longDrawdown,row,load,signal,availableStart:start}):undefined;
       // Independent history and recovery lock survive observation retries.
@@ -302,8 +311,8 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
             continue;
           }
           if(at<readyAt||fixedMinute==null&&at<=record.startTime)continue;
-          const guard = await guardReader(at);
-          const readings = readers.map(r=>({...r.read(at,minute),label:r.condition.label}));
+          let guard: Awaited<ReturnType<typeof guardReader>> = admissionJoin === 'all' && lead ? {} : await guardReader(at);
+          const readings = regularReaders.map(r=>({...r.read(at,minute),label:r.condition.label}));
           const map = new Map(readings.map(r=>[r.id,r]));
           const zeroTrade = isTuringCupSymbol(row.symbol)&&completeZeroTradeBar(minute);
           let qualification: EntryStageResult = {status:'pass',...(!requiredEnabled?{reason:'已跳过必要条件'}:{})};
@@ -321,19 +330,44 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           }
           // v10 starts counting indicator events only after the necessary gate passes.
           // Keep earlier versions' event consumption and resume behavior intact.
-          const observeAdmission = retry && admissionEnabled && (!signalGate || !zeroTrade)
+          const observeAdmission = retry && admissionEnabled && ((!signalGate && admissionJoin !== 'all') || !zeroTrade)
             && (!config.steps || qualification.status === 'pass');
           const indicatorEvents = observeAdmission ? admissionAlgorithms.filter(condition => {
             const met = map.get(condition.id)?.met;
-            if (!signalGate) return met === true;
+            if (!signalGate && admissionJoin !== 'all') return met === true;
             if (met === false) activeAdmissions.delete(condition.id);
             if (met !== true || activeAdmissions.has(condition.id)) return false;
             activeAdmissions.add(condition.id);
             return true;
           }) : [];
-          const metAdmission = observeAdmission && qualification.status === 'pass'
+          let metAdmission = observeAdmission && qualification.status === 'pass'
             ? [...(guard.event ? ['原生防守线新事件'] : []), ...indicatorEvents.map(condition => condition.label)] : [];
-          const candidate = !signalGate || qualification.status === 'pass' && !zeroTrade
+          let admissionPending: string | undefined;
+          let admissionIndicatorIds = indicatorEvents.map(c => c.id);
+          if (admissionJoin === 'all' && admissionEnabled) {
+            const label = (event: typeof lead) => event?.label ?? '原生防守线新事件';
+            const triggered = observeAdmission && qualification.status === 'pass' && (lead ? indicatorEvents.includes(lead) : !!guard.event);
+            if (triggered) {
+              for (const follower of followers) {
+                if (follower) {
+                  const reading = {...readerById.get(follower.id)!.read(at,minute), label:follower.label};
+                  readings.push(reading);
+                  map.set(follower.id,reading);
+                  if (reading.met === true) continue;
+                } else {
+                  guard = await guardReader(at);
+                  if (guard.event) continue;
+                }
+                admissionPending = label(lead)+' 已触发，同刻未满足：'+label(follower);
+                break;
+              }
+            }
+            const passed = triggered && !admissionPending;
+            metAdmission = passed ? intersection.map(label) : [];
+            admissionIndicatorIds = passed ? intersection.flatMap(c => c ? [c.id] : []) : [];
+            admissionPending ??= '等待首位事件触发：'+label(lead);
+          }
+          const candidate = (!signalGate && admissionJoin !== 'all') || qualification.status === 'pass' && !zeroTrade
             && (!admissionEnabled || metAdmission.length > 0)
             && (!useGateTime || !tracking || record.trackedGate?.at === at);
           // v8 checks historical rules only at a candidate time. The readers
@@ -366,7 +400,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           const exclusion:EntryStageResult=!exclusionEnabled?{status:'pass',reason:'已跳过排除检查'}:stallResult?.blocked?{status:'blocked',reason:stallResult.blocked}:longResult?.blocked?{status:'blocked',reason:longResult.blocked}:baseExclusion.status==='blocked'?baseExclusion:stallResult?.pending?{status:'pending',reason:stallResult.pending}:longResult?.pending?{status:'pending',reason:longResult.pending}:baseExclusion;
           const waiting=zeroTrade||observations.some(r=>r.zeroTrade&&(admissionIds.has(r.id)?!metAdmission.length:candidate));
           const decisionAt = fixedMinute != null ? signalAt : at;
-          const evidence={...(retry?decideThreeStageV7(decisionAt,zero,exclusion,guard,metAdmission,waiting,!admissionEnabled):v6?decideThreeStageV6(at,zero,exclusion,guard,waiting):decideThreeStage(at,first,second,guard,waiting)),readings:observations,...(retry?{attempt:{index:attempt,startedAt:observationStart}}:{})};
+          const evidence={...(retry?decideThreeStageV7(decisionAt,zero,exclusion,guard,metAdmission,waiting,!admissionEnabled,admissionJoin,admissionPending):v6?decideThreeStageV6(at,zero,exclusion,guard,waiting):decideThreeStage(at,first,second,guard,waiting)),readings:observations,...(retry?{attempt:{index:attempt,startedAt:observationStart}}:{})};
           const restart=retry&&!useGateTime&&candidate&&!waiting&&at<end&&(zero.status==='blocked'||exclusion.status==='blocked');
           // Rebuild past attempt transitions even during resume replay. Native
           // guard history stays continuous: a rejected event can never reappear.
@@ -378,7 +412,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           // Replaying up to the persisted cursor restores locks and confirmation
           // counts; it cannot admit or duplicate a previously observed event.
           if(fixedMinute==null&&at<=resumeAt)continue;
-          record={...record,cursor:decisionAt,threeStage:evidence,exclusionProcess:recordEntryEvidence(record.exclusionProcess!,{...evidence,readings:observations.map(r=>{const condition=conditions.find(c=>c.id===r.id);return {...r,...(admissionIds.has(r.id)?{role:'admission' as const}:{}),...(condition?{threshold:condition.threshold,direction:condition.direction,...(condition.range?{range:condition.range}:{})}:{})};})}, indicatorEvents.map(condition => condition.id)),readings:observations.filter(r=>r.value!=null).map(r=>({key:r.id,at:r.at,value:r.value!}))};
+          record={...record,cursor:decisionAt,threeStage:evidence,exclusionProcess:recordEntryEvidence(record.exclusionProcess!,{...evidence,readings:observations.map(r=>{const condition=conditions.find(c=>c.id===r.id);return {...r,...(admissionIds.has(r.id)?{role:'admission' as const}:{}),...(condition?{threshold:condition.threshold,direction:condition.direction,...(condition.range?{range:condition.range}:{})}:{})};})}, admissionIndicatorIds),readings:observations.filter(r=>r.value!=null).map(r=>({key:r.id,at:r.at,value:r.value!}))};
           if(waiting&&at>(record.zeroTradeWait?.lastAt??-Infinity))record.zeroTradeWait={count:(record.zeroTradeWait?.count??0)+1,firstAt:record.zeroTradeWait?.firstAt??at,lastAt:at};
           if(v6){if(evidence.state==='zero-blocked'||evidence.state==='first-blocked'||evidence.state==='second-blocked')record.lastVeto={at:decisionAt,reason:evidence.state==='zero-blocked'?evidence.zero!.reason!:evidence.state==='first-blocked'?evidence.first.reason!:evidence.second.reason!,count:(record.lastVeto?.count??0)+1};}
           else if(first.status==='blocked'||second.status==='blocked')record.lastVeto={at,reason:first.status==='blocked'?first.reason!:second.reason!,count:(record.lastVeto?.count??0)+1};

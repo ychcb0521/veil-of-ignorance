@@ -11,7 +11,7 @@ import type { PreEntrySettings } from '@/lib/fish/preEntryMonitor';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterMenuChoices, holdingVetoDraft, parseHoldingVetoDraft, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
-import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalAnchoredPreEntryThreeStage, PRE_ENTRY_SIGNAL_ANCHOR_VERSION, usesSignalTimeGate, usesTrackedGate, type PreEntryStageSwitches, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
+import { ENTRY_ADMISSION_PRIORITY_VERSION, orderedAdmissionEvents, emptyPreEntryThreeStage, retryPreEntryThreeStage, signalAnchoredPreEntryThreeStage, PRE_ENTRY_SIGNAL_ANCHOR_VERSION, usesSignalTimeGate, usesTrackedGate, type PreEntryStageSwitches, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
 import { vetoDraftOf, parseAdditionVetoDraft, type AdditionVetoDraft } from '@/lib/fish/qualityEntryVetoDraft';
 import { FishQualityEntryVetoEditor } from './FishQualityEntryVetoEditor';
 import { FishFrozenHoldingVetoEditor, FishQualityHoldingVetoEditor } from './FishQualityHoldingVetoEditor';
@@ -99,6 +99,21 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,di
   const sources=state?.study.sellPlans??[],source=sources.find(p=>p.id===sourceId),rounds=source?.addition?.rounds?.length?source.addition.rounds:source?.addition?[source.addition]:[];
   const patch=(p:Partial<NonNullable<typeof c>>)=>setPlans(old=>old.map(plan=>plan.id===active?.id?{...plan,preEntryThreeStage:{...plan.preEntryThreeStage!,...p}}:plan));
   const eventName=(condition:EntryMarketCondition)=>readOnly ? condition.label : choices.find(item=>item.key===qualityFilterChoiceKey({...condition,direction:'>'}))?.group||condition.snapshot.featureShort||condition.label;
+  const admission = c?.admission;
+  const join = admission?.combination?.join ?? 'any';
+  const ordered = admission ? orderedAdmissionEvents(admission) : [];
+  const enabledEvents = ordered.filter(event => event ? event.enabled : admission?.guardEnabled);
+  const setCombination = (mode: 'all' | 'any', events = ordered) => {
+    if (!admission) return;
+    patch({ admission: { ...admission, algorithms: events.filter((event): event is EntryMarketCondition => event !== null),
+      combination: { version: ENTRY_ADMISSION_PRIORITY_VERSION, join: mode, guardIndex: events.indexOf(null) } } });
+  };
+  const moveEvent = (index: number, delta: number) => {
+    const a = ordered.indexOf(enabledEvents[index]), b = ordered.indexOf(enabledEvents[index + delta]);
+    const next = [...ordered];
+    [next[a], next[b]] = [next[b], next[a]];
+    setCombination(join, next);
+  };
   const newCondition=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter(choices[0].key,'>',0,true,definitions),id:id()});
   const guardAction=(action:()=>void)=>{try{action();setError('');}catch(e){setError(e instanceof Error?e.message:'设置无效');}};
   const usePlan = (plan: QualityGroup, duration?: number) => {
@@ -295,26 +310,43 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,di
         <div className="flex items-center gap-0.5">
           {stageTitle('admission','事件准入','①')}
           <FishQualityInfo label="事件准入使用说明">
-            <p>防守线、状态 S 和其他指标彼此是“或”的关系。任一已启用项触发，就以该时点作为候选。</p>
+            <p>并集取任一已启用事件的触发时点。交集只取首位已启用事件的新触发时点，并在该分钟按顺序检查其余已启用事件。</p>
             {steps&&<p>首次进入本步时，已经达标的指标也可以触发。{signalAnchored?'跳过本步时，采用原信号或动态门槛首次达标的时点。':'跳过本步时，具备资格的观察时点直接成为候选。'}</p>}
             <p>各指标按自己的确认方式取读数。防守线读取已收盘的 5 分钟结构。</p>
           </FishQualityInfo>
-          <span className="screening-stage-note">{steps?.admission===false?'已跳过':'任一满足'}</span>
+          <span className="screening-stage-note">{steps?.admission===false?'已跳过':join==='all'?'首位触发 · 同刻全满足':'任一满足'}</span>
         </div>
         {signalAnchored && steps?.admission === false && <p className="text-[11px] text-muted-foreground">静态门槛通过或无需必要条件时，按原信号时点检查排除条件。动态门槛通过时，按首次达标时点检查。通过后在该时点入选。</p>}
         {(readOnly||steps?.admission!==false) && <>
-        <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[11px] text-muted-foreground">{signalGate?'同一指标持续达标只记一次。读到未达标后，再次达标才会产生候选。':'各模块互为“或”：满足任一已勾选事件即可。'}</p>{retry?<div className="flex gap-2"><button type="button" className={button} aria-label="全选准入标准" onClick={()=>patch({admission:{...c.admission!,guardEnabled:true,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:true}))}})}>全选</button><button type="button" className={button} onClick={()=>patch({admission:{...c.admission!,guardEnabled:false,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:false}))}})}>取消全选</button></div>:<button type="button" className={button+' text-primary'} onClick={()=>createEventAdmissionCopy()}>配置事件准入（另存副本）</button>}</div>
+        {admission && <div className="space-y-2">
+          <label className="flex items-center gap-2 text-[11px]">组合方式
+            <select className={field} aria-label="事件准入组合方式" disabled={readOnly} value={join}
+              onChange={e=>setCombination(e.target.value==='all'?'all':'any')}>
+              <option value="any">并集（任一触发）</option><option value="all">交集（首位触发，同刻全满足）</option>
+            </select>
+          </label>
+          {join==='all' && <ol aria-label="事件准入优先顺序" className="space-y-1 text-[11px]">
+            {enabledEvents.map((event,i)=><li key={event ? 'indicator-'+event.id : 'guard'} className="flex flex-wrap items-center gap-2">
+              <span>{i+1}. {i===0?'触发':'确认'} · {event ? eventName(event)+' '+(event.range ? (event.range.min??'−∞')+' ～ '+(event.range.max??'∞') : event.direction+' '+event.threshold) : '防守线事件'}</span>
+              {!readOnly && <><button type="button" className={button} aria-label={`第 ${i+1} 个准入事件上移`} disabled={i===0} onClick={()=>moveEvent(i,-1)}>上移</button>
+                <button type="button" className={button} aria-label={`第 ${i+1} 个准入事件下移`} disabled={i===enabledEvents.length-1} onClick={()=>moveEvent(i,1)}>下移</button></>}
+            </li>)}
+          </ol>}
+        </div>}
+        <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[11px] text-muted-foreground">{join==='all'?'首位触发时，其余指标可已达标；防守线须在该分钟产生事件。错过后等待首位再次触发。':signalGate?'同一指标持续达标只记一次。读到未达标后，再次达标才会产生候选。':'各模块互为“或”：满足任一已勾选事件即可。'}</p>{retry?<div className="flex gap-2"><button type="button" className={button} aria-label="全选准入标准" onClick={()=>patch({admission:{...c.admission!,guardEnabled:true,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:true}))}})}>全选</button><button type="button" className={button} onClick={()=>patch({admission:{...c.admission!,guardEnabled:false,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:false}))}})}>取消全选</button></div>:<button type="button" className={button+' text-primary'} onClick={()=>createEventAdmissionCopy()}>配置事件准入（另存副本）</button>}</div>
         {!retry&&<p className="text-[10px] text-muted-foreground">原方案保留。配置事件准入时创建独立副本，新副本默认全选。</p>}
         <div className="space-y-3" data-testid="admission-event-modules">
           <section aria-label="防守线事件准入模块" data-testid="admission-guard-module" className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3">
-            <div className="flex items-center gap-0.5"><input id={'guard-event-'+active.id} className="mr-1.5 shrink-0" type="checkbox" aria-label="启用原生防守线准入" checked={retry?c.admission!.guardEnabled:true} onChange={e=>retry?patch({admission:{...c.admission!,guardEnabled:e.target.checked}}):createEventAdmissionCopy(e.target.checked)}/><h5 className="text-[11px] font-medium"><label htmlFor={'guard-event-'+active.id} className="cursor-pointer">防守线事件</label></h5><FishQualityInfo label="防守线事件模块使用说明"><p>本模块只负责防守线事件：首次产生、断裂后重建、上移或下移、实虚切换。同价同型延续和仅换箱体编号不产生候选。</p><p>勾选后与其他事件按“或”判断；原生结构只读所选周期的已收盘数据。箱体和防守线的全部参数仅在本模块内设置。</p></FishQualityInfo></div>
+            <div className="flex items-center gap-0.5"><input id={'guard-event-'+active.id} className="mr-1.5 shrink-0" type="checkbox" aria-label="启用原生防守线准入" checked={retry?c.admission!.guardEnabled:true} onChange={e=>retry?patch({admission:{...c.admission!,guardEnabled:e.target.checked}}):createEventAdmissionCopy(e.target.checked)}/><h5 className="text-[11px] font-medium"><label htmlFor={'guard-event-'+active.id} className="cursor-pointer">防守线事件</label></h5><FishQualityInfo label="防守线事件模块使用说明"><p>本模块只负责防守线事件：首次产生、断裂后重建、上移或下移、实虚切换。同价同型延续和仅换箱体编号不产生候选。</p><p>防守线按所选组合方式参与准入；原生结构只读所选周期的已收盘数据。箱体和防守线的全部参数仅在本模块内设置。</p></FishQualityInfo></div>
             <details className="text-[11px]"><summary className="cursor-pointer text-muted-foreground">参数设置</summary><div className="mt-2"><FishQualityBoxStopEditor entry admission disabled={retry&&!c.admission!.guardEnabled} prefix="三阶准入 " definitions={definitions} rule={c.guard.rule} onChange={rule=>patch({guard:{...c.guard,rule}})}/></div></details>
           </section>
           {retry?c.admission!.algorithms.map((algorithm,i)=>{
             const put=(value:EntryMarketCondition)=>patch({admission:{...c.admission!,algorithms:c.admission!.algorithms.map((old,j)=>j===i?value:old)}});
-            const remove=()=>patch({admission:{...c.admission!,algorithms:c.admission!.algorithms.filter((_,j)=>j!==i)}});
+            const remove=()=>admission?.combination
+              ? setCombination(join,ordered.filter(event=>event?.id!==algorithm.id))
+              : patch({admission:{...c.admission!,algorithms:c.admission!.algorithms.filter((_,j)=>j!==i)}});
             return <section key={algorithm.id} aria-label={'事件 '+(i+2)+' '+(eventName(algorithm))+'准入模块'} data-testid="admission-indicator-module" className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3">
-              <div className="flex items-center gap-0.5"><input id={'indicator-event-'+algorithm.id} className="mr-1.5 shrink-0" type="checkbox" aria-label={'准入算法 '+(i+1)+' 启用'} checked={algorithm.enabled} onChange={e=>put({...algorithm,enabled:e.target.checked})}/><h5 className="min-w-0 text-[11px] font-medium"><label htmlFor={'indicator-event-'+algorithm.id} className="cursor-pointer">{eventName(algorithm)}</label></h5><FishQualityInfo label={'事件 '+(i+2)+' 模块使用说明'}><p>本模块按自己的指标、方向、门槛和确认时点判断。勾选后与防守线及其他事件按“或”判断；取消勾选会保留参数。</p><p>例如状态 S &gt; 0.8，只有读数严格超过 0.8 才满足；若包含等于，请选择 ≥。逐分钟复原与只读已收盘原周期由本模块单独选择。</p></FishQualityInfo><button type="button" className={button+' ml-auto text-muted-foreground'} aria-label={'准入算法 '+(i+1)+' 删除'} onClick={remove}>删除事件</button></div>
+              <div className="flex items-center gap-0.5"><input id={'indicator-event-'+algorithm.id} className="mr-1.5 shrink-0" type="checkbox" aria-label={'准入算法 '+(i+1)+' 启用'} checked={algorithm.enabled} onChange={e=>put({...algorithm,enabled:e.target.checked})}/><h5 className="min-w-0 text-[11px] font-medium"><label htmlFor={'indicator-event-'+algorithm.id} className="cursor-pointer">{eventName(algorithm)}</label></h5><FishQualityInfo label={'事件 '+(i+2)+' 模块使用说明'}><p>本模块按自己的指标、方向、门槛和确认时点判断。启用后按所选组合方式参与准入，取消勾选会保留参数。</p><p>例如状态 S &gt; 0.8，只有读数严格超过 0.8 才满足；若包含等于，请选择 ≥。逐分钟复原与只读已收盘原周期由本模块单独选择。</p></FishQualityInfo><button type="button" className={button+' ml-auto text-muted-foreground'} aria-label={'准入算法 '+(i+1)+' 删除'} onClick={remove}>删除事件</button></div>
               {eventConditionEditor(algorithm,put,'准入算法 '+(i+1)+' ')}
             </section>;
           }):<section aria-label="状态 S 准入模块" data-testid="admission-indicator-module" className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3"><div className="flex items-center gap-0.5"><input id={'state-event-'+active.id} className="mr-1.5 shrink-0" type="checkbox" aria-label="启用状态 S 事件准入" checked={false} onChange={()=>createEventAdmissionCopy()}/><h5 className="text-[11px] font-medium"><label htmlFor={'state-event-'+active.id} className="cursor-pointer">状态 S</label></h5><FishQualityInfo label="事件 2 模块使用说明"><p>勾选后创建独立副本，默认条件为状态 S &gt; 0.8。副本中可单独修改指标、方向、门槛和确认时点；与防守线按“或”判断，原方案保留。</p></FishQualityInfo></div><p className="text-[11px] text-muted-foreground">状态 S &gt; 0.8 · 勾选后可配置</p></section>}
