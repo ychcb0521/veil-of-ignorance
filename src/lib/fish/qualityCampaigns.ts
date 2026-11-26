@@ -147,7 +147,7 @@ export async function loadQualityCampaignData(owner: string, id: string, signal?
   if (instant) {
     if (isUsdtLiveCampaignId(id)) {
       const real = await loadUsdtCampaign(owner, id, signal);
-      let entryRiskPct: number | undefined;
+      let entryRiskPct: number | null | undefined;
       if (real.followId && isInstantCampaignId(real.followId) && !isUsdtLiveCampaignId(real.followId)) {
         // Only the exact opening snapshot is needed. A paper row's later visibility does not change entry risk.
         const job = await readInstantCampaignJob(owner, real.followId).catch(() => undefined);

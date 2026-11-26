@@ -36,10 +36,10 @@ import { fishDelay, validateFishBars } from './shared';
 import { loadQualityScanChunk } from './qualityScanChunk';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
-import { initialPayoffRiskThreshold, isStaticDrawdownSell, qualityExitAlgorithmLabel, qualityExitThresholdText, validateQualityExitRule } from './qualityStaticDrawdownSell';
+import { initialLimitedDrawdownPct, initialPayoffRiskThreshold, isStaticDrawdownSell, qualityExitAlgorithmLabel, qualityExitThresholdText, validateQualityExitRule } from './qualityStaticDrawdownSell';
 import {MIRROR_DEADLINE_KIND,mirrorDeadlineAt,mirrorCompletedBy} from './qualityMirrorDeadline';
 import {MIRROR_LOSS_REVIEW_KIND,reviewMirrorLoss,type MirrorLossReviewStates,type MirrorLossReviewCheck} from './qualityMirrorLossReview';
-import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVetoIdentity, DBL5_PAYOFF_RISK_VERSION, LIMITED_PAYOFF_RISK_VERSION, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
+import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVetoIdentity, L0_DBL5, L0_DRAWDOWN, isSelectedL0, DBL5_PAYOFF_RISK_VERSION, LIMITED_PAYOFF_RISK_VERSION, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
 
@@ -67,7 +67,7 @@ export interface QualityGroup {
   definitionSource?: 'account';
   router?: import('./qualityPlanRouter').QualityPlanRouter;
   holdingVetoes?: QualityHoldingVeto[];
-  payoffRiskVersion?: typeof LIMITED_PAYOFF_RISK_VERSION | typeof DBL5_PAYOFF_RISK_VERSION;
+  payoffRiskVersion?: typeof L0_DBL5 | typeof L0_DRAWDOWN | typeof LIMITED_PAYOFF_RISK_VERSION | typeof DBL5_PAYOFF_RISK_VERSION;
   positionManagement?: QualityPositionManagement;
   mirrorTakeProfit?: QualityMirrorTakeProfit;
   addition?: QualityAdditionRule;
@@ -134,6 +134,7 @@ export interface QualityResult {
   key: string; sampleId: string; groupId: string; evaluatedAt: number;
   routeDecision?: import('./qualityPlanRouter').QualityRouteDecision;
   status: 'open' | 'closed' | 'waiting' | 'error'; reason?: string;
+  selectedL0Pct?: number | null;
   initialDbl5RiskPct?: number | null;
   /** Reporting only: opening distance to the native seller line plus its own ATR buffer. */
   dbl5SellerRiskPctV1?:number|null;
@@ -721,10 +722,11 @@ async function evaluateQualitySampleCore(sample:QualitySample,group:QualityGroup
   catch(error){abort(signal);return {key,sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:error instanceof Error?error.message:'条件分支计算失败'};}
  }
 
- let initialPayoffRiskPct: number | null | undefined = group.payoffRiskVersion===LIMITED_PAYOFF_RISK_VERSION ? initialPayoffRiskThreshold(group) : undefined;
- if (group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION && sample.enteredAt) {
+ let initialPayoffRiskPct: number | null | undefined = group.payoffRiskVersion===L0_DRAWDOWN ? initialLimitedDrawdownPct(group) ?? null : group.payoffRiskVersion===LIMITED_PAYOFF_RISK_VERSION ? initialPayoffRiskThreshold(group) : undefined;
+ if ((group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION || group.payoffRiskVersion===L0_DBL5) && sample.enteredAt) {
   const key=qualityResultKey(sample,group,observeHours);
-  if (previous?.key===key && previous.initialDbl5RiskPct!==undefined) initialPayoffRiskPct=previous.initialDbl5RiskPct;
+  const savedRisk = group.payoffRiskVersion===L0_DBL5 ? previous?.selectedL0Pct : previous?.initialDbl5RiskPct;
+  if (previous?.key===key && savedRisk!==undefined) initialPayoffRiskPct=savedRisk;
   else {
    const entry=Math.ceil(sample.enteredAt/QUALITY_MINUTE)*QUALITY_MINUTE;
    if (Math.floor(now/QUALITY_MINUTE)*QUALITY_MINUTE>entry) try {
@@ -1026,7 +1028,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let vetoPath:import('./qualityVeto').QualityHoldingPath|undefined;
     if(trackVetoPath){vetoPath=prior?.vetoPath??{entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};for(const b of held)vetoPath=advanceQualityHolding(vetoPath,b);vetoPath=advanceQualityHolding({...vetoPath,peak:Math.max(vetoPath.peak,fillPeak)},{openTime:finalTime,open:finalPrice,high:finalPrice,low:finalPrice,close:finalPrice,volume:0,takerBuyVolume:0});}
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
-    return { ...base,...(initialPayoffRiskPct!==undefined && (group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION) ? {initialDbl5RiskPct:initialPayoffRiskPct}:{}),...(mirrorLossReviews?{mirrorLossReviews}:{}),...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
+    return { ...base,...(isSelectedL0(group.payoffRiskVersion)?{selectedL0Pct:initialPayoffRiskPct??null}:{}),...(initialPayoffRiskPct!==undefined && (group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION) ? {initialDbl5RiskPct:initialPayoffRiskPct}:{}),...(mirrorLossReviews?{mirrorLossReviews}:{}),...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       ...(additionGuardPlus&&additionGuardPlus.at<=finalTime?{additionGuardPlus}:{}),
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
       ...(position&&(additionFill||trackLedger) ? {additionFill,...(group.addition?.quantityMode==='calculator'||prior?.instantMonitorSwitches?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,

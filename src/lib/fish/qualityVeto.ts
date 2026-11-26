@@ -33,6 +33,10 @@ export const ADDITION_PROFIT_LABEL='加仓后几何仓位与均衡价止盈';
 /** 【用户要求】2026-11-03 盈亏比止盈：整笔盈亏（已落袋＋按当时价格的未实现）÷ 初始最大预期亏损 L₀ ≥ N（R）时立刻卖出全部持仓。L₀＝初始仓位 × 硬性终止静态回撤%。 */
 export const PAYOFF_STOP_KIND='payoff-ratio' as const;
 export const PAYOFF_STOP_LABEL='盈亏比止盈';
+export const L0_DRAWDOWN = 'selected-l0-limited-drawdown-v1' as const;
+export const L0_DBL5 = 'selected-l0-dbl5-execution-line-v1' as const;
+export const isSelectedL0 = (version: unknown): version is typeof L0_DRAWDOWN | typeof L0_DBL5 =>
+  version === L0_DRAWDOWN || version === L0_DBL5;
 export const DBL5_PAYOFF_RISK_VERSION = 'payoff-stop-dbl5-initial-risk-v3' as const;
 export const LIMITED_PAYOFF_RISK_VERSION = 'payoff-stop-limited-initial-risk-v2' as const;
 export const holdingVetoName = (v: { kind: string; label: string;activation?:string;mirrorStage?:MirrorHardStopStage;limitedStaticVersion?:string }) => (v.kind === 'static-drawdown' ? isLimitedStaticDrawdownVeto(v)?LIMITED_STATIC_DRAWDOWN_LABEL:FREE_STATIC_DRAWDOWN_LABEL : v.label)+(v.activation?'（'+POST_MIRROR_PROTECTION_LABEL+'）':'')+(v.mirrorStage?'（'+mirrorHardStopStageLabel(v.mirrorStage)+'）':'');

@@ -13,6 +13,7 @@ import type { TradeCampaign } from '@/types/journal';
 import { useMemo, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { FishQualitySellPlansEditor } from '@/components/FishQualitySellPlansEditor';
+import { isSelectedL0, L0_DBL5 } from '@/lib/fish/qualityVeto';
 import { FishQualityMirrorEditor, mirrorDraft } from '@/components/FishQualityMirrorEditor';
 import { FishQualityAdditionEditor, additionDraft } from '@/components/FishQualityAdditionEditor';
 import { FishQualityHoldingVetoEditor } from '@/components/FishQualityHoldingVetoEditor';
@@ -50,6 +51,7 @@ export function FishQualityMonitorSettingsView({ plan, holdingOnly = false, show
     {savedOnly&&!plan.mirrorTakeProfit ? <p className="text-muted-foreground">原设置未记录镜像减仓。</p> :
       <FishQualityMirrorEditor draft={mirror} setDraft={ignore} additionEnabled={addition.enabled} holdingLedger={addition.positionVersion===HOLDING_LEDGER_ADDITION_VERSION}/>}
     {/* 旧引擎方案的加仓按 10-31 原始参数显示：新版编辑器会把它换算成箱体，显示的就不是当时的规则了 */}
+    {isSelectedL0(plan.payoffRiskVersion) && <p className="rounded border border-border/60 p-3">L0 选择 · {plan.payoffRiskVersion===L0_DBL5 ? 'DBL-5 线' : '限制静态最大回撤'}</p>}
     {savedOnly&&!plan.addition ? <p className="text-muted-foreground">原设置未记录加仓。</p> :
       legacy ? <LegacyAdditionView plan={plan}/> : <FishQualityAdditionEditor positionExtra={plan.impulse1115Classification?<FishHoldingImpulse1115Settings compact value={plan.impulse1115Classification} readOnly/>:undefined} draft={addition} setDraft={ignore} vetoStages={vetoStages} setVetoStages={ignore}/>}
     {plan.impulse1115Classification&&(legacy||savedOnly&&!plan.addition)&&<section className="rounded border border-border/60 p-3" data-testid="addition-timing">

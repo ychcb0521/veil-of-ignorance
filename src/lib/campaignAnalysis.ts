@@ -1099,7 +1099,7 @@ export function resolveMainRiskAnchors(
   reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
 ): CampaignRiskAnchors {
   const paperRisk=qualityCampaignStaticRisk(campaign);
-  if (!paperRisk && campaign.comparison?.sellEvidence?.dbl5SellerRiskPctV1 !== undefined) {
+  if (!paperRisk && (campaign.comparison?.sellEvidence?.selectedL0Pct !== undefined || campaign.comparison?.sellEvidence?.dbl5SellerRiskPctV1 !== undefined)) {
     const exposure=campaign.comparison.holdingMetrics?.initialNotional ?? campaign.initial_main_size_usdt;
     return {anchors:[],expectedMaxLoss:0,anchoredExposureNotional:0,unanchoredExposureNotional:exposure,fullExposureNotional:exposure};
   }

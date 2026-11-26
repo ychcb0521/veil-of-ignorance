@@ -2,7 +2,7 @@
 import { expect, it } from 'vitest';
 import { qualityPayoffRatio, qualityPayoffRatioText } from '../qualityPresentation';
 import { qualityCampaignStaticRisk } from '../qualityCampaignRisk';
-import { LIMITED_STATIC_DRAWDOWN_VETO_VERSION } from '../qualityVeto';
+import { L0_DBL5, LIMITED_STATIC_DRAWDOWN_VETO_VERSION } from '../qualityVeto';
 import type { QualityHoldingVeto } from '../qualityVeto';
 const veto = (threshold: number, enabled = true): QualityHoldingVeto => ({ id: `s${threshold}`, label: '持仓过程静态最大回撤', kind: 'static-drawdown', direction: '>=', threshold, enabled } as QualityHoldingVeto);
 const closed = (pnl: number) => ({ key: 'k', sampleId: 's', groupId: 'g', evaluatedAt: 0, status: 'closed' as const, pnl, initialNotional: 100 });
@@ -27,8 +27,14 @@ it('uses the frozen opening DBL-5 seller distance for reported R even with a sta
 });
 it('prefers the opening limited static drawdown to the DBL-5 distance',()=>{
  const stop=5;
- const plan={holdingVetoes:[{...veto(stop),limitedStaticVersion:LIMITED_STATIC_DRAWDOWN_VETO_VERSION}]};
+ const plan:{holdingVetoes:QualityHoldingVeto[]}={holdingVetoes:[{...veto(stop),limitedStaticVersion:LIMITED_STATIC_DRAWDOWN_VETO_VERSION}]};
  expect(qualityPayoffRatio(plan,{...closed(10),dbl5SellerRiskPctV1:2.8}).value).toBe(2);
  expect(qualityPayoffRatio(plan,{...closed(10),dbl5SellerRiskPctV1:null}).value).toBe(2);
  expect(qualityCampaignStaticRisk({comparison:{monitorPlan:plan,sellEvidence:{dbl5SellerRiskPctV1:2.8},holdingMetrics:{initialNotional:100,entryPrice:100}}} as never)?.loss).toBe(stop);
+ const selected={...plan,payoffRiskVersion:L0_DBL5} as const;
+ for(const risk of [2,null]){
+   const result={...closed(10),selectedL0Pct:risk,dbl5SellerRiskPctV1:2.8};
+   expect(qualityPayoffRatio(selected,result).value).toBe(risk===null?null:5);
+   expect(qualityCampaignStaticRisk({comparison:{monitorPlan:selected,sellEvidence:{selectedL0Pct:risk,dbl5SellerRiskPctV1:2.8},holdingMetrics:{initialNotional:100,entryPrice:100}}} as never)?.loss).toBe(risk??undefined);
+ }
 });

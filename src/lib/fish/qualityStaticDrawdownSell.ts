@@ -2,7 +2,7 @@ import { definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { FishSnapshot } from './algorithm';
 import type { QualityExitRule, QualityGroup, QualityResult } from './quality';
 import {initialDbl5RiskVetoes,isDbl5Sell, isDbl5SellLine, validateDbl5Sell} from './qualityDbl5Sell';
-import { FREE_STATIC_DRAWDOWN_LABEL, LIMITED_PAYOFF_RISK_VERSION, DBL5_PAYOFF_RISK_VERSION, PAYOFF_STOP_KIND, isLimitedStaticDrawdownVeto, payoffStopL0Pct } from './qualityVeto';
+import { isSelectedL0, L0_DBL5, L0_DRAWDOWN, validatePayoffStops, FREE_STATIC_DRAWDOWN_LABEL, LIMITED_PAYOFF_RISK_VERSION, DBL5_PAYOFF_RISK_VERSION, PAYOFF_STOP_KIND, isLimitedStaticDrawdownVeto, payoffStopL0Pct } from './qualityVeto';
 
 export const STATIC_DRAWDOWN_SELL_VERSION = 'sell-static-drawdown-v1' as const;
 export const ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL = '静态最大回撤止损';
@@ -109,7 +109,17 @@ export function initialPayoffRiskThreshold(plan:LimitedDrawdownPlan){
   return marked?payoffStopL0Pct(initial.holdingVetoes):undefined;
 }
 
+export function validatePlanPayoffRisk(plan: QualityGroup) {
+  const initial = plan.router?.structure ?? plan;
+  const version = initial.payoffRiskVersion;
+  const pct = initialLimitedDrawdownPct(initial);
+  if (version === L0_DRAWDOWN && pct == null) throw Error('L0 选择「限制静态最大回撤」需要在首仓阶段配置限制静态最大回撤');
+  if (version === L0_DBL5 && !initialDbl5RiskVetoes(initial).length) throw Error('L0 选择「DBL-5 线」需要在首仓阶段配置 DBL-5 卖出线或启用相应的触价箱体止损线');
+  validatePayoffStops(plan.holdingVetoes, plan.payoffRiskVersion ? pct : undefined, version===DBL5_PAYOFF_RISK_VERSION || version===L0_DBL5);
+}
+
 export function withLimitedPayoffRisk(plan: QualityGroup): QualityGroup {
+  if (isSelectedL0(plan.payoffRiskVersion)) return plan;
   const hasPayoff = (plan.holdingVetoes ?? []).some(v => v.enabled && v.kind === PAYOFF_STOP_KIND)
     || plan.vetoStages?.some(stage => stage.conditions.some(v => v.enabled && v.kind === PAYOFF_STOP_KIND));
   const marked=[...(plan.holdingVetoes??[]),...(plan.vetoStages??[]).flatMap(s=>s.conditions)].some(v=>v.enabled&&isLimitedStaticDrawdownVeto(v));

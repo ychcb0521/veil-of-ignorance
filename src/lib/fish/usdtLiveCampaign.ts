@@ -20,6 +20,7 @@ export interface UsdtLiveCampaign {
   followId?: string;
   management?: Pick<BinanceManualPosition, 'version' | 'monitor' | 'armedAt'> & {
     exitReason?: string;
+    selectedL0Pct?: number | null;
     switches?: import('./instantMonitorSwitchCheckpoint').InstantMonitorSwitch[];
   };
 }

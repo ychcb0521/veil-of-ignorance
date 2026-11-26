@@ -1,3 +1,4 @@
+import { isSelectedL0, L0_DBL5, L0_DRAWDOWN } from '@/lib/fish/qualityVeto';
 import {FishRunTimeChoices} from './FishRunTimeChoices';
 import {additionExitKeys,additionExitForRound,buildRoundExits} from '@/lib/fish/qualityAddition';
 import {FishQualityHardStopStagesEditor} from './FishQualityHardStopStagesEditor';
@@ -44,16 +45,16 @@ const button = 'inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10.5px]
  * 【用户要求】2026-10-27「持仓监测中也需要一个条件设置」「持仓一票否决卖出其实隶属于持仓监测」：
  * 这套卖出方案的持仓一票否决在这里设（观察时长已于 0d3dc61c 从界面移除，不放回来）。
  */
-type MonitorDraft = { impulse1115Classification?:HoldingImpulse1115Rule; addition: ReturnType<typeof additionDraft>; mirror: ReturnType<typeof mirrorDraft>; vetoes: ReturnType<typeof holdingVetoDraft>;vetoStages:VetoStagesDraft };
-const monitorDraftOf = (plan: QualityGroup): MonitorDraft => ({ ...(plan.impulse1115Classification?{impulse1115Classification:structuredClone(plan.impulse1115Classification)}:{}), addition: additionDraft(plan.addition, plan.sellStages), mirror: mirrorDraft(plan.mirrorTakeProfit ?? { ...defaultQualityMirror(), enabled: false }), vetoes: planHoldingVetoDraft(plan.holdingVetoes),vetoStages:{enabled:!!plan.vetoStages?.length,mode:plan.vetoStageMode??'overlay',peakBasis:plan.vetoPeakBasis??'stage',stages:(plan.vetoStages??[]).map(s=>({afterAdditions:String(s.afterAdditions),conditions:holdingVetoDraft(s.conditions)}))} });
-const monitorBaseKey = (plan: QualityGroup) => JSON.stringify([plan.holdingVetoes,plan.mirrorTakeProfit,plan.addition,plan.sellStages,plan.vetoStages,plan.vetoStageMode,plan.vetoPeakBasis,...(plan.impulse1115Classification?[plan.impulse1115Classification]:[])]);
+type MonitorDraft = { payoffRiskVersion?:QualityGroup['payoffRiskVersion']; impulse1115Classification?:HoldingImpulse1115Rule; addition: ReturnType<typeof additionDraft>; mirror: ReturnType<typeof mirrorDraft>; vetoes: ReturnType<typeof holdingVetoDraft>;vetoStages:VetoStagesDraft };
+const monitorDraftOf = (plan: QualityGroup): MonitorDraft => ({ payoffRiskVersion:plan.payoffRiskVersion, ...(plan.impulse1115Classification?{impulse1115Classification:structuredClone(plan.impulse1115Classification)}:{}), addition: additionDraft(plan.addition, plan.sellStages), mirror: mirrorDraft(plan.mirrorTakeProfit ?? { ...defaultQualityMirror(), enabled: false }), vetoes: planHoldingVetoDraft(plan.holdingVetoes),vetoStages:{enabled:!!plan.vetoStages?.length,mode:plan.vetoStageMode??'overlay',peakBasis:plan.vetoPeakBasis??'stage',stages:(plan.vetoStages??[]).map(s=>({afterAdditions:String(s.afterAdditions),conditions:holdingVetoDraft(s.conditions)}))} });
+const monitorBaseKey = (plan: QualityGroup) => JSON.stringify([plan.payoffRiskVersion,plan.holdingVetoes,plan.mirrorTakeProfit,plan.addition,plan.sellStages,plan.vetoStages,plan.vetoStageMode,plan.vetoPeakBasis,...(plan.impulse1115Classification?[plan.impulse1115Classification]:[])]);
 function parseMonitorDraft(draft: MonitorDraft, definitions: Parameters<typeof parseAdditionDraft>[1]) {
   if(draft.impulse1115Classification)validateHoldingImpulse1115Rule(draft.impulse1115Classification);
   const holdingVetoes = parseHoldingVetoDraft(draft.vetoes,definitions), mirrorTakeProfit = parseMirrorDraft(draft.mirror), addition = parseAdditionDraft(draft.addition,definitions), sellStages = parseAdditionSellStages(draft.addition,definitions);
   const vetoStages=draft.vetoStages.enabled?draft.vetoStages.stages.map(s=>({afterAdditions:s.afterAdditions.trim()?Number(s.afterAdditions):NaN,conditions:parseHoldingVetoDraft(s.conditions,definitions)})).sort((a,b)=>a.afterAdditions-b.afterAdditions):undefined;
   if(draft.vetoStages.enabled&&!vetoStages?.length)throw Error('请添加至少一个一票条件切换阶段');
   const staged={vetoStages,vetoStageMode:draft.vetoStages.mode,vetoPeakBasis:draft.vetoStages.peakBasis};validateQualityVetoStages({...staged,addition});
-  validateQualitySellStages({sellStages,addition});validateQualityMirror(mirrorTakeProfit); return { holdingVetoes, mirrorTakeProfit, addition, sellStages,...staged,impulse1115Classification:draft.impulse1115Classification };
+  validateQualitySellStages({sellStages,addition});validateQualityMirror(mirrorTakeProfit); return { payoffRiskVersion:draft.payoffRiskVersion, holdingVetoes, mirrorTakeProfit, addition, sellStages,...staged,impulse1115Classification:draft.impulse1115Classification };
 }
 function HoldingMonitorEditor({ ready, plan, draft, setDraft, save, error, allDirty, count, displayName=plan.label, hideSave = false }: {
   ready: boolean; plan: QualityGroup; draft: MonitorDraft; setDraft: (draft: MonitorDraft) => void;
@@ -62,6 +63,22 @@ function HoldingMonitorEditor({ ready, plan, draft, setDraft, save, error, allDi
   return <div className="space-y-3" data-testid="quality-monitor-editor" data-plan-id={plan.id}>
     <div className="flex items-center gap-1.5"><p className="text-xs font-medium">持仓监测 · {displayName}</p><FishQualityInfo label="持仓监测说明"><p>买入之后依次是：① 组合算法（上方卡片）→ ② 镜像平衡减仓 → ③ 加仓细节 → ④ 硬性终止。各项分别保存在对应方案中；切换方案保留本次填写，保存时一起保存。</p></FishQualityInfo></div>
     <FishQualityMirrorEditor draft={draft.mirror} setDraft={mirror => setDraft({...draft,mirror})} additionEnabled={draft.addition.enabled} holdingLedger={draft.addition.positionVersion===HOLDING_LEDGER_ADDITION_VERSION}/>
+    <section className="space-y-2 rounded-lg border border-border/60 p-3">
+      <label className="flex flex-wrap items-center gap-3 text-xs font-medium">
+        L0 选择
+        <select className={field} value={isSelectedL0(draft.payoffRiskVersion) ? draft.payoffRiskVersion : ''}
+          onChange={event => setDraft({...draft, payoffRiskVersion: isSelectedL0(event.target.value) ? event.target.value : isSelectedL0(plan.payoffRiskVersion) ? undefined : plan.payoffRiskVersion})}>
+          <option value="">沿用原方案</option>
+          <option value={L0_DRAWDOWN}>限制静态最大回撤</option>
+          <option value={L0_DBL5}>DBL-5 线</option>
+        </select>
+      </label>
+      <p className="text-[10.5px] text-muted-foreground">{draft.payoffRiskVersion===L0_DRAWDOWN
+        ? 'L0 = 首仓名义金额 × 首仓限制静态最大回撤比例。'
+        : draft.payoffRiskVersion===L0_DBL5
+        ? 'L0 = 首仓数量 ×（买入价 − 首仓 DBL-5 执行线）。多条有效线取买入价下方最近的一条。'
+        : '沿用此方案已有的盈亏比计算规则。'}{isSelectedL0(draft.payoffRiskVersion) && ' 盈亏比和盈亏比止盈共用开仓时确定的 L0。'}</p>
+    </section>
     <FishQualityAdditionEditor positionExtra={<FishHoldingImpulse1115Settings compact value={draft.impulse1115Classification} onChange={value=>setDraft({...draft,impulse1115Classification:value})}/>} stickyRounds onRemoveRound={(addition,vetoStages)=>setDraft({...draft,addition,vetoStages:vetoStages??draft.vetoStages})} draft={draft.addition} setDraft={addition => setDraft({...draft,addition})} vetoStages={draft.vetoStages} setVetoStages={vetoStages=>setDraft({...draft,vetoStages})}/>
     <section className="space-y-2 rounded-lg border border-destructive/20 bg-destructive/[0.02] p-3" data-testid="quality-hard-stop"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">④ 硬性终止</h4><span className="text-[10px] text-muted-foreground">任一条件触发即清仓</span><FishQualityInfo label="硬性终止说明"><p>与「加仓细节 · 卖出」并列：硬性终止的任一启用条件、或某次加仓的卖出条件，任何一个先达标，都立即卖出全部仓位（含各次加仓买入的部分），不等普通卖出算法。某次加仓后另加或收紧的否决条件，在「③ 加仓细节 · 卖出」里按次设置。</p></FishQualityInfo></div>
       <FishQualityHardStopStagesEditor draft={draft.vetoes} setDraft={vetoes => setDraft({...draft,vetoes})}/>

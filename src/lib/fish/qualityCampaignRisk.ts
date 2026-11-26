@@ -1,3 +1,4 @@
+import { isSelectedL0 } from './qualityVeto';
 import { usdtLiveRiskMetrics } from './usdtLiveCampaignMetrics';
 import type {TradeCampaign} from '@/types/journal';
 import { initialLimitedDrawdownPct, qualityLimitedDrawdownText, timedDrawdownPayoffPct } from './qualityStaticDrawdownSell';
@@ -5,13 +6,13 @@ import { initialLimitedDrawdownPct, qualityLimitedDrawdownText, timedDrawdownPay
 export function qualityCampaignStaticRisk(campaign?:TradeCampaign){
  if(!campaign?.comparison)return;
  const live = usdtLiveRiskMetrics(campaign);
- if (live) return live.loss > 0 && campaign.comparison.liveUsdt?.asset === 'USDT'
+ if (live) return live.percent != null && live.loss > 0 && campaign.comparison.liveUsdt?.asset === 'USDT'
    ? { percent: live.percent, notional: live.openingNotional, loss: live.loss, entry: live.entryPrice ?? undefined, stop: live.stop } : undefined;
  const evidence=campaign.comparison.sellEvidence;
  const stops=(evidence?.holdingVetoes??[]).filter(v=>v.kind==='static-drawdown'&&(v.direction==='>='||v.direction==='>')&&Number.isFinite(v.threshold)&&v.threshold>0&&v.threshold<=100);
  const plan=campaign.comparison.monitorPlan;
  const limited=plan && (timedDrawdownPayoffPct(plan) ?? initialLimitedDrawdownPct(plan));
- const percent=limited ?? (evidence?.dbl5SellerRiskPctV1!==undefined ? evidence.dbl5SellerRiskPctV1 : (campaign.comparison.section==='instant'&&!plan
+ const percent=evidence?.selectedL0Pct!==undefined || isSelectedL0((plan?.router?.structure??plan)?.payoffRiskVersion) ? evidence?.selectedL0Pct : limited ?? (evidence?.dbl5SellerRiskPctV1!==undefined ? evidence.dbl5SellerRiskPctV1 : (campaign.comparison.section==='instant'&&!plan
   ? campaign.comparison.instant?.initialStaticStopPct
   : evidence&&Object.prototype.hasOwnProperty.call(evidence,'initialStaticStopPct')?evidence.initialStaticStopPct:stops.length?Math.min(...stops.map(v=>v.threshold)):undefined));
  if(!(percent!>0&&(evidence?.dbl5SellerRiskPctV1!=null||percent!<=100)&&Number.isFinite(percent)))return;

@@ -4,6 +4,7 @@ import type { InstantMonitorSettings } from './instantMonitorSettings';
 export interface InstantMonitorSwitch {
   at: number;
   effectiveAt: number;
+  openingSelectedL0Pct?: number | null;
   from: Pick<InstantMonitorSettings, 'templateId' | 'name'> & Partial<InstantMonitorSettings>;
   to: InstantMonitorSettings;
   followBasis?: import('./usdtFollowMonitorBasis').UsdtFollowMonitorBasis;
@@ -25,10 +26,12 @@ export function rebaseInstantMonitorCheckpoint(current: QualityResult, initialNo
   return {
     ...current,
     key, groupId: to.plan.id, evaluatedAt: at, endTime: effectiveAt, initialNotional,
-    instantMonitorSwitches: [...current.instantMonitorSwitches ?? [], { at, effectiveAt, from, to }],
+    instantMonitorSwitches: [...current.instantMonitorSwitches ?? [], { at, effectiveAt, from, to,
+      ...(!current.instantMonitorSwitches?.length && current.selectedL0Pct !== undefined ? { openingSelectedL0Pct: current.selectedL0Pct } : {}) }],
     routeDecision: undefined, activeSellStage: undefined, sellStageSwitches: undefined, activeVetoStage: undefined,
     vetoStageSwitches: undefined, vetoPath: undefined, advantageState: undefined, boxStopStates: undefined,
     ...(current.impulse1115Classification?{impulse1115Classification:undefined}:{}),
+    ...(current.selectedL0Pct!==undefined ? {selectedL0Pct:undefined} : {}),
     additionGuardPlus: undefined, additionNote: undefined, boxMarketRepair: undefined, exitSnapshot: undefined, exitReading: undefined,
   };
 }

@@ -1096,6 +1096,20 @@ it('explains unavailable filtering and provides a resume/retry action that reuse
  cleanup();render(<FishQuality state={{...s,resumeFiltering:undefined,filterError:'本轮还有 2 项缺数据'}}/>);expect(screen.getByRole('button',{name:'重试缺数据'})).toBeEnabled();expect(screen.getByRole('alert')).toHaveTextContent('2 项');
 });
 
+it('saves the chosen L0 source beneath the mirror settings on the active holding plan',async()=>{
+ const {makeQualitySellPlan,replaceQualitySellPlans}=await import('@/lib/fish/qualitySellPlans');
+ const s=state();
+ s.study=replaceQualitySellPlans(s.study,[{...makeQualitySellPlan('sell-dbl5-guard:line','<',0,[]),id:'sell-state-raw'}]);
+ render(<FishQuality state={s}/>);
+ fireEvent.click(screen.getByLabelText('持仓监测条件'));
+ const select=screen.getByRole('combobox',{name:'L0 选择'});
+ expect(screen.getByLabelText('启用镜像平衡减仓策略').compareDocumentPosition(select)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ expect(select).toHaveValue('');
+ fireEvent.change(select,{target:{value:'selected-l0-dbl5-execution-line-v1'}});
+ fireEvent.click(screen.getByRole('button',{name:/保存到/}));
+ expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({id:'sell-state-raw',payoffRiskVersion:'selected-l0-dbl5-execution-line-v1'})]));
+});
+
 it('offers mirror values on explicit enable and validates custom percentages before saving any settings',()=>{
  const s=state();render(<FishQuality state={s}/>);
  fireEvent.click(screen.getByLabelText('持仓监测条件'));

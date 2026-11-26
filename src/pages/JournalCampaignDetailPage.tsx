@@ -1994,8 +1994,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       { key: 'initialMainExposureNotional', label: '首仓名义金额', value: amount(openingNotional), help: '首个开仓委托的实际成交金额合计。', column: 1 },
       { key: 'averageEntry', label: '首仓开仓均价', value: entryPrice != null ? usdtAmountText(entryPrice) : '—', help: '首个开仓委托按成交数量加权的成交价。', column: 1 },
       { key: 'remainingQuantity', label: '余仓数量', value: liveUsdt.quantity, help: '币安成交确认后的剩余持仓数量。', column: 1 },
-      { key: 'liveEntryRiskBasis', label: '初始风险依据', value: liveMetrics.frozen ? '开仓冻结风控' : '首仓名义金额 × 3%',
-        help: '按首个开仓委托全部成交计算初始风险。缺少开仓风控时统一取首仓名义金额的 3%。整场盈亏比在全部平仓且手续费可核算后显示。', column: 1 },
+      { key: 'liveEntryRiskBasis', label: '初始风险依据', value: liveMetrics.percent == null ? '所选 L0 缺少开仓读数' : liveMetrics.frozen ? '开仓冻结风控' : '首仓名义金额 × 3%',
+        help: '按首个开仓委托全部成交计算初始风险。旧方案缺少开仓风控时取首仓名义金额的 3%。明确选择 L0 的方案采用开仓风险读数。整场盈亏比在全部平仓且手续费可核算后显示。', column: 1 },
       ...campaignPnlOverviewItems.filter(item => readings.has(item.key)).map(item => item.key === 'payoffRatio'
         ? { ...item, help: liveUsdt.closedAt == null ? '仓位尚未全部平仓，整场盈亏比待结算。'
           : net == null ? '手续费含其他币种，缺少成交时折算金额，整场净盈亏和盈亏比暂缺。'

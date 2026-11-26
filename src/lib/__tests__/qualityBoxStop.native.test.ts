@@ -90,6 +90,39 @@ it('saves DBL-5 sellers with a payoff stop and freezes the entry distance as R',
  const plain=await evaluateQualitySample(sample,{...plan,holdingVetoes:[],payoffRiskVersion:undefined},0,entry+60000,load,new AbortController().signal);
  expect(plain.dbl5SellerRiskPctV1).toBeGreaterThan(0);
  expect(plain.dbl5SellerRiskPctV1).toBe(result.dbl5SellerRiskPctV1);
+ const {L0_DBL5,L0_DRAWDOWN,LIMITED_STATIC_DRAWDOWN_VETO_VERSION}=await import('@/lib/fish/qualityVeto');
+ const {qualityPayoffRatio}=await import('@/lib/fish/qualityPresentation');
+ const initialStudy={...newQualityStudy(),sellPlans:[plan]};
+ const original=structuredClone(initialStudy.sellPlans);
+ const limited={id:'limited',label:'限制静态最大回撤',kind:'static-drawdown' as const,enabled:true,direction:'>=' as const,threshold:3,limitedStaticVersion:LIMITED_STATIC_DRAWDOWN_VETO_VERSION} as const;
+ const run=async(version:typeof L0_DBL5|typeof L0_DRAWDOWN)=>{
+   const saved=replaceQualitySellPlans(initialStudy,[{...plan,payoffRiskVersion:version,holdingVetoes:[limited]}]).sellPlans![0];
+   expect(saved.payoffRiskVersion).toBe(version);
+   expect(saved.frozenVersions?.find(v=>v.key==='payoff-initial-risk')?.version).toBe(version);
+   const r=await evaluateQualitySample(sample,saved,0,entry+60000,load,new AbortController().signal);
+   expect(r.status).toBe('closed');
+   expect(qualityPayoffRatio(saved,r).value).toBeCloseTo(r.pnl!/(r.initialNotional??100)*100/r.selectedL0Pct!);
+   return r;
+ };
+ const dbl=await run(L0_DBL5), drawdown=await run(L0_DRAWDOWN);
+ expect(dbl.selectedL0Pct).toBeCloseTo(result.initialDbl5RiskPct!);
+ expect(drawdown.selectedL0Pct).toBe(3);
+ expect(dbl.selectedL0Pct).not.toBe(drawdown.selectedL0Pct);
+ const gainBars:FishReconstructionLoader=async(row,a,b,p,signal)=>(await load(row,a,b,p,signal)).map(bar=>p.step===60000?{...bar,low:200,high:212,close:212}:bar);
+ const {defaultQualityAddition}=await import('@/lib/fish/qualityAddition');
+ const {HOLDING_LEDGER_ADDITION_VERSION}=await import('@/lib/fish/qualityHoldingLedger');
+ const addition={...defaultQualityAddition(),enabled:true,positionVersion:HOLDING_LEDGER_ADDITION_VERSION} as const;
+ const runStop=async(version:typeof L0_DBL5|typeof L0_DRAWDOWN)=>{
+   const saved=replaceQualitySellPlans(initialStudy,[{...plan,payoffRiskVersion:version,addition,holdingVetoes:[limited,{...candidate.holdingVetoes![0],threshold:1}]}]).sellPlans![0];
+   return evaluateQualitySample(sample,saved,0,entry+60000,gainBars,new AbortController().signal);
+ };
+ const staticStop=await runStop(L0_DRAWDOWN),lineStop=await runStop(L0_DBL5);
+ expect(staticStop.exitSnapshot?.cause?.payoffBasis).toMatchObject({l0Pct:3});
+ expect(staticStop.endPrice).toBeCloseTo(206);
+ expect(lineStop.status).toBe('open');
+ expect(lineStop.selectedL0Pct).toBeGreaterThan(6);
+ expect(()=>replaceQualitySellPlans(initialStudy,[{...plan,payoffRiskVersion:L0_DRAWDOWN}])).toThrow(/首仓阶段配置限制静态最大回撤/);
+ expect(initialStudy.sellPlans).toEqual(original);
 });
 
 it('uses the closed DBL-5 line to reverse-calculate a mirror limit at entry', async()=>{

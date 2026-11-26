@@ -7,7 +7,7 @@ import type { QualityMirrorFill, QualityMirrorTakeProfit } from './qualityMirror
 import { mirrorFillGainPct } from './qualityMirror';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { initialLimitedDrawdownPct, timedDrawdownPayoffPct } from './qualityStaticDrawdownSell';
-import { payoffStopL0Pct } from './qualityVeto';
+import { isSelectedL0, L0_DBL5, payoffStopL0Pct } from './qualityVeto';
 export const qualityPeakPct = (result?: QualityResult): number | null => result && ['open','closed'].includes(result.status) && result.peakPct != null && Number.isFinite(result.peakPct) ? Math.max(0,result.peakPct) : null;
 /** Original buy price to actual final sale price; independent of partial sales/addition sizing. */
 export const qualitySalePriceChangePct=(result?:QualityResult):number|null=>{
@@ -20,7 +20,7 @@ export const qualitySalePriceChangePct=(result?:QualityResult):number|null=>{
  * 首仓风险优先取组合算法的限制静态最大回撤；未配置时沿用原初始硬性终止口径。
  * 只算有实际加仓且已卖出的持仓（交易战役同样只算有加仓的）；缺任一项返回 null 并说明原因。
  */
-type QualityRiskPlan = Pick<QualityGroup, 'holdingVetoes' | 'rule' | 'combo' | 'router'>;
+type QualityRiskPlan = Pick<QualityGroup, 'holdingVetoes' | 'rule' | 'combo' | 'router' | 'payoffRiskVersion'>;
 
 function qualityReportedInitialRiskPct(plan: QualityRiskPlan) {
  return initialLimitedDrawdownPct(plan) ?? payoffStopL0Pct((plan.router?.structure ?? plan).holdingVetoes);
@@ -63,7 +63,9 @@ export const qualityGeometricPositionText=(value:number|null)=>value==null?'—'
 export function qualityPayoffRatio(plan:QualityRiskPlan,result?:QualityResult):{value:number|null;reason:string}{
  if(result?.status!=='closed')return {value:null,reason:result?.status==='open'?'持有中，卖出后才有盈亏比':'尚无卖出结果'};
  const limitedPct=timedDrawdownPayoffPct(plan) ?? initialLimitedDrawdownPct(plan);
- const stopPct=limitedPct ?? (result.dbl5SellerRiskPctV1!==undefined ? result.dbl5SellerRiskPctV1 : result.initialDbl5RiskPct!==undefined ? result.initialDbl5RiskPct : qualityReportedInitialRiskPct(plan));
+ const version=(plan.router?.structure??plan).payoffRiskVersion;
+ const stopPct=isSelectedL0(version) ? result.selectedL0Pct : limitedPct ?? (result.dbl5SellerRiskPctV1!==undefined ? result.dbl5SellerRiskPctV1 : result.initialDbl5RiskPct!==undefined ? result.initialDbl5RiskPct : qualityReportedInitialRiskPct(plan));
+ if(isSelectedL0(version) && !(stopPct!>0))return {value:null,reason:version===L0_DBL5?'首仓买入价下方没有有效的 DBL-5 执行线，L0（L₀）不可用':'缺少首仓限制静态最大回撤，L0（L₀）不可用'};
  if(result.dbl5SellerRiskPctV1!==undefined && !(stopPct!>0))return {value:null,reason:'开仓时缺少有效的 DBL-5 卖出线风险距离'};
  if(stopPct==null)return {value:null,reason:'缺少初始最大预期亏损 L₀：请在组合算法起始阶段设置限制静态最大回撤'};
  const notional=result.initialNotional??100,L0=notional*stopPct/100,pnl=result.pnl;

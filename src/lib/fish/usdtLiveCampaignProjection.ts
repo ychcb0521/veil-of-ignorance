@@ -4,7 +4,7 @@ import type { QualityCampaignData } from './qualityCampaignProjection';
 import { linkedUsdtEntryRiskPct, usdtLiveFillMetrics } from './usdtLiveCampaignMetrics';
 import { usdtLiveCampaignId, type UsdtLiveCampaign } from './usdtLiveCampaign';
 
-export function buildUsdtLiveCampaignData(owner: string, position: UsdtLiveCampaign, liveEntryRiskPct?: number): QualityCampaignData {
+export function buildUsdtLiveCampaignData(owner: string, position: UsdtLiveCampaign, liveEntryRiskPct?: number | null): QualityCampaignData {
   const id = usdtLiveCampaignId(position);
   const opened = new Date(position.openedAt).toISOString();
   const closed = position.closedAt ? new Date(position.closedAt).toISOString() : null;
@@ -29,7 +29,7 @@ export function buildUsdtLiveCampaignData(owner: string, position: UsdtLiveCampa
       ...(fill.action !== 'reduce' ? { entry_price: Number(fill.price) } : { exit_price: Number(fill.price) }), notes: null,
     })),
     comparison: { section: 'instant', runKey: id, sellKey: 'binance-live', sellLabel: '币安实盘', detectors: [],
-      valuedAt: last.at, liveUsdt: position, ...(liveEntryRiskPct != null ? { liveEntryRiskPct } : {}) },
+      valuedAt: last.at, liveUsdt: position, ...(liveEntryRiskPct !== undefined ? { liveEntryRiskPct } : {}) },
   };
   return { campaign, legs: [], tradeRecords: [], pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [],
     legExitPriceCorrections: {}, timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0,
@@ -50,6 +50,6 @@ export function mergeUsdtLiveCampaignRows(rows: QualityCampaignData[]) {
     const live = comparison?.liveUsdt;
     if (!live?.followId) return row;
     const percent = linkedUsdtEntryRiskPct(live, row.campaign.user_id, byId.get(live.followId)?.campaign);
-    return percent == null ? row : { ...row, campaign: { ...row.campaign, comparison: { ...comparison, liveEntryRiskPct: percent } } };
+    return percent === undefined ? row : { ...row, campaign: { ...row.campaign, comparison: { ...comparison, liveEntryRiskPct: percent } } };
   });
 }

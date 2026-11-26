@@ -95,6 +95,11 @@ it('links only the original frozen follow risk and never uses a later management
   const facts = usdtLiveRiskMetrics(linked.campaign)!;
   expect(facts).toMatchObject({ percent: 5, frozen: true });
   expect(facts.loss).toBeCloseTo(100 * Number(buy.price) * 0.05);
+  const linePlan = { ...from, plan: { ...from.plan, payoffRiskVersion: 'selected-l0-dbl5-execution-line-v1' as const } };
+  const managed = { version: 'binance-manual-monitor-v1' as const, armedAt: at, monitor: linePlan };
+  const selected = (pct: number | null) => buildUsdtLiveCampaignData('owner', { ...closed, management: { ...managed, selectedL0Pct: pct } });
+  expect(usdtLiveRiskMetrics(selected(7).campaign)).toMatchObject({ percent: 7, frozen: true });
+  expect(usdtLiveRiskMetrics(selected(null).campaign)).toMatchObject({ percent: null, payoffRatio: null });
   const late = buildUsdtLiveCampaignData('owner', { ...closed, management: {
     version: 'binance-manual-monitor-v1', armedAt: at + 1, monitor: to,
   } });

@@ -1,4 +1,4 @@
-import {LIMITED_STATIC_DRAWDOWN_VETO_VERSION,LIMITED_STATIC_DRAWDOWN_LABEL,isLimitedStaticDrawdownVeto} from './qualityVeto';
+import {isSelectedL0,L0_DBL5,LIMITED_STATIC_DRAWDOWN_VETO_VERSION,LIMITED_STATIC_DRAWDOWN_LABEL,isLimitedStaticDrawdownVeto} from './qualityVeto';
 import {MIRROR_DEADLINE_KIND,MIRROR_DEADLINE_VERSION} from './qualityMirrorDeadline';
 import {MIRROR_LOSS_REVIEW_KIND} from './qualityMirrorLossReview';
 import {CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION,CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION,classifiedImpulsePositionsIdentity,classifiedImpulsePositionLabel} from './qualityClassifiedImpulsePosition';
@@ -171,7 +171,8 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     plan.execution === 'intrabar-1m' ? (periodSnapshots.length || hourlyCda.length ? '用 1 分钟线复原所选周期指标，盘中达标即卖' : '用 1 分钟线复原 5 分钟指标，盘中达标即卖') : '只认 '+(closePeriod??'5 分钟')+'收盘读数');
   const mirror = [...versionTags(mirrorIdentity(plan.mirrorTakeProfit)), ...versionTags(mirrorExecutionIdentity(plan))];
   if (plan.mirrorTakeProfit?.enabled) add('mirror', '镜像平衡减仓', plan.mirrorTakeProfit.mode===DBL5_MIRROR_MODE ? `DBL-5 反推触发价 · 卖 ${plan.mirrorTakeProfit.sellPct}%` : `涨 ${plan.mirrorTakeProfit.gainPct}% 卖 ${plan.mirrorTakeProfit.sellPct}%`, join(mirror), '限价镜像止盈，只卖一次');
-  if (plan.payoffRiskVersion) add('payoff-initial-risk', '盈亏比止盈', plan.payoffRiskVersion==='payoff-stop-dbl5-initial-risk-v3'?'首仓 DBL-5 执行线距离':'沿用首仓限制静态最大回撤', plan.payoffRiskVersion,
+  if (isSelectedL0(plan.payoffRiskVersion)) add('payoff-initial-risk','L0 选择',plan.payoffRiskVersion===L0_DBL5?'DBL-5 线':'限制静态最大回撤',plan.payoffRiskVersion,'首仓风险同时用于盈亏比止盈和结算盈亏比。');
+  else if (plan.payoffRiskVersion) add('payoff-initial-risk', '盈亏比止盈', plan.payoffRiskVersion==='payoff-stop-dbl5-initial-risk-v3'?'首仓 DBL-5 执行线距离':'沿用首仓限制静态最大回撤', plan.payoffRiskVersion,
     plan.payoffRiskVersion==='payoff-stop-dbl5-initial-risk-v3'?'按开仓时已确认且低于买入价的执行线计算，取最小正距离作为 L₀ 比例。':'以首仓限制回撤阈值计算 L₀，分段切换后仍沿用开仓阈值。');
   const vetoes = activeHoldingVetoes(plan.holdingVetoes);
   const lossReviews=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(v=>v.kind===MIRROR_LOSS_REVIEW_KIND);

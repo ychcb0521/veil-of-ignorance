@@ -1,6 +1,7 @@
 import type { TradeCampaign } from '@/types/journal';
 import { computeSettlementPayoffRatio } from '@/lib/campaignB';
-import { initialPayoffRiskThreshold, timedDrawdownPayoffPct } from './qualityStaticDrawdownSell';
+import { isSelectedL0, L0_DRAWDOWN } from './qualityVeto';
+import { initialLimitedDrawdownPct, initialPayoffRiskThreshold, timedDrawdownPayoffPct } from './qualityStaticDrawdownSell';
 import { usdtCampaignAmounts, type UsdtLiveCampaign } from './usdtLiveCampaign';
 
 // The exchange can split one order across fills and allocate only part of a reversal to this campaign.
@@ -67,6 +68,11 @@ export function linkedUsdtEntryRiskPct(live: UsdtLiveCampaign, owner: string, pa
   const comparison = paper.comparison;
   const firstSwitch = comparison.instant?.switches?.[0];
   const plan = firstSwitch ? firstSwitch.from.plan : comparison.monitorPlan;
+  const opening = plan?.router?.structure ?? plan;
+  if (opening && isSelectedL0(opening.payoffRiskVersion)) {
+    if (opening.payoffRiskVersion === L0_DRAWDOWN) return riskPercent(initialLimitedDrawdownPct(opening)) ?? null;
+    return riskPercent(firstSwitch ? firstSwitch.openingSelectedL0Pct : comparison.sellEvidence?.selectedL0Pct) ?? null;
+  }
   return riskPercent(plan ? (timedDrawdownPayoffPct(plan) ?? initialPayoffRiskThreshold(plan)) : comparison.instant?.initialStaticStopPct);
 }
 
@@ -77,11 +83,16 @@ export function usdtLiveRiskMetrics(campaign?: Pick<TradeCampaign, 'comparison'>
   const managed = live.management;
   const firstSwitch = managed?.switches?.[0];
   const entryPlan = managed && managed.armedAt <= live.openedAt ? (firstSwitch ? firstSwitch.from.plan : managed.monitor.plan) : undefined;
-  const frozen = riskPercent(campaign.comparison?.liveEntryRiskPct) ?? (entryPlan && riskPercent(timedDrawdownPayoffPct(entryPlan) ?? initialPayoffRiskThreshold(entryPlan)));
-  const percent = frozen ?? 3;
-  const loss = fills.openingNotional * (percent / 100);
+  const opening = entryPlan?.router?.structure ?? entryPlan;
+  const linked = campaign.comparison?.liveEntryRiskPct;
+  const frozen = linked !== undefined ? linked : opening && isSelectedL0(opening.payoffRiskVersion)
+    ? riskPercent(opening.payoffRiskVersion === L0_DRAWDOWN ? initialLimitedDrawdownPct(opening)
+      : firstSwitch ? firstSwitch.openingSelectedL0Pct : managed?.selectedL0Pct) ?? null
+    : entryPlan && riskPercent(timedDrawdownPayoffPct(entryPlan) ?? initialPayoffRiskThreshold(entryPlan));
+  const percent = frozen === null ? null : riskPercent(frozen) ?? 3;
+  const loss = percent == null ? 0 : fills.openingNotional * (percent / 100);
   const settledNet = live.closedAt != null && live.asset === 'USDT' ? fills.net : null;
   const payoff = computeSettlementPayoffRatio(settledNet, loss);
   return { ...fills, percent, frozen: frozen != null, loss, payoffRatio: payoff, payoffPercent: payoff == null ? null : payoff * 100,
-    stop: fills.entryPrice == null ? undefined : fills.entryPrice * (1 + (live.direction === 'long' ? -1 : 1) * percent / 100) };
+    stop: fills.entryPrice == null || percent == null ? undefined : fills.entryPrice * (1 + (live.direction === 'long' ? -1 : 1) * percent / 100) };
 }

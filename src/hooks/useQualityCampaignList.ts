@@ -19,7 +19,7 @@ function mergeInstantCampaignCards(current: CampaignCardData[], incoming: Campai
     const previousLive = previous?.campaign.comparison?.liveUsdt;
     if (live && previousLive && live.fills.length < previousLive.fills.length) continue;
     const priorRisk = previous?.campaign.comparison?.liveEntryRiskPct;
-    if (live?.followId && live.followId === previousLive?.followId && priorRisk != null && row.campaign.comparison?.liveEntryRiskPct == null) {
+    if (live?.followId && live.followId === previousLive?.followId && priorRisk !== undefined && row.campaign.comparison?.liveEntryRiskPct === undefined) {
       const enriched = buildUsdtLiveCampaignData(row.campaign.user_id, live, priorRisk);
       byId.set(row.campaign.id, { ...row, ...buildCampaignCardData(enriched) });
     } else {
