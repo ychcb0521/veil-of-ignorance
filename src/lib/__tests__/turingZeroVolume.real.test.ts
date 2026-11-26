@@ -43,7 +43,7 @@ it.skipIf(!process.env.TURING_REPLAY_FIXTURE)('preserves the v2 error, waits in 
   expect(record.status).toBe('error'); expect(record.detail).not.toContain('盘中指标存在缺失读数');
   expect(archive.markets['TURING 50'][3538]).toBeNull();
   expect(record.cursor).toBe(source.timeMs + 3538 * 60000);
-  expect(record.detail).toMatch(/缺口|缺根|不连续|历史不足/);
+  expect(record.detail).toContain('图灵杯离线行情缺口：TURING:TURING 50 在 2026-03-31 23:58:00 缺少 1 分钟 K 线');
   expect(preEntrySignal(record)).toBeNull();
   const lateStart = source.timeMs + 991 * 60000;
   const recoveredPlan = createTuringQualityPlan(makeQualitySellPlan('cda:CDA', '<', 1000, BUILTIN_FEATURES), BUILTIN_FEATURES, 'recovered');

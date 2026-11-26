@@ -69,3 +69,24 @@ it('keeps distinct screening outcomes in a merged cabin row and shows shared evi
   expect(results.map(({record})=>record.id)).toEqual(['record','later-record']);
   expect(screeningCell(results)).toMatchObject({status:'已入选 / 未入选',at:'2026-11-08 08:01:00'});
 });
+
+it('identifies proven Turing data issues per plan without rewriting archived results', () => {
+ const l=library(),round=l.rounds[0],original=l.records[0];
+ const sample={...original.sample,source:{...original.sample.source,symbol:'TURING:TURING 5'}};
+ const regular={...original,sample,status:'error' as const,matchedAt:undefined,detail:'当前条件依赖 BTC，但图灵杯行情没有 BTCUSDT。'};
+ const copy={...round.plans![0],id:'offline',label:'图灵杯副本'};
+ round.plans!.push(copy);
+ const offline={...regular,id:'copy',planId:copy.id,status:'unmatched' as const,detail:'本轮无通过所选步骤的候选'};
+ const before=structuredClone({regular,offline,round});
+ const cell=screeningCell([{record:regular,round},{record:offline,round}]);
+ expect(cell).toMatchObject({status:'缺 BTC 行情 / 未入选',error:false});
+ expect(cell.detail).toContain('冻结方案；缺 BTC 行情；当前条件依赖 BTC');
+ expect(cell.detail).toContain('图灵杯副本；未入选；本轮无通过所选步骤的候选');
+ expect({regular,offline,round}).toEqual(before);
+ expect(screeningCell([{record:{...regular,detail:'图灵杯历史不足：现有行情始于信号时刻'},round}]))
+  .toMatchObject({status:'历史不足',error:false});
+ expect(screeningCell([{record:{...regular,detail:'图灵杯离线行情缺口：TURING:TURING 5 在 2026-03-30 04:43:00 缺少 1 分钟 K 线'},round}]))
+  .toMatchObject({status:'行情缺口',error:true});
+ expect(screeningCell([{record:{...regular,detail:'最早K线晚于所需起点：当时未上市 / 历史不足500根'},round}]))
+  .toMatchObject({status:'缺数据',error:true});
+});

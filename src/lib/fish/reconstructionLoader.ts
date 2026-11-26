@@ -7,9 +7,8 @@ import { fishRetentionReason } from './retention';
 import { FishError, validateFishBars } from './shared';
 import { fetchResearchKlines } from '@/lib/deepRsa/marketData';
 import { readTuringCupTickSize } from '@/lib/turingCupMarketData';
-import { isTuringCupSymbol, turingCupSymbol } from '@/lib/turingCupSymbol';
-import { loadTuringReplayArchive } from '@/lib/turingCupReplayArchive';
-import { turingCupTicker } from '@/lib/turingCupSymbol';
+import { isTuringCupSymbol, turingCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
+import { loadTuringReplayArchive, TURING_REPLAY_MINUTE_MS } from '@/lib/turingCupReplayArchive';
 import { formatUTC8 } from '@/lib/timeFormat';
 
 const loadTuringWindow: FishReconstructionLoader = async (row, from, cut, plan, signal) => {
@@ -21,14 +20,28 @@ const loadTuringWindow: FishReconstructionLoader = async (row, from, cut, plan, 
       throw new FishError('当前条件依赖 BTC，但图灵杯行情没有 BTCUSDT。请另选“无 BTC”版本；不会替换原版公式。', 'readings');
     }
     const first = series.findIndex(bar => bar !== null);
-    const available = archive.anchorMs + first * 60_000;
+    const available = archive.anchorMs + first * TURING_REPLAY_MINUTE_MS;
     if (first >= 0 && from < available) throw new FishError(`图灵杯历史不足：此条件需要从 ${formatUTC8(from)} 开始的 K 线，现有行情始于 ${formatUTC8(available)}。原方案不能用不存在的历史预热；请补充更长行情，或在条件设置中另建“图灵杯专用版”。动态筛选仅在其自身条件历史足够时可用。`, 'history');
   }
   const interval = intervalOf(plan.def);
   const count = (cut - from) / plan.step;
   const read = (symbol: string) => fetchResearchKlines(symbol, from, cut, undefined, signal, interval, true);
   const bars = await read(row.symbol);
-  validateFishBars(bars, cut, count, plan.step);
+  try {
+    validateFishBars(bars, cut, count, plan.step);
+  } catch (error) {
+    if (archive && series && error instanceof FishError) {
+      const startSlot = Math.max(0, (from - archive.anchorMs) / TURING_REPLAY_MINUTE_MS);
+      const endSlot = (cut - archive.anchorMs) / TURING_REPLAY_MINUTE_MS;
+      const missing = series.indexOf(null, startSlot);
+      if (missing >= 0 && missing < endSlot && series.some((minute, slot) => slot > missing && minute !== null)) {
+        const at = formatUTC8(archive.anchorMs + missing * TURING_REPLAY_MINUTE_MS);
+        // Preserve each engine's existing retry and lookahead behavior.
+        throw new FishError(`图灵杯离线行情缺口：${row.symbol} 在 ${at} 缺少 1 分钟 K 线`, error.kind);
+      }
+    }
+    throw error;
+  }
   if (bars.some(bar => (plan.compiled.usesAmounts && !Number.isFinite(bar.quoteVolume)) ||
       (plan.usesTaker && !Number.isFinite(bar.takerBuyQuoteVolume)))) {
     throw new FishError('图灵杯离线数据缺少本指标所需的成交额或主动买入额', 'readings');
