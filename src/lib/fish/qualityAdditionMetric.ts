@@ -1,5 +1,5 @@
 import { usesHourlyCda } from '@/lib/cdaPeriods';
-import { compileFeatureFormula, definitionKey, intervalOf, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { ATR_PRICE_PCT_DEF, compileFeatureFormula, definitionKey, intervalOf, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { RESEARCH_INTERVALS } from '@/lib/deepRsa/marketData';
 import type { ResearchInterval } from '@/lib/deepRsa/marketData';
 import { shortFishHash, type FishSnapshot } from './algorithm';
@@ -13,7 +13,13 @@ const BASE_FIELD = 'addition-base=';
 const BASE_LABEL_FIELD = 'addition-label=';
 const BASE_INTERVAL_FIELD = 'base-interval=';
 type TimeField = 'window' | 'avgh' | 'hl';
-export type AdditionMetricTime = Partial<Record<TimeField, string>> & { interval?: ResearchInterval };
+export type AdditionMetricTime = Partial<Record<TimeField, string>> & { interval?: ResearchInterval; atrBars?: string };
+const atrPriceCall = /^(\s*ATRP\s*=\s*atr\(\s*H\s*,\s*L\s*,\s*C\s*,\s*)(\d+)(?=\s*\))/m;
+
+export function atrPricePeriod(def: DeepDigFeatureDef): number | undefined {
+  const match = def.id === ATR_PRICE_PCT_DEF.id && atrPriceCall.exec(def.formula);
+  return match ? Number(match[2]) : undefined;
+}
 type Expression = CompiledFeature['program']['statements'][number]['expr'];
 
 function timedDefinitionFields(snapshot: FishSnapshot): string[] {
@@ -103,7 +109,7 @@ export function withMetricSnapshotTime<T extends Pick<QualityBuyFilter, 'label' 
 export function withAdditionMetricTime(base: QualityBuyFilter, time: AdditionMetricTime = {}): QualityBuyFilter {
   const snapshot = base.snapshot;
   const originalTime = additionMetricTime(snapshot);
-  if ((['interval','window','avgh','hl'] as const).every(field => time[field] === originalTime[field])) return base;
+  if ((['interval','window','avgh','hl','atrBars'] as const).every(field => time[field] === originalTime[field])) return base;
   const key = JSON.parse(snapshot.definitionKey!) as unknown[];
   // The original key lets future edits start from the same frozen account formula.
   const original = key.slice(4).find((item): item is string => typeof item === 'string' && item.startsWith(BASE_FIELD));
@@ -125,12 +131,19 @@ export function withAdditionMetricTime(base: QualityBuyFilter, time: AdditionMet
     if (!Number.isFinite(hours) || hours <= 0) throw Error(`${labels[field]}须为大于 0 的有限小时数`);
     return [[field, hours] as const];
   });
-  const configured = periodChanged || selected.length > 0;
+  const originalBars = atrPricePeriod(definition);
+  const atrBars = originalBars !== undefined && time.atrBars?.trim() ? Number(time.atrBars) : originalBars;
+  const atrChanged = atrBars !== undefined && atrBars !== originalBars;
+  if (atrChanged) {
+    if (!Number.isSafeInteger(atrBars) || atrBars < 1) throw Error('ATR 周期须为正整数根 K 线');
+    parts[0] = parts[0].replace(atrPriceCall, (_, prefix: string) => prefix + atrBars);
+  }
+  const configured = periodChanged || atrChanged || selected.length > 0;
   if (configured) {
     const statements = compileFeatureFormula(parts[0]).program.statements;
     const names = new Set(statements.flatMap(s => s.name ? [s.name] : []));
     const metric = base.metric === '结果' ? statements.at(-1)?.name ?? base.metric : base.metric;
-    if (selected.length && (base.metric === '结果' || averageSeries(metric,names) && selected.some(([field])=>field!=='window'))) {
+    if (atrChanged || selected.length && (base.metric === '结果' || averageSeries(metric,names) && selected.some(([field])=>field!=='window'))) {
       parts.push(INDICATOR_FORMULA_TIME_VERSION);
     }
     for (const [field, hours] of selected) {
@@ -151,6 +164,7 @@ export function withAdditionMetricTime(base: QualityBuyFilter, time: AdditionMet
       }
     }
     const timeRecord: AdditionMetricTime = Object.fromEntries(selected.map(([field,hours]) => [field, String(hours)]));
+    if (atrChanged) timeRecord.atrBars = String(atrBars);
     if (periodChanged) {
       const index = parts.findIndex((value, i) => i >= 4 && typeof value === 'string' && /^\d+[mhdwM]$/.test(value));
       if (index !== -1) parts.splice(index, 1);
@@ -161,7 +175,7 @@ export function withAdditionMetricTime(base: QualityBuyFilter, time: AdditionMet
     parts.push(ADDITION_INDICATOR_TIME_VERSION, TIME_FIELD + JSON.stringify(timeRecord), BASE_FIELD + baseKey, BASE_LABEL_FIELD + baseLabel);
   }
   const definitionKey = configured ? JSON.stringify(parts) : baseKey;
-  const label = [baseLabel, ...(periodChanged ? [interval] : []), ...selected.map(([field,hours]) => `${labels[field]} ${hours} 小时`)].join(' · ');
+  const label = [baseLabel, ...(periodChanged ? [interval] : []), ...(atrChanged ? [`ATR ${atrBars} 根`] : []), ...selected.map(([field,hours]) => `${labels[field]} ${hours} 小时`)].join(' · ');
   const next = { ...snapshot, definitionKey, ...(periodChanged || originalTime.interval ? { interval } : {}) };
   if (configured) qualityMetricPlan(next, base.metric);
   const choice = snapshot.featureId + ':' + base.metric;

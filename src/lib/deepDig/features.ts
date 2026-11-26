@@ -1110,7 +1110,15 @@ export const BTC_FREE_FEATURES: readonly DeepDigFeatureDef[] = BTC_ADJUSTED_FEAT
     .join('\n'),
 }));
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, CDA_HOURLY_DEF, ...DBL5_HOURLY_FEATURES, DBL5_GUARD_PLUS_DEF, IMPULSE_1115_CLASSIFICATION_DEF, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES];
+export const ATR_PRICE_PCT_DEF: DeepDigFeatureDef = {
+  id: 'atr-price-pct-v1', name: '真实波动率占现价（%）', short: '真实波动率占现价（%）',
+  definition: '所选 K 线周期的 Wilder ATR 除以计算时点的价格，乘以 100。默认取 14 根 K 线。',
+  chartCore: 'ATRP', formula: 'ATRP = atr(H, L, C, 14) / C * 100',
+  interval: '5m', scale: 1, unit: '%', source: 'campaigns', groupVars: 2,
+  positive: DEFAULT_POSITIVE, control: DEFAULT_CONTROL, builtin: true,
+};
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, CDA_HOURLY_DEF, ...DBL5_HOURLY_FEATURES, DBL5_GUARD_PLUS_DEF, IMPULSE_1115_CLASSIFICATION_DEF, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES, ATR_PRICE_PCT_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {

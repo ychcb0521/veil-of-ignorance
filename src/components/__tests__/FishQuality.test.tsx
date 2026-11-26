@@ -565,6 +565,19 @@ it('hands the evaluator the on-screen rows first and updates that order after sc
 });
 
 // 【用户要求】2026-10-26 比较卖出时的买入过滤（条件由用户设）
+it('saves an ATR percentage from the static filter settings', () => {
+  const s = state();
+  render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button', { name: '买入过滤条件' }));
+  fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
+  fireEvent.change(screen.getByLabelText('买入条件 1 指标'), { target: { value: 'atr-price-pct-v1:ATRP' } });
+  fireEvent.change(screen.getByLabelText('买入条件 1 K 线周期'), { target: { value: '15m' } });
+  fireEvent.change(screen.getByLabelText('买入条件 1 ATR 周期（根）'), { target: { value: '7' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+  const [filter] = vi.mocked(s.setFilters).mock.calls[0][0];
+  expect(filter.snapshot).toMatchObject({ interval: '15m', unit: '%', statistic: 'ATRP' });
+  expect(JSON.parse(filter.snapshot.definitionKey!)[0]).toContain('atr(H, L, C, 7) / C * 100');
+});
 it('saves standalone conditions and shows their judgments without masking selling results', async () => {
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
   const { qualityFilterReadingKey } = await import('@/lib/fish/quality');

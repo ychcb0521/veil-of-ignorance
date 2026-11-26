@@ -1,7 +1,7 @@
 import { CDA_HOURLY_TIME_SCALE, usesHourlyCda } from '@/lib/cdaPeriods';
 import { useId, useMemo } from 'react';
 import { AVG_HOURS_PRESETS, HALF_LIFE_PRESETS, avgHoursOf, halfLifeOf, intervalOf, type DeepDigFeatureDef } from '@/lib/deepDig/features';
-import { additionMetricBaseDefinition, additionMetricTime, additionMetricTimeFields, metricIntervalOptions, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
+import { additionMetricBaseDefinition, additionMetricTime, additionMetricTimeFields, atrPricePeriod, metricIntervalOptions, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
 
 const field = 'h-7 min-w-0 rounded border border-border/60 bg-background px-2 text-foreground';
@@ -30,6 +30,7 @@ export function FishMetricTimeFields({ label, metric, definition, snapshot, time
   const { base, periods, hours } = options;
   const time = draftTime ?? (snapshot && additionMetricTime(snapshot));
   const interval = time?.interval ?? intervalOf(base);
+  const atrBars = atrPricePeriod(base);
   const hourly = usesHourlyCda(base);
   const timeScale = hourly ? CDA_HOURLY_TIME_SCALE : 1;
   return <div className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground ${className}`}>
@@ -48,6 +49,18 @@ export function FishMetricTimeFields({ label, metric, definition, snapshot, time
         {periods.map(period => <option key={period} value={period}>{period}</option>)}
       </select>
     </label>
+    {atrBars !== undefined && <label className="inline-flex items-center gap-1">
+      ATR 周期
+      <input aria-label={`${label} ATR 周期（根）`} type="number" min="1" step="1" disabled={disabled}
+        value={time?.atrBars ?? ''} placeholder={String(atrBars)} title={`留空使用原公式的 ${atrBars} 根 K 线`}
+        className={field + ' w-24 font-mono tabular-nums'} onChange={event => {
+          const updated = { ...time };
+          if (event.target.value) updated.atrBars = event.target.value;
+          else delete updated.atrBars;
+          onChange(updated);
+        }}/>
+      根
+    </label>}
     {hours.map(key => {
       const name = key === 'window' ? '均值窗口' : key === 'avgh' ? '公式回看' : '半衰期';
       const value = time?.[key] ?? '';

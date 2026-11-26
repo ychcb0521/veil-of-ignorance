@@ -75,6 +75,27 @@ it('keeps the selected period for both sell stages after account definition sync
  expect(screen.getByLabelText('卖出算法 1 K 线周期')).toHaveValue('15m');
  expect(screen.getByLabelText('卖出算法 1 后段 K 线周期')).toHaveValue('30m');
 });
+it('saves and reopens independent ATR lookbacks for both holding stages', () => {
+  const original = initial().find(plan => plan.combo)!;
+  const saved = vi.fn();
+  const editor = (plan: QualityGroup) => <FishQualitySellPlansEditor plans={[plan]} ready onSave={saved}/>;
+  const view = render(editor(original));
+  const selectAtr = (label: string) => fireEvent.change(screen.getByLabelText(label), { target: { value: 'atr-price-pct-v1' } });
+  selectAtr('卖出算法 1 指标 特征值');
+  selectAtr('卖出算法 1 后段指标 特征值');
+  const bars = (stage: string) => screen.getByLabelText(stage + ' ATR 周期（根）');
+  expect(bars('卖出算法 1')).toHaveAttribute('placeholder', '14');
+  fireEvent.change(bars('卖出算法 1'), { target: { value: '7' } });
+  fireEvent.change(bars('卖出算法 1 后段'), { target: { value: '21' } });
+  fireEvent.change(screen.getByLabelText('卖出算法 1 后段 K 线周期'), { target: { value: '15m' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存卖出算法' }));
+  const [plan]: QualityGroup[] = saved.mock.calls[0][0];
+  view.unmount();
+  render(editor(plan));
+  expect(bars('卖出算法 1')).toHaveValue(7);
+  expect(bars('卖出算法 1 后段')).toHaveValue(21);
+  expect(screen.getByLabelText('卖出算法 1 后段 K 线周期')).toHaveValue('15m');
+});
 it('preserves a newly synchronized plan when an older open form saves its own edits',()=>{
  const original=initial()[0],remote={...structuredClone(original),id:'remote-attack',label:'另一设备的进攻型'},save=vi.fn();
  const view=render(<FishQualitySellPlansEditor plans={[original]} ready onSave={save}/>);

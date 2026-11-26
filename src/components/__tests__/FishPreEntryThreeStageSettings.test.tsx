@@ -143,6 +143,23 @@ it('offers save-as-template for the already saved current screening scheme',()=>
  const f=singleFixture();render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);fireEvent.click(screen.getByRole('button',{name:'把当前筛选方案存为模板'}));fireEvent.change(screen.getByLabelText('模板名称'),{target:{value:'我的三阶模板'}});fireEvent.click(screen.getByRole('button',{name:'保存模板'}));expect(f.savePlanTemplate).toHaveBeenCalledWith(f.current.id,'我的三阶模板');expect(f.configure).not.toHaveBeenCalled();
 });
 
+it('saves an ATR percentage from a dynamic screening condition', () => {
+  const f = singleFixture(), p = f.current;
+  p.preEntryThreeStage!.required = [{ id: 'required', label: p.label, metric: p.metric,
+    snapshot: p.snapshot, enabled: true, direction: '>', threshold: 1, timing: 'intrabar' }];
+  p.frozenVersions = freezeQualityPlan(p).frozenVersions;
+  const before = structuredClone(p);
+  render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
+  fireEvent.change(screen.getByLabelText('必要条件 1 指标'), { target: { value: 'atr-price-pct-v1:ATRP' } });
+  fireEvent.change(screen.getByLabelText('必要条件 1 K 线周期'), { target: { value: '1h' } });
+  fireEvent.change(screen.getByLabelText('必要条件 1 ATR 周期（根）'), { target: { value: '21' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存三阶方案' }));
+  const saved = f.configure.mock.calls[0][0].find((plan: typeof p) => plan.id === p.id);
+  const condition = saved.preEntryThreeStage.required[0];
+  expect(condition.snapshot).toMatchObject({ interval: '1h', statistic: 'ATRP' });
+  expect(JSON.parse(condition.snapshot.definitionKey)[0]).toContain('atr(H, L, C, 21) / C * 100');
+  expect(p).toEqual(before);
+});
 it('keeps the saved screening editor mounted when a numeric threshold is cleared before replacement',()=>{
  vi.spyOn(console,'error').mockImplementation(()=>{});const f=singleFixture(),p=f.current;p.preEntryThreeStage!.required=[{id:'required',label:'必要数值',metric:p.metric,snapshot:p.snapshot,enabled:true,direction:'>',threshold:1,timing:'intrabar'}];p.frozenVersions=freezeQualityPlan(p).frozenVersions;const before=structuredClone(f.state.preEntry!.library);
  render(<ModuleErrorBoundary label="鱼质量" backgroundTasks><TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider></ModuleErrorBoundary>);

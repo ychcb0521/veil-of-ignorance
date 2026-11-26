@@ -8,7 +8,7 @@ import { guardDistanceConfig } from './qualityAdditionVeto';
 import { guardDistanceDefinition, guardDistanceSignalChoices } from './qualityGuardDistance';
 import {BOX_STOP_KIND,BOX_BREAK_CHOICE,BOX_SECOND_BREAK_CHOICE,BOX_SECOND_EXIT_CHOICE,boxStopChoice,freezeBoxStop,validateBoxStop,boxStopIdentity,boxStopLabel,type BoxStopRule} from './qualityBoxStop';
 /** Filter choices use the same account definitions as charts and Deep dig. */
-import { compileFeatureFormula, definitionKey, intervalOf, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { ATR_PRICE_PCT_DEF, compileFeatureFormula, definitionKey, intervalOf, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { accountFeatureDefs } from '@/lib/featureSource';
 import { researchIndicatorForFeature, researchChartFormula } from '@/lib/researchIndicators';
 import { shortFishHash } from './algorithm';
@@ -58,7 +58,7 @@ export function makeQualityBuyFilter(choiceKey: string, direction: '<' | '>', th
     snapshot:metricSnapshot(choice,def,threshold,direction) };
 }
 function metricSnapshot(choice: QualityFilterChoice, def: DeepDigFeatureDef, threshold: number, direction: '<' | '>'): QualityBuyFilter['snapshot'] {
-  return {featureId:def.id,featureShort:def.short,featureName:def.name,definitionKey:definitionKey(def),statistic:choice.metric,interval:intervalOf(def),scale:1,unit:'',threshold,direction,cutoffMs:0,average:0,cbi2:0,startAverage:0,previousAverage:0};
+  return {featureId:def.id,featureShort:def.short,featureName:def.name,definitionKey:definitionKey(def),statistic:choice.metric,interval:intervalOf(def),scale:1,unit:def.id === ATR_PRICE_PCT_DEF.id ? '%' : '',threshold,direction,cutoffMs:0,average:0,cbi2:0,startAverage:0,previousAverage:0};
 }
 export function makeQualitySignalMetrics(choiceKeys: readonly string[], definitions: readonly DeepDigFeatureDef[]): QualitySignalMetric[] {
   if (!choiceKeys.length) return [];
