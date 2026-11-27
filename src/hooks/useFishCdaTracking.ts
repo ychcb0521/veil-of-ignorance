@@ -8,7 +8,7 @@ import { fishEmailQuotaRetryAt, fishNotifyMissing } from '@/lib/fish/notify';
 import { isAutomaticPreEntryRound, type PreEntryLibrary, type PreEntryRecord, type PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { readAutomaticPreEntryCheckpoint, readAutomaticPreEntrySales } from '@/lib/fish/preEntryPersistence';
 import { freezeScreenedCda, SCREENED_CDA_STEP, SCREENED_CDA_GUARD_RULE, SCREENED_PRICE_EXIT_RULE, validScreenedSale, type ScreenedPriceProgress, type ScreenedCdaGuardProgress, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
-import { readFishPreferences, readFishPreferenceEntries, writeFishPreference, writeFishPreferences } from '@/lib/fish/fishPreferencesDb';
+import { readFishPreferences, readFishPreferenceEntries, updateFishPreference, writeFishPreference, writeFishPreferences } from '@/lib/fish/fishPreferencesDb';
 import { markPageInstantPosition, readPageInstantCampaignCandles, readPageInstantMonitor, readPageScreenedCda } from './useFish';
 import { screenedFishMailLock } from './useFishScreeningAutomation';
 import { instantManualCheckpointKey, instantMonitorCheckpointKey, SCREENED_POSITION_KEY } from '@/lib/fish/instantPositionProgress';
@@ -45,6 +45,12 @@ interface Checkpoint {
   nextMailAt?: number;
   failures?: number;
 }
+function awaitingSimulatedExit(checkpoint?: Checkpoint) {
+  const result = checkpoint?.monitorResult;
+  return result?.status === 'open' && !!checkpoint?.alert && result.pendingExit?.at === checkpoint.alert.at
+    && instantMonitorExitDue(result);
+}
+
 export interface FishCdaTracking {
   enabled: boolean;
   active: number;
@@ -123,7 +129,14 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         ? [{ record, round }] : [];
     });
   }, [library?.records, library?.rounds, owner, ready]);
-  const entries = useMemo(() => autoPositions ? admitted : settings ? admitted.filter(({record}) => record.updatedAt >= settings.enabledAt) : [], [admitted, autoPositions, settings]);
+  const entries = useMemo(() => {
+    if (!autoPositions) return settings ? admitted.filter(({record}) => record.updatedAt >= settings.enabledAt) : [];
+    if (!owner || savedSales?.owner !== owner) return admitted;
+    const present = new Set(admitted.map(({ record }) => record.id));
+    const pending = savedSales.admitted.filter(({ record }) => !present.has(record.id)
+      && awaitingSimulatedExit(checkpoints.current.get(jobPrefix + encodeURIComponent(record.id))));
+    return pending.length ? [...admitted, ...pending] : admitted;
+  }, [admitted, autoPositions, settings, owner, savedSales, jobPrefix]);
   const current = useRef({ entries, notify });
   current.current = { entries, notify };
   const wake = useRef<() => void>();
@@ -199,7 +212,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       if (!active || !sales.size) return;
       for (const [suffix, saved] of sales) {
         const key = jobPrefix + suffix;
-        if (!checkpoints.current.get(key)?.alert) checkpoints.current.set(key, saved);
+        if (!checkpoints.current.get(key)?.alert || awaitingSimulatedExit(checkpoints.current.get(key)) && saved.monitorResult?.status === 'closed') checkpoints.current.set(key, saved);
       }
       const pendingMail = [...sales.values()].some(saved => !saved.delivered);
       setSavedSales(previous => ({ owner, admitted: previous?.owner === owner ? previous.admitted : [], pendingMail }));
@@ -225,7 +238,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       keys.forEach((key, i) => {
         const saved = rows[i];
         const existing = checkpoints.current.get(key);
-        if (saved && (!existing || !existing.alert && (!!saved.alert || !!saved.manual || saved.after >= existing.after))) checkpoints.current.set(key, saved);
+        if (saved && (!existing || awaitingSimulatedExit(existing) && saved.monitorResult?.status === 'closed' || !existing.alert && (!!saved.alert || !!saved.manual || saved.after >= existing.after))) checkpoints.current.set(key, saved);
       });
       setRevision(value => value + 1);
       wake.current?.();
@@ -267,7 +280,18 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     const save = async (record: PreEntryRecord, value: Checkpoint) => {
       const key = keyOf(record);
       const switched = !!value.monitorResult?.instantMonitorSwitches;
-      await writeFishPreference(switched ? instantMonitorCheckpointKey(key) : value.manual ? instantManualCheckpointKey(key) : key, value);
+      const storageKey = switched ? instantMonitorCheckpointKey(key) : value.manual ? instantManualCheckpointKey(key) : key;
+      if (value.alert && value.monitorResult) {
+        // Mail delivery and simulated settlement use separate locks. Keep both receipts.
+        value = await updateFishPreference<Checkpoint>(storageKey, stored => {
+          if (!stored?.alert || stored.alert.at !== value.alert!.at) return value;
+          const result = awaitingSimulatedExit(value) && stored.monitorResult?.status === 'closed' ? stored : value;
+          return { ...value, monitorResult: result.monitorResult, alert: result.alert, after: result.after,
+            sent: [...new Set([...(stored.sent ?? []), ...(value.sent ?? [])])], delivered: stored.delivered || value.delivered };
+        });
+      } else {
+        await writeFishPreference(storageKey, value);
+      }
       checkpoints.current.set(key, value);
       // Keep receipts visible to a concurrently open 630 page using a legacy watch.
       if (!value.manual && !switched && readLocal<Settings>(configKey)) {
@@ -321,7 +345,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       ? checkpoint?.after ?? start(record) : start(record);
     const eligible = (entry: ScreenedFishAdmission, target: number) => {
       const checkpoint = read(entry.record);
-      if (checkpoint?.alert || hasManualIntent(entry.record.id) || (retry.get(entry.record.id) ?? 0) > Date.now()) return false;
+      if ((checkpoint?.alert && !awaitingSimulatedExit(checkpoint)) || hasManualIntent(entry.record.id) || (retry.get(entry.record.id) ?? 0) > Date.now()) return false;
       if (checkpoint?.manual) return !!checkpoint.manual.orders && checkpoint.manual.through < target;
       if (entry.round.instantMonitor) {
         const preview = checkpoint?.monitorResult?.openingAdditionPreview;
@@ -342,9 +366,11 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     };
     const saveTemplate = async ({ record, round }: ScreenedFishAdmission, result: QualityResult, through: number) => {
       if (hasManualIntent(record.id)) return;
-      const previous = read(record)?.monitorResult;
-      const alert = instantMonitorExitDue(result) ? { ...instantMonitorSale(result), observedAt: Date.now() } : undefined;
-      await save(record, { after: through, monitorResult: result, alert });
+      const prior = read(record);
+      const previous = prior?.monitorResult;
+      if (awaitingSimulatedExit(prior) && result.status !== 'closed') return;
+      const alert = instantMonitorExitDue(result) ? { ...instantMonitorSale(result), observedAt: prior?.alert?.observedAt ?? Date.now() } : undefined;
+      await save(record, { ...prior, after: through, monitorResult: result, alert });
       changes.current?.postMessage('alert');
       if (alert) {
         const input = instantCampaignInput(record, round, alert, result);
@@ -430,8 +456,13 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       const now = Date.now();
       const templateTarget = Math.floor(now / step) * step;
       const target = Math.floor((now - CLOSE_GRACE_MS) / step) * step;
-      const targetFor = (entry: ScreenedFishAdmission) =>
-        autoPositions && entry.round.instantMonitor && !read(entry.record)?.manual ? templateTarget : target;
+      const targetFor = (entry: ScreenedFishAdmission) => {
+        const checkpoint = read(entry.record);
+        if (!autoPositions || !entry.round.instantMonitor || checkpoint?.manual) return target;
+        // A restored exit only needs the minute containing its scheduled opening fill.
+        return awaitingSimulatedExit(checkpoint)
+          ? Math.min(templateTarget, checkpoint!.alert!.at + 60_000) : templateTarget;
+      };
       const due = current.current.entries.filter(entry => eligible(entry, targetFor(entry)));
       if (!due.length) return;
       scanning = true;
@@ -731,7 +762,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     for (const { record, round } of entries) {
       const key = jobPrefix + encodeURIComponent(record.id);
       const checkpoint = checkpoints.current.get(key) ?? readLocal<Checkpoint>(key);
-      if (!checkpoint?.alert) {
+      if (!checkpoint?.alert || awaitingSimulatedExit(checkpoint)) {
         active++;
         const source = record.sample.source;
         if (round.instantMonitor && checkpoint?.monitorResult?.status === 'open' && !checkpoint.manual
@@ -739,7 +770,8 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
           streamSymbols.add(source.symbol);
         }
         if (!checkpoint?.manual || checkpoint.manual.orders) watching = true;
-      } else if (!checkpoint.delivered) awaitingMail++;
+      }
+      if (checkpoint?.alert && !checkpoint.delivered) awaitingMail++;
     }
     return { active, awaitingMail, watching, streamSymbols: [...streamSymbols].sort().join(',') };
   }, [entries, jobPrefix, revision]);

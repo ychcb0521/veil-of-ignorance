@@ -20,6 +20,9 @@ vi.mock('@/lib/fish/fishPreferencesDb', () => ({
   readFishPreferences: async (keys: string[]) => keys.map(key => preferences.get(key)),
   readFishPreferenceEntries: async (prefix: string, filter = (_: unknown) => true) =>
     [...preferences].filter(([key, value]) => key.startsWith(prefix) && filter(value)).map(([key, value]) => [key.slice(prefix.length), value]),
+  updateFishPreference: async (key: string, merge: (previous: unknown) => unknown) => {
+    const next = merge(preferences.get(key)); preferences.set(key, structuredClone(next)); return next;
+  },
   writeFishPreference: async (key: string, value: unknown) => { preferences.set(key, structuredClone(value)); },
   writeFishPreferences: async (entries: [string, unknown][]) => {
     for (const [key, value] of entries) preferences.set(key, structuredClone(value));
@@ -77,6 +80,43 @@ it('stores the switch for one screened fish, reads it after reload, and only eva
     if (originalLocks) Object.defineProperty(navigator, 'locks', originalLocks);
     else Reflect.deleteProperty(navigator, 'locks');
   }
+});
+
+it('settles a restored clock exit at the minute opening price and keeps the original notification receipt', async () => {
+  const minute = 60_000, deadline = Date.UTC(2026, 10, 27, 10, 5), start = deadline - 60 * minute;
+  vi.useFakeTimers({ now: deadline });
+  const monitor = { version: INSTANT_TEMPLATE_MONITOR, templateId: 'clock', name: 'clock',
+    plan: freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 3, [])) };
+  const sample = { id: 'Y', source: { id: 'Y', symbol: 'YBUSDT', timeMs: start, timeLabel: '', fallbackZone: '' },
+    basis: 'signal' as const, groups: [], enteredAt: start, importedAt: start };
+  const record: PreEntryRecord = { id: 'y-clock', roundId: 'round', matchedAt: start, updatedAt: start, status: 'matched',
+    startTime: start, cursor: start, readings: [], sample };
+  const round: PreEntryRound = { id: record.roundId, state: 'complete', automatic: true, instantMonitor: monitor,
+    startedAt: start, updatedAt: start, hours: 1, filters: [] };
+  const pending: QualityResult = { key: sample.id, sampleId: sample.id, groupId: monitor.plan.id, status: 'open',
+    entryTime: start, entryPrice: 0.0601, endTime: deadline, endPrice: 0.05947, evaluatedAt: deadline,
+    pendingExit: { at: deadline, reading: -1.13, atOpen: true, cause: { id: 'loss', label: 'loss', kind: 'mirror-loss-review',
+      direction: '>=', threshold: 1, mirrorDeadlineVersion: 'holding-mirror-pnl-threshold-v6' } } };
+  const key = SCREENED_POSITION_KEY + 'clock:' + record.id;
+  preferences.set(key, { after: deadline, monitorResult: pending, delivered: true, sent: ['a@example.test'],
+    alert: { at: deadline, closePrice: pending.endPrice, observedAt: deadline + 27,
+      evidence: { version: INSTANT_TEMPLATE_MONITOR, reason: 'template', detail: 'pending' } } });
+  vi.mocked(readPageInstantMonitor).mockResolvedValue({ ...pending, status: 'closed', pendingExit: undefined, endPrice: 0.05943, pnl: -0.61 });
+  const library: PreEntryLibrary = { version: 1, records: [record], rounds: [round] };
+  const notify = { config: { enabled: false, emails: [] } } as never;
+  const view = renderHook(() => useFishCdaTracking('clock', library, true, notify, true));
+  try {
+    await act(async () => {});
+    expect(saveInstantCampaignInput).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(minute + 2000));
+    expect(saveInstantCampaignInput).toHaveBeenCalledTimes(1);
+    expect(saveInstantCampaignInput).toHaveBeenCalledWith('clock', expect.objectContaining({
+      sell: expect.objectContaining({ at: deadline, observedAt: deadline + 27, closePrice: 0.05943 }),
+      monitorResult: expect.objectContaining({ status: 'closed' }) }));
+    expect(preferences.get(key)).toMatchObject({ delivered: true, sent: ['a@example.test'] });
+    await act(() => vi.advanceTimersByTimeAsync(minute));
+    expect(readPageInstantMonitor).toHaveBeenCalledTimes(1);
+  } finally { view.unmount(); }
 });
 
 it('starts all due template batches on the minute boundary without waiting for the polling interval', async () => {
