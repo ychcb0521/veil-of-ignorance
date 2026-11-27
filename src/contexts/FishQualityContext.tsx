@@ -9,6 +9,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { useFishNotify } from '@/hooks/useFishNotify';
 import { useFishCdaTracking } from '@/hooks/useFishCdaTracking';
 import { useInstantCampaigns } from '@/hooks/useInstantCampaigns';
+import {useInstantTradeMail} from '@/hooks/useInstantTradeMail';
 import { useUsdtFollow } from '@/hooks/useUsdtFollow';
 import { useUsdtLiveTrading } from '@/hooks/useUsdtLiveTrading';
 import { useBinanceManualMonitor } from '@/hooks/useBinanceManualMonitor';
@@ -30,7 +31,7 @@ type InstantPositionsView = Pick<ReturnType<typeof useFishCdaTracking>, 'monitor
 };
 export const InstantPositionsContext = createContext<InstantPositionsView | null>(null);
 export const useScreenedInstantPositions = () => useContext(InstantPositionsContext);
-const FishQualityContext = createContext<{ state: FishQualityState; sources: (fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[], researchOpen: boolean, screeningOpen: boolean) => void; activate: () => void; enqueue: ReturnType<typeof useFishScreeningAutomation>['enqueue']; notify: ReturnType<typeof useFishNotify> } | null>(null);
+const FishQualityContext = createContext<{ state: FishQualityState; sources: (fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[], researchOpen: boolean, screeningOpen: boolean) => void; activate: () => void; enqueue: ReturnType<typeof useFishScreeningAutomation>['enqueue']; notify: ReturnType<typeof useFishNotify> & {tradeMailIssue?:string} } | null>(null);
 
 /** Owned by the authenticated app shell, outside the route boundary and collapsible panels. */
 export function FishQualityProvider({ owner, children, run = runPageFishQuality }: { owner?: string; children: ReactNode; run?: QualityRunner }) {
@@ -58,6 +59,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const executionMonitor = { ...preEntry,...preEntry.automaticState,ready:automaticReady, library: preEntry.automaticLibrary };
   const cdaTracking = useFishCdaTracking(owner, executionMonitor.library, automaticReady || preEntry.instantReady && preferenceStatus === 'ready', notify, true);
   const usdtFollow = useUsdtFollow(owner, cdaTracking);
+  const tradeMailIssue=useInstantTradeMail(owner,cdaTracking,usdtFollow.statuses);
   const balanceCalibration = useInstantBalanceCalibration(owner, usdtFollow);
   const usdtLive = useUsdtLiveTrading(owner, usdtFollow, balanceCalibration.campaigns);
   const management = useBinanceManualMonitor(usdtFollow, usdtLive, instantMonitor.settings);
@@ -99,7 +101,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const location = useLocation();
   const templates=state.study.planTemplates??state.templateCatalog;
   const names=useMemo(()=>({owner,resolver:qualityTemplateNames({planTemplates:templates})}),[owner,templates]);
-  return <FishQualityContext.Provider value={{ state: { ...state, requestStudyArchive: () => {activate();state.requestStudyArchive();}, requestScreeningArchive: screeningRequested?undefined:() => setScreeningRequested(true), instantPreferenceStatus:preferenceStatus, retryInstantPreferences:()=>setPreferenceAttempt(n=>n+1), automaticScreening, instantMonitor, instantPosition, cdaTracking: { ...cdaTracking, campaignIssue } }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
+  return <FishQualityContext.Provider value={{ state: { ...state, requestStudyArchive: () => {activate();state.requestStudyArchive();}, requestScreeningArchive: screeningRequested?undefined:() => setScreeningRequested(true), instantPreferenceStatus:preferenceStatus, retryInstantPreferences:()=>setPreferenceAttempt(n=>n+1), automaticScreening, instantMonitor, instantPosition, cdaTracking: { ...cdaTracking, campaignIssue } }, sources, activate, enqueue: automaticScreening.enqueue, notify:{...notify,tradeMailIssue} }}>
     <QualityTemplateNamesContext.Provider value={names}><InstantPositionsContext.Provider value={{ positions, monitorResults: cdaTracking.monitorResults, mirrorFills: cdaTracking.mirrorFills, manualPositions: cdaTracking.manualPositions, usdtFollow, balanceCalibration, usdtLive: { ...usdtLive, management }, manage: cdaTracking.managePosition }}>{children}</InstantPositionsContext.Provider></QualityTemplateNamesContext.Provider>
     {(state.running || state.filterRunning || state.postExit?.running || state.preEntry?.running) && location.pathname !== '/' && <div role="status" className="fixed bottom-4 right-4 z-50 space-y-1 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
       {state.preEntry?.running && <div>买前筛选后台运行中 · {state.preEntry.progress?.done ?? 0}/{state.preEntry.progress?.total ?? 0}</div>}

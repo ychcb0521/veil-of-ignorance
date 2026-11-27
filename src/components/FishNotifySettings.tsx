@@ -2,6 +2,7 @@
  * 「渔」的新鱼邮件提醒设置：开关、收件邮箱（可加多个）、EmailJS 三个编号、发测试邮件、上次发送结果。
  * 【用户要求】2026-10-21「我希望捕捉到的新鱼能够及时发送到我的邮箱，并且邮箱地址数量可以添加」。
  */
+import {FishTradeMailSettings} from './FishTradeMailSettings';
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import type { FishNotify } from '@/hooks/useFishNotify';
@@ -26,6 +27,7 @@ export function FishNotifySettings({ notify, algorithms = [] }: { notify: FishNo
     notify.update({ ...config, emails }); setDraft(''); setHint('');
   };
   return <div className="space-y-2 rounded-lg bg-muted/30 px-3 py-2.5 text-[11px]" data-testid="fish-notify" aria-label="邮件提醒设置">
+    {notify.screening && <><FishTradeMailSettings/>{notify.tradeMailIssue&&<p role="alert">成交通知待重试 · {notify.tradeMailIssue}</p>}</>}
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <label className="flex items-center gap-1.5 font-medium"><FishCheck aria-label={notify.screening ? '已入选发到邮箱' : '新鱼发到邮箱'} checked={config.enabled} onChange={e => notify.update({ ...config, enabled: e.target.checked })} />{notify.screening ? '已入选发到邮箱' : '新鱼发到邮箱'}</label>
       <span className="text-[10.5px] text-muted-foreground">{notify.screening ? '新鱼自动进入动态筛选，入选后发送邮件。' : '每轮捕捞结束（手动或自动）按已保存的来源筛选；和上一封比有变化才发，多出来的标「新」'}</span>

@@ -15,7 +15,7 @@ import { validScreenedSale, type ScreenedCdaTrigger } from '@/lib/fish/screenedC
 export interface FishNotifyStatus { at: number; ok: boolean; count: number; test?: boolean; error?: string; unchanged?: boolean; skipped?: boolean; quotaRetryAt?: number; recipientCount?: number }
 export interface FishNotify {
   config: FishNotifyConfig; status: FishNotifyStatus | null; sending: boolean;
-  screening?: boolean;
+  screening?: boolean; tradeMailIssue?: string;
   update: (next: FishNotifyConfig) => void;
   /** 每轮结束调用：fish = 这一轮第一次捕到的；fresh = 邮件那张表（默认本轮并集）。和上一封不一样就发整张表，多出来的标「新」。 */
   send: (fish: readonly TradeSignal[], fresh?: readonly TradeSignal[]) => Promise<void>; test: () => Promise<void>;

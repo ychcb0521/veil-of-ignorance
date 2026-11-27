@@ -1,0 +1,22 @@
+import {afterEach,expect,it,vi} from 'vitest';
+import {cleanup,fireEvent,render,screen} from '@testing-library/react';
+import {FishTradeMailSettings} from '../FishTradeMailSettings';
+import {readTradeRoutes} from '@/lib/fish/tradeMailRoutes';
+const auth=vi.hoisted(()=>({owner:'one'}));
+vi.mock('@/lib/userStoragePrefix',()=>({getUserId:()=>auth.owner,getUserPrefix:(id:string)=>'sim_'+id+'_'}));
+vi.mock('@/lib/simStateSync',()=>({queueSimStatePush:vi.fn()}));
+afterEach(()=>{cleanup();localStorage.clear();});
+it('saves each category independently and clears the previous account view on switch',async()=>{
+  const ui=render(<FishTradeMailSettings/>);
+  fireEvent.click(screen.getByRole('checkbox',{name:'实盘买入'}));
+  fireEvent.change(screen.getByLabelText('实盘买入收件邮箱'),{target:{value:'alice@example.com bob@example.com'}});
+  fireEvent.click(screen.getByLabelText('添加实盘买入邮箱'));
+  await screen.findByLabelText('删除实盘买入邮箱 alice@example.com');
+  expect(readTradeRoutes('one').liveBuy?.recipients).toHaveLength(2);
+  expect(readTradeRoutes('one').paperBuy).toBeUndefined();
+  auth.owner='two';
+  ui.rerender(<FishTradeMailSettings/>);
+  expect(screen.queryByText(/alice@example.com/)).toBeNull();
+  expect(screen.getByRole('checkbox',{name:'实盘买入'})).not.toBeChecked();
+  expect(readTradeRoutes('two')).toEqual({});
+});
