@@ -25,6 +25,7 @@ vi.mock('@/lib/fish/fishPreferencesDb', () => ({
     for (const [key, value] of entries) preferences.set(key, structuredClone(value));
   },
 }));
+vi.mock('@/lib/fish/instantMinuteStream', () => ({ watchInstantMinuteStreams: () => () => undefined }));
 vi.mock('../useFish', () => ({ readPageScreenedCda: vi.fn(), readPageInstantCampaignCandles: vi.fn(), markPageInstantPosition: vi.fn(), readPageInstantMonitor: vi.fn() }));
 vi.mock('@/lib/fish/preEntryPersistence', () => ({ readAutomaticPreEntryCheckpoint: vi.fn(), readAutomaticPreEntrySales: async () => [] }));
 vi.mock('@/lib/fish/instantPositionQuote', () => ({ readInstantPositionQuote: vi.fn() }));
@@ -76,6 +77,47 @@ it('stores the switch for one screened fish, reads it after reload, and only eva
     if (originalLocks) Object.defineProperty(navigator, 'locks', originalLocks);
     else Reflect.deleteProperty(navigator, 'locks');
   }
+});
+
+it('starts all due template batches on the minute boundary without waiting for the polling interval', async () => {
+  const minute = 60_000, at = Date.UTC(2026, 10, 26, 15, 35);
+  const start = at - minute;
+  vi.useFakeTimers({ now: at - 125 });
+  const monitor = { version: INSTANT_TEMPLATE_MONITOR, templateId: 'test', name: 'test',
+    plan: freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 3, [])) };
+  const rows = Array.from({ length: 4 }, (_, index): PreEntryRecord => {
+    const id = 'fish' + index;
+    return { id, roundId: 'round', status: 'matched', updatedAt: start, matchedAt: start,
+      startTime: start, cursor: start, readings: [], sample: { id, groups: [], enteredAt: start, basis: 'signal',
+        source: { id, symbol: 'SEIUSDT', timeMs: start, timeLabel: '', fallbackZone: '' }, importedAt: start } };
+  });
+  const library: PreEntryLibrary = { version: 1, records: rows, rounds: [{ id: 'round', state: 'complete',
+    automatic: true, instantMonitor: monitor, startedAt: start, updatedAt: start, hours: 1, filters: [] }] };
+  for (const record of rows) preferences.set(SCREENED_POSITION_KEY + 'wake:' + record.id, { after: start });
+  const observed: number[] = [];
+  let firstOpen = false;
+  vi.mocked(readPageInstantMonitor).mockImplementation(async (sample, _monitor, _at, through) => {
+    observed.push(Date.now());
+    const preview = sample.id === 'fish0' ? { at: through, round: 1, line: 100,
+      ...(firstOpen ? { price: 101, quantity: 2 } : {}), detail: '开盘核算' } : undefined;
+    return { key: sample.id, sampleId: sample.id, groupId: '', status: 'open', evaluatedAt: through, endTime: through,
+      openingAdditionPreview: preview };
+  });
+  const notify = { config: { enabled: false, emails: [] } } as never;
+  const view = renderHook(() => useFishCdaTracking('wake', library, true, notify, true));
+  try {
+    await act(async () => {});
+    await act(() => vi.advanceTimersByTimeAsync(124));
+    expect(observed).toEqual([]);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(observed).toEqual(rows.map(() => at));
+    firstOpen = true;
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    expect(observed).toHaveLength(5);
+    const stored = view.result.current.monitorResults?.get('fish0');
+    expect(stored?.openingAdditionPreview?.quantity).toBe(2);
+    expect(stored?.additionFills).toBeUndefined();
+  } finally { view.unmount(); }
 });
 
 it('watches newly admitted automatic fish after enabling, survives reload and retries only unsent mail', async () => {

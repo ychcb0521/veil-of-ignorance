@@ -228,6 +228,22 @@ describe('DBL-5防守线+急拉-1115',()=>{
   expect(split.fills[0]).toMatchObject({at,price:101.4,sizing:{support:k},structureEvidence:{
    algorithmVersion:IMPULSE_1115_POSITION_VERSION,event:'IMPULSE_EARLY',guardCloses:1,buffer:0,
   }});
+  // At the exact close, use only closed history plus the separately observed new minute open.
+  const closedLoad:FishReconstructionLoader=async(row,from,to,plan,signal)=>{
+   expect(to).toBeLessThanOrEqual(at);
+   return market(row,from,to,plan,signal);
+  };
+  const openingOptions={...options,end:at,liveAt:at,prices:prices.filter(b=>b.openTime<at),
+   impulse1115Position:independent,load:Object.assign(closedLoad,{
+    turingInitialization:load.turingInitialization,currentMinuteOpen:async()=>101.4,
+   })};
+  const opening=await findCalculatorAdditions(openingOptions);
+  expect(opening.fills).toEqual([]);
+  expect(opening.openingPreview).toMatchObject({at,price:101.4,quantity:split.fills[0].quantity});
+  expect((await findCalculatorAdditions({...openingOptions,additionsBlockedAt:at})).openingPreview).toBeUndefined();
+  const noPrice=await findCalculatorAdditions({...openingOptions,load:Object.assign(closedLoad,{currentMinuteOpen:async()=>undefined})});
+  expect(noPrice.openingPreview).toMatchObject({at,detail:'等待本分钟开盘价'});
+  expect(noPrice.fills).toEqual([]);
   const splitAttack=await findCalculatorAdditions({...options,roundRules:[{candidates:[],unavailable:'fixture',alternative:{candidates:[],impulse1115Position:independent}}]});
   expect(splitAttack.fills[0]).toMatchObject({lane:'attack',at,sizing:{support:k}});
   const configurable={version:IMPULSE_1115_CONFIGURABLE_K_VERSION,bufferAtr:.25,skipNative:true} as const;

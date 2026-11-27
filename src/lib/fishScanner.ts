@@ -1,3 +1,4 @@
+import { instantMinuteOpening } from './fish/instantMinuteStream';
 import { fishProgramForLookback, limitFishLookback } from '@/lib/fish/lookback';
 import { checkFishDownwardWick, describeFishWick, fishWickCount, type FishDownwardWick, type FishWickRejection } from '@/lib/fish/downwardWick';
 import { saveFishRound, summarizeFishRound, type FishRoundRow } from '@/lib/fish/roundSummary';
@@ -274,6 +275,27 @@ export class FishScanner {
       const { now, load, marketEnd, marketStart } = await this.qualityMarket([symbol], signal);
       const end = Math.min(target, await marketEnd?.(symbol) ?? now);
       const start = monitor.plan.initialization ? await marketStart?.(symbol) : undefined;
+      const closedMinute = Math.floor(now / 60_000) * 60_000;
+      if ((sample.source.exchange ?? 'binance') === 'binance' && !isTuringCupSymbol(symbol)
+        && !sample.binanceEntry && end === closedMinute && end % 300_000 === 0) {
+        let opening: Promise<number | undefined> | undefined;
+        load.currentMinuteOpen = at => {
+          if (at !== closedMinute) return Promise.resolve(undefined);
+          opening ??= (async () => {
+            const query = new URLSearchParams({ symbol, interval: '1m', startTime: String(at), limit: '1' });
+            for (const delay of [0, 250, 750]) {
+              if (delay) await fishDelay(delay, signal);
+              const streamed = instantMinuteOpening(symbol, at);
+              if (streamed !== undefined) return streamed;
+              const rows = await this.requests.get('binance')!('klines?' + query, 1, signal);
+              const row = Array.isArray(rows) && rows[0];
+              const price = Number(row?.[1]);
+              if (Number(row?.[0]) === at && Number(row?.[8]) > 0 && Number.isFinite(price) && price > 0) return price;
+            }
+          })();
+          return opening;
+        };
+      }
       return evaluateInstantMonitor(instantMonitorSample(sample, buyAt), monitor, end, load, signal, previous, start,exchangeAt??Date.now(),position);
     });
   }

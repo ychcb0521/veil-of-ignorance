@@ -41,6 +41,8 @@ export interface FishReconstructionOptions {
   onProgress:(progress:FishReconstructionProgress)=>void;
 }
 export type FishReconstructionLoader = ((row:TradeSignal,from:number,cut:number,plan:FishProgram,signal:AbortSignal)=>Promise<readonly ResearchBar[]>) & {
+  /** Opening trade of the current minute, isolated from closed OHLC history. */
+  currentMinuteOpen?: (at: number) => Promise<number | undefined>;
   boxStopMarketLoad?: FishReconstructionLoader;
   boxAdditionMarketLoad?: FishReconstructionLoader;
   turingInitialization?: { version: import('./qualityInitialization').QualityInitialization; startMs: number };

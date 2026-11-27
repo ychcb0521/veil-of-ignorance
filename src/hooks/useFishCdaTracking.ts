@@ -1,3 +1,4 @@
+import { watchInstantMinuteStreams } from '@/lib/fish/instantMinuteStream';
 import { toast } from 'sonner';
 import { instantMonitorSale, instantMonitorExitDue } from '@/lib/fish/instantMonitorExecution';
 import type { QualityResult } from '@/lib/fish/quality';
@@ -238,6 +239,8 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     const lifetime = new AbortController();
     let scanning = false, mailing = false;
     const retry = new Map<string, number>();
+    // Keep the input before this close only while waiting for its first traded opening price.
+    const openingInputs = new Map<string, { through: number; checkpoint?: Checkpoint }>();
     const errors = new Map<string, string>();
     const limitMode = () => {
       const raw = readPersistedStateRaw(getUserPrefix(owner) + 'position_limit_mode');
@@ -320,7 +323,11 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       const checkpoint = read(entry.record);
       if (checkpoint?.alert || hasManualIntent(entry.record.id) || (retry.get(entry.record.id) ?? 0) > Date.now()) return false;
       if (checkpoint?.manual) return !!checkpoint.manual.orders && checkpoint.manual.through < target;
-      if (entry.round.instantMonitor) return (checkpoint?.after ?? Math.floor(entry.record.matchedAt! / 60_000) * 60_000) < target;
+      if (entry.round.instantMonitor) {
+        const preview = checkpoint?.monitorResult?.openingAdditionPreview;
+        return (checkpoint?.after ?? Math.floor(entry.record.matchedAt! / 60_000) * 60_000) < target
+          || preview?.at === target && preview.price == null && openingInputs.get(entry.record.id)?.through === target;
+      }
       return !!settings && (autoPositions
           ? cursor(entry.record, checkpoint) < Math.floor(target / SCREENED_CDA_STEP) * SCREENED_CDA_STEP
             || (checkpoint?.risk?.through ?? Math.floor(entry.record.matchedAt! / 60_000) * 60_000) < target
@@ -419,14 +426,20 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       send();
       if (scanning || lifetime.signal.aborted || navigator.onLine === false) return;
       const step = autoPositions ? 60_000 : SCREENED_CDA_STEP;
-      const target = Math.floor((Date.now() - CLOSE_GRACE_MS) / step) * step;
-      const due = current.current.entries.filter(entry => eligible(entry, target));
+      // Template market reads independently verify the exchange clock and the closed-bar cutoff.
+      const now = Date.now();
+      const templateTarget = Math.floor(now / step) * step;
+      const target = Math.floor((now - CLOSE_GRACE_MS) / step) * step;
+      const targetFor = (entry: ScreenedFishAdmission) =>
+        autoPositions && entry.round.instantMonitor && !read(entry.record)?.manual ? templateTarget : target;
+      const due = current.current.entries.filter(entry => eligible(entry, targetFor(entry)));
       if (!due.length) return;
       scanning = true;
+      let continueScan = false;
       void lock(configKey + ':scan', async () => {
         // The admission record must be durable before its first CDA evaluation.
         await refresh(due.map(entry => entry.record));
-        const candidates = due.filter(entry => eligible(entry, target));
+        const candidates = due.filter(entry => eligible(entry, targetFor(entry)));
         const work = await Promise.all(candidates.map(async entry => {
           const { record, round } = entry;
           const checkpoint = read(record);
@@ -451,8 +464,13 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         const admitted = work.filter(entry => entry !== undefined);
         const manualEntries = admitted.filter(entry => !!read(entry.record)?.manual).sort((a, b) =>
           read(a.record)!.manual!.through - read(b.record)!.manual!.through).slice(0, 3);
-        const templates = admitted.filter(entry => entry.round.instantMonitor && !read(entry.record)?.manual).sort((a, b) =>
-          (read(a.record)?.after ?? a.record.matchedAt!) - (read(b.record)?.after ?? b.record.matchedAt!)).slice(0, 3);
+        const templateQueue = admitted.filter(entry => entry.round.instantMonitor && !read(entry.record)?.manual);
+        const cursorOf = (entry: ScreenedFishAdmission) => read(entry.record)?.after ?? entry.record.matchedAt!;
+        // Protect the current candle's window when several historical positions also need recovery.
+        templateQueue.sort((a, b) => Number(cursorOf(b) >= templateTarget - step) - Number(cursorOf(a) >= templateTarget - step)
+          || cursorOf(a) - cursorOf(b));
+        const templates = templateQueue.slice(0, 3);
+        continueScan = templateQueue.length > templates.length;
         const legacy = admitted.filter(entry => !entry.round.instantMonitor && !read(entry.record)?.manual);
         await Promise.all([
           ...manualEntries.map(async entry => {
@@ -469,9 +487,28 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
           }),
           ...templates.map(async entry => {
             const { record } = entry;
+            const target = targetFor(entry);
             try {
-              const result = await checkTemplate(entry, target, read(record));
-              if (result.status === 'waiting' || (result.status === 'open' && result.endTime! < target)) {
+              const stored = read(record);
+              const pending = openingInputs.get(record.id);
+              const repeatOpening = pending?.through === target && stored?.after === target;
+              const input = repeatOpening ? pending.checkpoint : stored;
+              if (!repeatOpening) openingInputs.delete(record.id);
+              const result = await checkTemplate(entry, target, input);
+              openingInputs.delete(record.id);
+              const preview = result.openingAdditionPreview;
+              if (preview?.at === target && preview.price == null) {
+                openingInputs.set(record.id, { through: target, checkpoint: input });
+              }
+              if (repeatOpening && stored?.monitorResult) {
+                if (!hasManualIntent(record.id) && preview) {
+                  await save(record, { ...stored, monitorResult: { ...stored.monitorResult, openingAdditionPreview: preview } });
+                }
+                retry.set(record.id, Date.now() + POLL_MS);
+                return;
+              }
+              if (openingInputs.has(record.id)) retry.set(record.id, Date.now() + POLL_MS);
+              else if (result.status === 'waiting' || (result.status === 'open' && result.endTime! < target)) {
                 retry.set(record.id, Date.now() + 5000);
               } else retry.delete(record.id);
               if (result.status === 'open' || result.status === 'closed') await saveTemplate(entry, result, result.endTime!);
@@ -529,7 +566,10 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
           for (const {record} of due) retry.set(record.id, Date.now() + 5000);
           setError(cause instanceof Error ? cause.message : 'CDA 行情待重试');
         }
-      }).finally(() => { scanning = false; });
+      }).finally(() => {
+        scanning = false;
+        if (!lifetime.signal.aborted && (continueScan || Math.floor(Date.now() / step) * step > templateTarget)) tick();
+      });
     };
     switchCurrent.current = async (recordId, monitor, revision) => {
       if (!autoPositions || !navigator.locks) throw Error('请在支持跨标签页并发保护的浏览器中切换');
@@ -647,7 +687,20 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     };
     wake.current = tick;
     let timer: number | undefined;
+    let closeTimer: number | undefined;
+    const scheduleClose = () => {
+      const remaining = INSTANT_MANUAL_MINUTE - Date.now() % INSTANT_MANUAL_MINUTE;
+      closeTimer = window.setTimeout(() => {
+        scheduleClose();
+        tick();
+      }, remaining);
+    };
     setPoll.current = enabled => {
+      if (enabled && autoPositions && closeTimer === undefined) scheduleClose();
+      if (!enabled && closeTimer !== undefined) {
+        window.clearTimeout(closeTimer);
+        closeTimer = undefined;
+      }
       if (enabled && timer === undefined) timer = window.setInterval(tick, POLL_MS);
       else if (!enabled && timer !== undefined) {
         window.clearInterval(timer);
@@ -673,17 +726,32 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
 
   useEffect(() => { wake.current?.(); }, [entries, notify.config]);
   const counts = useMemo(() => {
+    const streamSymbols = new Set<string>();
     let active = 0, awaitingMail = 0, watching = false;
-    for (const { record } of entries) {
+    for (const { record, round } of entries) {
       const key = jobPrefix + encodeURIComponent(record.id);
       const checkpoint = checkpoints.current.get(key) ?? readLocal<Checkpoint>(key);
       if (!checkpoint?.alert) {
         active++;
+        const source = record.sample.source;
+        if (round.instantMonitor && checkpoint?.monitorResult?.status === 'open' && !checkpoint.manual
+          && (source.exchange ?? 'binance') === 'binance' && /^[\p{L}\d]+USDT$/u.test(source.symbol)) {
+          streamSymbols.add(source.symbol);
+        }
         if (!checkpoint?.manual || checkpoint.manual.orders) watching = true;
       } else if (!checkpoint.delivered) awaitingMail++;
     }
-    return { active, awaitingMail, watching };
+    return { active, awaitingMail, watching, streamSymbols: [...streamSymbols].sort().join(',') };
   }, [entries, jobPrefix, revision]);
+  useEffect(() => {
+    if (!autoPositions || !counts.streamSymbols || typeof WebSocket === 'undefined') return;
+    const symbols = counts.streamSymbols.split(',');
+    const cleanups = [];
+    for (let offset = 0; offset < symbols.length; offset += 64) {
+      cleanups.push(watchInstantMinuteStreams(symbols.slice(offset, offset + 64), () => wake.current?.()));
+    }
+    return () => cleanups.forEach(close => close());
+  }, [autoPositions, owner, counts.streamSymbols]);
   const shouldPoll = counts.watching || (counts.awaitingMail > 0 && notify.config.enabled && !fishNotifyMissing(notify.config));
   useEffect(() => { setPoll.current?.(shouldPoll); }, [shouldPoll, configKey, activeSettings, autoPositions]);
 

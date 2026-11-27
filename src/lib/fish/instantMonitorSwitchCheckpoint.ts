@@ -32,6 +32,7 @@ export function rebaseInstantMonitorCheckpoint(current: QualityResult, initialNo
     vetoStageSwitches: undefined, vetoPath: undefined, advantageState: undefined, boxStopStates: undefined,
     ...(current.impulse1115Classification?{impulse1115Classification:undefined}:{}),
     ...(current.selectedL0Pct!==undefined ? {selectedL0Pct:undefined} : {}),
+    ...(current.openingAdditionPreview ? { openingAdditionPreview: undefined } : {}),
     additionGuardPlus: undefined, additionNote: undefined, boxMarketRepair: undefined, exitSnapshot: undefined, exitReading: undefined,
   };
 }

@@ -14,6 +14,16 @@ const setup = (overrides: Partial<FishQualityState>) => ({
   preEntry:{ready:false,library:emptyPreEntryLibrary()}, ...overrides,
 } as FishQualityState);
 const view = (state:FishQualityState) => <TooltipProvider><FishInstantTrading state={state}>{null}</FishInstantTrading></TooltipProvider>;
+it('shows the opening calculation for the matching open simulated position', () => {
+  const event = { at: Date.parse('2026-11-26T23:35:00+08:00'), round: 2, line: 0.03645,
+    price: 0.03791, quantity: 307.567, detail: '首次急拉' };
+  const state = setup({ cdaTracking: { alerts: new Map(),
+    monitorResults: new Map([['sei', { openingAdditionPreview: event }]]) } as never });
+  const instant = { positions: [{ recordId: 'sei', source: { symbol: 'SEIUSDT' } }] } as never;
+  render(<InstantPositionsContext.Provider value={instant}>{view(state)}</InstantPositionsContext.Provider>);
+  expect(screen.getByText(/SEIUSDT · 23:35:00 急拉线已确认/)).toHaveTextContent('第 2 轮开盘预判 · 首次急拉 · 开盘价 0.03791 · 预计加仓 307.567 张');
+});
+
 function openAfter() {
   fireEvent.click(screen.getByRole('button',{name:'即时交易条件设置'}));
   fireEvent.click(screen.getByRole('button',{name:'买后设置'}));

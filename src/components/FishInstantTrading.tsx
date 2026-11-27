@@ -148,6 +148,16 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   </div>}
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={<>
+      {instant?.positions.map(position => {
+        const preview = cda?.monitorResults?.get(position.recordId)?.openingAdditionPreview;
+        if (!preview || cda?.manualPositions?.has(position.recordId) || cda?.alerts.has(position.recordId)) return null;
+        return <span key={position.recordId} role="status">
+          {position.source.symbol} · {new Date(preview.at).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })} 急拉线已确认
+          {' · 第 '}{preview.round} 轮开盘预判 · {preview.detail}
+          {preview.price != null && <> · 开盘价 {preview.price}</>}
+          {preview.quantity != null && <> · 预计加仓 {+preview.quantity.toPrecision(8)} 张</>}
+        </span>;
+      })}
       {state.instantMonitor?.pendingCloud && <span role="status">买后设置 · 云端同步中</span>}
       {automatic && <>
       {needsSettings && <span>请先保存买前设置</span>}

@@ -147,6 +147,7 @@ export interface QualityResult {
   mirrorFill?: QualityMirrorFill; remainingFraction?: number; realizedPnl?: number;
   mirrorRealizedPnl?: number; remainingPnl?: number; initialNotional?: number;
   additionFill?: QualityAdditionFill; additionFills?:QualityAdditionFill[]; additionNote?: string;
+  openingAdditionPreview?:import('./qualityAdditionCalculator').InstantAdditionPreview;
   additionGuardPlus?:import('@/lib/dbl5GuardPlus').Dbl5GuardPlusRow;
   /** 被「加仓否决」拦下的加仓（时间、第几次、原因与读数）。 */
   additionVetoes?: { at: number; round: number; kind: string; label: string; reading: string; lockPeak?: number; lockAt?: number }[];
@@ -939,6 +940,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let finalPrice = closed ? stopFill ?? exitBar!.open : prices.at(-1)!.close;
     let sellStageBoundary=false;
     const additionsBlockedAt=boxAdditionBlockedAt(boxStopStates,prior?.additionsBlockedAt);
+    let openingAdditionPreview:QualityResult['openingAdditionPreview'];
     let additionFill=prior?.additionFill,additionFills=[...qualityAdditionFills(prior??{})], additionNote: string | undefined, additionVetoes=prior?.additionVetoes,additionReductions=prior?.additionReductions,additionSkips=prior?.additionSkips,additionSkipsFrom=prior?.additionSkipsFrom,impulseTimingAuditFrom=prior?.impulseTimingAuditFrom,additionGuardPlus=prior?.additionGuardPlus;
     const carriedAdditions=prior?.followBasis?.carriedAdditions??0;
     if(group.addition?.enabled && ((!additionFill&&!carriedAdditions)||group.addition.quantityMode==='calculator')) {
@@ -978,6 +980,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         if(config.quantityMode==='calculator'){
           const calculated=await findCalculatorAdditions({additionsBlockedAt,positionVersion:config.positionVersion,candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,impulsePosition:config.impulsePosition,attackFromRound:config.attackFromRound,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,indicatorIncrease:config.indicatorIncrease,entryBufferAtr:config.entryBufferAtr,entryDistanceAtr:config.entryDistanceAtr,gainBasis:config.gainBasis,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:initialNotional,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,previousVetoes:prior?.additionVetoes,roundExits:config.roundExits,geometricLock:config.geometricLock,kStopVersion:config.kStopVersion,breakevenFloor:config.breakevenFloor,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,initialPayoffRiskPct,pauseAfterAdditionCount,load,signal,
             carriedAdditions,impulse1115Position:config.impulse1115Position,classifiedImpulsePositions:config.classifiedImpulsePositions,liveAt,advantage:group.advantage,readAdvantage,ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
+          openingAdditionPreview=calculated.openingPreview;
           additionFills=calculated.fills;additionFill=additionFills[0];if(!additionFills.length&&unavailable)additionNote=unavailable;additionReductions=calculated.reductions;
           additionGuardPlus=calculated.guardPlus??additionGuardPlus;
           additionSkipsFrom=prior?(prior.additionSkipsFrom??since):entry;
@@ -1048,6 +1051,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     if(trackVetoPath){vetoPath=prior?.vetoPath??{entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};for(const b of held)vetoPath=advanceQualityHolding(vetoPath,b);vetoPath=advanceQualityHolding({...vetoPath,peak:Math.max(vetoPath.peak,fillPeak)},{openTime:finalTime,open:finalPrice,high:finalPrice,low:finalPrice,close:finalPrice,volume:0,takerBuyVolume:0});}
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
     return { ...base,...(isSelectedL0(group.payoffRiskVersion)?{selectedL0Pct:initialPayoffRiskPct??null}:{}),...(initialPayoffRiskPct!==undefined && (group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION) ? {initialDbl5RiskPct:initialPayoffRiskPct}:{}),...(mirrorLossReviews?{mirrorLossReviews}:{}),...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(impulseTimingAuditFrom!=null?{impulseTimingAuditFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
+      ...(!closed&&!trigger&&openingAdditionPreview?.at===finalTime?{openingAdditionPreview}:{}),
       ...(additionGuardPlus&&additionGuardPlus.at<=finalTime?{additionGuardPlus}:{}),
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
       ...(position&&(additionFill||trackLedger) ? {additionFill,...(group.addition?.quantityMode==='calculator'||prior?.instantMonitorSwitches?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,

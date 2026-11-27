@@ -74,7 +74,15 @@ export interface AdditionSkipRecord {at:number;round:number;kind:string;label:st
 export interface AdditionVetoRecord {at:number;round:number;kind:string;label:string;reading:string;
  /** 冲高回落锁住时：要收复的最高点与锁住的 5 分钟边界（续算时据此恢复锁）。 */
  lockPeak?:number;lockAt?:number}
-export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop;stageBoundary?:{at:number;price:number};vetoed?:AdditionVetoRecord[];reductions?:QualityReductionFill[];skipped?:AdditionSkipRecord[];guardPlus?:Dbl5GuardPlusRow}>{
+export interface InstantAdditionPreview {
+ at: number;
+ round: number;
+ line: number;
+ price?: number;
+ quantity?: number;
+ detail: string;
+}
+export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];openingPreview?:InstantAdditionPreview;stop?:SupportStop;stageBoundary?:{at:number;price:number};vetoed?:AdditionVetoRecord[];reductions?:QualityReductionFill[];skipped?:AdditionSkipRecord[];guardPlus?:Dbl5GuardPlusRow}>{
  // 镜像止盈须已成交且留有余仓（2026-11-02 起不限 50%，平衡公式对任意比例成立）。镜像成交那一分钟本身不能排出先后，不加仓。
  const independent=o.positionVersion===HOLDING_LEDGER_ADDITION_VERSION,halfMirror=o.mirror;if(!independent&&!isPartialMirror(halfMirror))return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
@@ -215,11 +223,12 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  };
 
  const hasGuardPlus=!!o.structure?.guardPlusVersion||o.roundRules?.some(round=>round.structure?.guardPlusVersion||round.alternative?.structure?.guardPlusVersion);
+ let openingPreview:InstantAdditionPreview|undefined;
  const done=async(stop?:SupportStop)=>{
   const last=fills.at(-1),round=last?o.roundRules?.[carried+fills.length-1]:undefined;
   const lastRule=last?.lane==='attack'?round?.alternative?.structure:round?.structure??o.structure;
   const guardPlus=hasGuardPlus?await readStructure.latestGuardPlus(Math.min(o.end,stop?.at??o.end),lastRule):undefined;
-  return {fills,stop,...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{}),...(guardPlus?{guardPlus}:{})};
+  return {fills,stop,...(openingPreview&&!stop?{openingPreview}:{}),...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{}),...(guardPlus?{guardPlus}:{})};
  };
  /** 当前止损线 K：最近一次加仓的 K，或其后支撑下移减仓移到的 K′。 */
  const currentK=():{k?:number;at?:number;guard?:number;sellK?:number;profitFloor?:number}=>{
@@ -399,6 +408,33 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    const price=priceAt.get(hit.at);
    if(!(price!>0)||!Number.isFinite(price))throw Error('缺少位置加仓下一分钟开盘价');
    hit.price=price!;
+  }
+  // At a live 5m close the line is final. Run a separate opening-tick calculation.
+  // Its evidence never enters the positions ledger or advances the closed-minute cursor.
+  if(!hit && !stop && !drop && pendingMirror==null && !o.ordinaryExit && (o.additionsBlockedAt??Infinity)>o.end && addEnd===o.end
+    && o.end%STEP===0 && o.liveAt!=null && o.liveAt>=o.end && o.liveAt<o.end+MINUTE
+    && o.load.currentMinuteOpen && (primaryRule.impulse1115Position||alternative?.impulse1115Position)){
+   try {
+    const event=await readStructure.impulse1115(o.end-1,o.end+1,fills);
+    if(event){
+     openingPreview={at:o.end,round:roundNo,line:event.reading,detail:'等待本分钟开盘价'};
+     const price=await o.load.currentMinuteOpen(o.end);
+     if(price!=null && Number.isFinite(price) && price>0){
+      // Only the opening trade is known. All indicator loaders are still capped at the closed boundary.
+      const tick={openTime:o.end,open:price,high:price,low:price,close:price,volume:0,takerBuyVolume:null};
+      const preview=await findCalculatorAdditions({...o,since:o.end,end:o.end+1,previous:fills,
+       previousVetoes:[...(o.previousVetoes??[]),...vetoed],previousReductions:reductions,
+       prices:[...o.prices,tick],pauseAfterAdditionCount:roundNo});
+      const fill=preview.fills.find(f=>f.at===o.end);
+      const reason=preview.vetoed?.find(v=>v.at===o.end)??preview.skipped?.find(v=>v.at===o.end);
+      openingPreview={...openingPreview,price,...(fill?{quantity:fill.quantity,detail:fill.label}:
+       {detail:reason?[reason.label,reason.reading].filter(Boolean).join(' · '):preview.stop?'开盘触发退出条件':'本轮加仓条件未满足'})};
+     }
+    }
+   } catch(error){
+    if(o.signal.aborted)throw error;
+    if(openingPreview)openingPreview.detail='开盘核算待行情确认';
+   }
   }
   if(!hit){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}if(pendingMirror!=null&&addEnd===pendingMirror+MINUTE){after=pendingMirror;continue;}return done(stop);}
   if(independent&&o.mirror?.at===hit.at){after=hit.at;skip({at:hit.at,round:roundNo,kind:'mirror-minute',label:'镜像成交分钟不加仓',reading:'同一分钟不借用尚未完成的镜像成交与落袋盈亏，等待下一次机会'});continue;}
