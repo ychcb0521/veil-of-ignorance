@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { BSS_DEFAULTS, BSS_WEIGHTS, computeBss, type BssBar } from '@/lib/bss';
-import { BSS_DEF, BSS_FORMULA, BUILTIN_FEATURES, compileFeatureFormula, computeFeatureValues, DRIFT_SPEED_DEF, formulaVariables } from '@/lib/deepDig/features';
+import { BSS_COMPONENT_FEATURES, evaluateOnBars, BSS_DEF, BSS_FORMULA, BUILTIN_FEATURES, compileFeatureFormula, computeFeatureValues, DRIFT_SPEED_DEF, formulaVariables } from '@/lib/deepDig/features';
 import { evaluateProgram, parseFormula, rollingZScore } from '@/lib/deepDig/formula';
 import { mulberry32 } from '@/lib/deepRsa/grouping';
 import { BAR_MS, type ObservationWindow, type ResearchBar } from '@/lib/deepRsa/window';
+
+import { mergeFeatureDefs } from '@/lib/deepDig/features';
+import { compileFishProgram, evaluateFishProgram } from '@/lib/fish/algorithm';
+import { qualityMetricPlan } from '@/lib/fish/quality';
+import { makeQualityBuyFilter, makeQualitySignalMetrics, parseHoldingVetoDraft, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
+import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 
 function bars(n: number, seed: number, barMs = BAR_MS, missingEvery = 0): ResearchBar[] {
   const rand = mulberry32(seed);
@@ -24,6 +30,42 @@ const windowOf = (b: ResearchBar[], barMs = BAR_MS): ObservationWindow => ({
 });
 
 describe('【用户要求】BSS 买卖强度综合分', () => {
+  it('offers and restores component readings across fishing, entry, exit and monitoring', () => {
+    const defs = mergeFeatureDefs([]);
+    const sample = bars(576, 7);
+    for (const def of BSS_COMPONENT_FEATURES) {
+      const readings = evaluateOnBars(sample, compileFeatureFormula(def.formula), def);
+      for (const metric of [def.chartCore, 'avg_' + def.chartCore, 'avg_' + def.chartCore + '_2']) {
+        const key = def.id + ':' + metric;
+        for (const original of [true, false]) {
+          expect(qualityFilterMenuChoices([def], original).some(choice => choice.key === key)).toBe(true);
+        }
+        const fishing = compileFishProgram(def, { statistic: metric, direction: '>', threshold: 0, constraints: [] });
+        expect(evaluateFishProgram(sample, fishing).value).toEqual(readings.vars.get(metric));
+        const snapshots = [
+          makeQualityBuyFilter(key, '>', 0, true, defs).snapshot, makeQualitySellPlan(key, '<', 0, defs).snapshot,
+          parseHoldingVetoDraft([{ choice: key, direction: '<', threshold: '0', enabled: true }], defs)[0].snapshot!,
+          makeQualitySignalMetrics([key], defs)[0].snapshot,
+        ];
+        for (const snapshot of snapshots) {
+          const { plan } = qualityMetricPlan(JSON.parse(JSON.stringify(snapshot)), metric);
+          expect(evaluateFishProgram(sample, plan).value).toEqual(readings.vars.get(metric));
+        }
+      }
+    }
+  });
+
+  it('standalone components reproduce every original BSS observation including missing values', () => {
+    for (const interval of ['5m', '15m'] as const) {
+      const sample = bars(576, 11, interval === '5m' ? BAR_MS : 3 * BAR_MS, 37);
+      const original = evaluateOnBars(sample, compileFeatureFormula(BSS_FORMULA), { interval });
+      for (const def of BSS_COMPONENT_FEATURES) {
+        const standalone = evaluateOnBars(sample, compileFeatureFormula(def.formula), { interval });
+        expect(standalone.vars.get(def.chartCore)).toEqual(original.vars.get(def.chartCore.slice(4)));
+      }
+    }
+  });
+
   it('【用户要求】去掉订单簿 I，权重 0.45 / 0.25 / 0.30（合计 1）；BSS ∈ [−1, 1]', () => {
     expect(BSS_WEIGHTS).toEqual({ alpha: 0.45, beta: 0.25, delta: 0.3 });
     expect(BSS_WEIGHTS.alpha + BSS_WEIGHTS.beta + BSS_WEIGHTS.delta).toBeCloseTo(1, 15);

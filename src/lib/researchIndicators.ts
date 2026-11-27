@@ -14,7 +14,7 @@ import {ati6hMarketVersion,requestAti6hTickSize} from '@/lib/ati6hMarketData';
 import {ati6hDependencyOf} from '@/lib/deepDig/features';
 import { SELLER_RETENTION_SPECS, retentionComponents } from '@/lib/sellerRetention';
 import { accountFeatureDefs, chartFeaturePeriod, featureCoreName, namedChartFormula, hasSavedFeatureDefinition } from '@/lib/featureSource';
-import { featureTemplateId, featureUsesMbi, featureUsesMbi2, featureUsesMbiFamily, BUILTIN_FEATURES, IMPULSE_1115_CLASSIFICATION_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { featureTemplateId, featureUsesMbi, featureUsesMbi2, featureUsesMbiFamily, BUILTIN_FEATURES, BSS_COMPONENT_FEATURES, IMPULSE_1115_CLASSIFICATION_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { CTBA_DEFAULTS, CTBA_ABSOLUTE_BOUND } from '@/lib/ctba';
 /** Deep dig chart features: raw value and the two named averages share one formula. */
 import type { KLineData } from 'klinecharts';
@@ -62,6 +62,10 @@ export const IMPULSE_1115_CLASSIFICATION_CHART: ResearchIndicator = {
   rawOnly:true,priceOverlay:true,components:[...IMPULSE_1115_CLASSIFICATION_FIELDS.filter(n=>n!=='DBL5C'),...IMPULSE_1115_CLASSIFICATION_RENDER_FIELDS],
 };
 export const RESEARCH_INDICATORS = [
+  ...BSS_COMPONENT_FEATURES.map(def => ({
+    id: def.chartCore.toUpperCase(), featureId: def.id, core: def.chartCore, short: def.short, name: def.name,
+    period: 1, parameter: '近期窗口', neutral: 0, avgNeutral: 0, min: -1, max: 1, avgRange: [-1, 1] as const, seller: false,
+  })),
   DBL5_GUARD_CHART,
   DBL5_HOURLY_CHART,
   {id:'DBL5_GUARD_PLUS',featureId:DBL5_GUARD_PLUS_VERSION,core:'DBL5P',short:DBL5_GUARD_PLUS_DISPLAY_NAME,name:DBL5_GUARD_PLUS_DISPLAY_NAME,period:3,parameter:'确认参数（定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:[...DBL5_GUARD_PLUS_NUMERIC.slice(1),...DBL5_GUARD_PLUS_RENDER,'_DBL5_guard_segment']},

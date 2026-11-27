@@ -1110,6 +1110,21 @@ export const BTC_FREE_FEATURES: readonly DeepDigFeatureDef[] = BTC_ADJUSTED_FEAT
     .join('\n'),
 }));
 
+// Each component uses only its own BSS inputs so unrelated missing feeds do not mask its reading.
+export const BSS_COMPONENT_FEATURES = [
+  { id: 'bss-mz-v1', core: 'BSS_Mz', label: '价格动量', definition: '近期涨跌幅经滚动标准化后取 tanh。BSS 中权重为 45%。',
+    expression: 'M = C / ago(C, n) - 1\nBSS_Mz = tanh(zscore(M, avgh))' },
+  { id: 'bss-vd-v1', core: 'BSS_Vd', label: '方向成交量', definition: '上涨时放量加分、缩量扣分；下跌时放量扣分、缩量为零；平盘为零。BSS 中权重为 25%。',
+    expression: 'M = C / ago(C, n) - 1\nV = avg(Q, n) / avg(Q, avgh)\nVz = tanh(zscore(V, avgh))\nBSS_Vd = if(M > 0, Vz, if(M < 0, min(-Vz, 0), 0))' },
+  { id: 'bss-a-v1', core: 'BSS_A', label: '成交攻击性', definition: '近期主动买卖成交额之差除以同期总成交额。BSS 中权重为 30%。',
+    expression: 'BSS_A = (avg(B, n) - avg(S, n)) / avg(Q, n)' },
+].map(({ id, core, label, definition, expression }) => {
+  const base = 'n = 1\n' + expression;
+  const formula = appendResearchAverages(base, new Set([core]), { core, avg: 'avg_' + core, avg2: 'avg_' + core + '_2' });
+  return { ...BSS_DEF, id, name: 'BSS ' + label + '（' + core.slice(4) + '）', short: 'BSS·' + core.slice(4),
+    chartCore: core, definition, formula: formula + '\n' + core + ' = ' + core };
+});
+
 export const ATR_PRICE_PCT_DEF: DeepDigFeatureDef = {
   id: 'atr-price-pct-v1', name: '真实波动率占现价（%）', short: '真实波动率占现价（%）',
   definition: '所选 K 线周期的 Wilder ATR 除以计算时点的价格，乘以 100。默认取 14 根 K 线。',
@@ -1118,7 +1133,7 @@ export const ATR_PRICE_PCT_DEF: DeepDigFeatureDef = {
   positive: DEFAULT_POSITIVE, control: DEFAULT_CONTROL, builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, CDA_HOURLY_DEF, ...DBL5_HOURLY_FEATURES, DBL5_GUARD_PLUS_DEF, IMPULSE_1115_CLASSIFICATION_DEF, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES, ATR_PRICE_PCT_DEF];
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, CDA_HOURLY_DEF, ...DBL5_HOURLY_FEATURES, DBL5_GUARD_PLUS_DEF, IMPULSE_1115_CLASSIFICATION_DEF, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES, ATR_PRICE_PCT_DEF, ...BSS_COMPONENT_FEATURES];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
