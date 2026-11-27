@@ -109,7 +109,7 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
 
   return <PositionTableRow long testId="instant-position" cells={{
     symbol: <PositionContract symbol={symbol} leverage={leverage} long onOpen={onOpenChart}
-      badge={<span className="text-muted-foreground" title={EXCHANGE_NAMES[source.exchange??'binance']}>即时·模拟</span>}/>,
+      badge={<span className="text-muted-foreground" title={EXCHANGE_NAMES[source.exchange??'binance']}>即时·模拟{monitor?.status === 'open' && monitor.pendingExit && !manual ? ' · 待平仓成交' : ''}</span>}/>,
     quantity: <PositionNumber value={formatAmount(held.remainingQuantity)+' '+symbol.replace(/USDT$/,'')} tone="text-trading-green"/>,
     entry: <PositionNumber value={formatPrice(held.averageEntryPrice,symbol)}/>,
     breakeven: <PositionNumber value={breakeven==null||breakeven<=0?'—':formatPrice(breakeven,symbol)} title="余仓成本扣除已落袋的净盈亏"/>,

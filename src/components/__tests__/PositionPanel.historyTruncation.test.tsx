@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PositionPanel } from '@/components/PositionPanel';
+import { MemoryRouter } from 'react-router-dom';
+import { InstantPositionsContext } from '@/contexts/FishQualityContext';
 import type { TradeRecord } from '@/types/trading';
 
 /**
@@ -31,10 +33,12 @@ const closed = (i: number): TradeRecord => ({
   pnl: 10, fee: 0, slippage: 0, openTime: 1_000 + i, closeTime: 2_000 + i,
 } as TradeRecord);
 
-function renderHistory(n: number, tab: 'positionHistory' | 'trades' = 'positionHistory') {
+function renderHistory(n: number, tab: 'positionHistory' | 'trades' = 'positionHistory', paper = false) {
   const history = Array.from({ length: n }, (_, i) => closed(i));
   return render(
-    <PositionPanel
+    <MemoryRouter><InstantPositionsContext.Provider value={paper ? { positions: [], history: [
+      { id:'fish-instant-paper', symbol:'YBUSDT', buyAt:600, sellAt:3000, entryPrice:2, exitPrice:1 },
+    ] } : null}><PositionPanel
       positionsMap={{}}
       ordersMap={{}}
       tradeHistory={history}
@@ -44,7 +48,7 @@ function renderHistory(n: number, tab: 'positionHistory' | 'trades' = 'positionH
       onCancelOrder={vi.fn()}
       activeTab={tab}
       onTabChange={vi.fn()}
-    />,
+    /></InstantPositionsContext.Provider></MemoryRouter>,
   );
 }
 
@@ -54,6 +58,15 @@ describe('仓位历史记录的截断必须说出来', () => {
     const note = screen.getByTestId('history-truncation-note');
     expect(note).toHaveTextContent('仅显示最近 100 条');
     expect(note).toHaveTextContent('105');
+  });
+
+  it('shows a completed instant simulation in chronological position history with its own detail link', () => {
+    renderHistory(1, 'positionHistory', true);
+    const rows = screen.getAllByRole('row');
+    expect(rows[1]).toHaveTextContent('YBUSDT');
+    expect(rows[2]).toHaveTextContent('BTC');
+    expect(screen.getByRole('link', { name: '查看平仓明细' })).toHaveAttribute('href', '/journal/campaigns/fish-instant-paper?section=instant');
+    expect(screen.getByText('仓位历史记录(2)')).toBeInTheDocument();
   });
 
   // 用「历史成交」这个 6 列的简单表来验展开：仓位历史记录是 12 列还带按钮，

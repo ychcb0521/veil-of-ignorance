@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { instantCampaignInput, instantPositionInput, type InstantPositionFill, type InstantPositionInput, type InstantCampaignInput } from '@/lib/fish/instantCampaign';
-import { readOpenInstantPositions, readPendingInstantCampaignJobs, saveInstantCampaignInput, saveInstantPosition, saveInstantCampaignSnapshot, subscribeInstantCampaigns, syncInstantCampaign } from '@/lib/fish/instantCampaignStore';
+import { readInstantPositionLedger, reconcileOpenInstantPositions, type InstantPositionClose, readPendingInstantCampaignJobs, saveInstantCampaignInput, saveInstantPosition, saveInstantCampaignSnapshot, subscribeInstantCampaigns, syncInstantCampaign } from '@/lib/fish/instantCampaignStore';
 import { buildPageInstantCampaign, openPageInstantPosition } from './useFish';
 import type { FishCdaTracking } from './useFishCdaTracking';
 
@@ -12,30 +12,48 @@ function campaignIssueDetail(error: unknown): string {
 }
 
 export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTracking, autoPositions = false) {
-  const executions = useRef(cda.monitorResults);
-  executions.current = cda.monitorResults;
   const inputs = useMemo<(InstantPositionInput | InstantCampaignInput)[]>(() => [...(cda.localSales ?? []), ...(cda.admitted ?? [])].flatMap(({ record, round }) => {
     const alert = cda.alerts.get(record.id);
-    const input = alert ? instantCampaignInput(record, round, alert, executions.current?.get(record.id)) : autoPositions ? instantPositionInput(record, round) : undefined;
+    const input = alert ? instantCampaignInput(record, round, alert, cda.monitorResults?.get(record.id)) : autoPositions ? instantPositionInput(record, round) : undefined;
     return input ? [input] : [];
-  }), [cda.admitted, cda.localSales, cda.alerts, autoPositions]);
+  }), [cda.admitted, cda.localSales, cda.alerts, cda.monitorResults, autoPositions]);
   const latest = useRef(inputs);
   latest.current = inputs;
   const wake = useRef<() => void>();
   const [issue, setIssue] = useState('');
-  const [open, setOpen] = useState<{ owner?: string; rows: InstantPositionFill[] }>({ rows: [] });
+  const [ledger, setLedger] = useState<{ owner?: string; positions: InstantPositionFill[]; history: InstantPositionClose[] }>({ positions: [], history: [] });
   useEffect(() => {
     if (!owner || !autoPositions) return;
     let alive = true, revision = 0;
     const read = async () => {
       const epoch = ++revision;
-      const rows = await readOpenInstantPositions(owner);
-      if (alive && epoch === revision) setOpen({ owner, rows });
+      const next = await readInstantPositionLedger(owner);
+      if (alive && epoch === revision) setLedger({ owner, ...next });
     };
     const refresh = () => void read().catch(() => undefined);
     const unsubscribe = subscribeInstantCampaigns(owner, refresh);
     refresh();
-    return () => { alive = false; unsubscribe(); };
+    const lifetime = new AbortController();
+    let reconciling = false;
+    const reconcile = async () => {
+      if (reconciling || !navigator.onLine) return;
+      reconciling = true;
+      try { await reconcileOpenInstantPositions(owner, lifetime.signal); }
+      catch { /* Keep local executions and retry when connectivity returns. */ }
+      finally { reconciling = false; }
+    };
+    void reconcile();
+    const timer = window.setInterval(reconcile, 60_000);
+    window.addEventListener('online', reconcile);
+    window.addEventListener('focus', reconcile);
+    return () => {
+      alive = false;
+      lifetime.abort();
+      window.clearInterval(timer);
+      window.removeEventListener('online', reconcile);
+      window.removeEventListener('focus', reconcile);
+      unsubscribe();
+    };
   }, [owner, autoPositions]);
 
   useEffect(() => {
@@ -136,5 +154,12 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
 
   useEffect(() => { wake.current?.(); }, [inputs]);
   const sold = useMemo(() => new Set(inputs.filter(input => 'sell' in input).map(input => input.id)), [inputs]);
-  return { issue, positions: open.owner === owner ? open.rows.filter(row => !sold.has(row.id)) : [] };
+  const positions = ledger.owner === owner ? ledger.positions.filter(row => {
+    if (sold.has(row.id)) return false;
+    const result = cda.monitorResults?.get(row.recordId);
+    if (result?.status === 'closed' && result.entryTime === Math.floor(row.buyAt / 60_000) * 60_000) return false;
+    const manual = cda.manualPositions?.get(row.recordId);
+    return !(manual && manual.startedAt >= row.buyAt && manual.fills.at(-1)?.fraction === 1);
+  }) : [];
+  return { issue, positions, history: ledger.owner === owner ? ledger.history : [] };
 }

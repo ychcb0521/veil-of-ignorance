@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
+import { formatBeijingTime } from '@/lib/timeFormat';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { InstantPositionRow } from '@/components/InstantPositionRow';
 import { UsdtLivePositionCard } from '@/components/UsdtLivePositionCard';
@@ -639,7 +641,7 @@ export function PositionPanel({
   }
 
   const fundingRecords = tradeHistory.filter(t => t.action === 'FUNDING');
-  const tradeRecords = tradeHistory.filter(t => t.action === 'CLOSE' || t.action === 'LIQUIDATION');
+  const tradeRecords = useMemo(() => tradeHistory.filter(t => t.action === 'CLOSE' || t.action === 'LIQUIDATION'), [tradeHistory]);
   /**
    * 历史类表格原本一律 `.slice(0, 100)` 硬截断，而 tab 上的 showCount 是 false——
    * 超过 100 笔之后更早的记录在界面上**永久不可见，且没有任何提示**。
@@ -722,13 +724,19 @@ export function PositionPanel({
     };
   }, [rollbackSymbol, tradeHistory, positionsMap, ordersMap]);
 
+  const paperHistory = instant?.history;
+  const positionHistory = useMemo(() => activeTab === 'positionHistory' ? [
+    ...tradeRecords.map(trade => ({ at: trade.closeTime ?? trade.openTime, trade } as const)),
+    ...(paperHistory ?? []).map(paper => ({ at: paper.sellAt, paper } as const)),
+  ].sort((a, b) => (b.at ?? 0) - (a.at ?? 0)) : [], [activeTab, tradeRecords, paperHistory]);
+  const positionHistoryCount = tradeRecords.length + (paperHistory?.length ?? 0);
   const TABS = [
     { key: 'positions', label: '仓位', count: mergedPositions.length + instantPositions.length + livePositions.length, showCount: true },
     { key: 'pending', label: '当前委托', count: allOrders.length, showCount: true },
     { key: 'history', label: '历史委托', count: 0, showCount: false },
     { key: 'trades', label: '历史成交', count: tradeRecords.length, showCount: true },
     { key: 'funding', label: '资金流水', count: fundingRecords.length, showCount: true },
-    { key: 'positionHistory', label: '仓位历史记录', count: tradeRecords.length, showCount: true },
+    { key: 'positionHistory', label: '仓位历史记录', count: positionHistoryCount, showCount: true },
     { key: 'bots', label: '机器人', count: 0, showCount: false },
     { key: 'assets', label: '资产', count: 0, showCount: false },
   ];
@@ -1406,7 +1414,7 @@ export function PositionPanel({
                 </a>
               </div>
             )}
-            {tradeRecords.length === 0 ? (
+            {positionHistory.length === 0 ? (
               <div className="px-4 py-20 text-center text-xs text-gray-500 dark:text-[#848e9c]">暂无仓位历史记录</div>
             ) : (
               <table className="w-full text-[11px] font-mono tabular-nums">
@@ -1418,7 +1426,18 @@ export function PositionPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {capRows(tradeRecords.slice().reverse()).map(t => {
+                  {capRows(positionHistory).map(row => {
+                    if ('paper' in row) {
+                      const p = row.paper;
+                      return <tr key={p.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">
+                        <td className="px-3 py-2">{p.symbol}</td><td className="px-3 py-2">即时·模拟 多</td>
+                        <td colSpan={3} className="px-3 py-2">首仓 {p.entryPrice ? formatPrice(p.entryPrice, p.symbol) : '—'} · 平仓 {p.exitPrice ? formatPrice(p.exitPrice, p.symbol) : '—'}</td>
+                        <td className="px-3 py-2">{formatBeijingTime(p.buyAt)}</td>
+                        <td className="px-3 py-2">{formatBeijingTime(p.sellAt)}</td>
+                        <td colSpan={5} className="px-3 py-2"><Link className="underline" to={'/journal/campaigns/' + encodeURIComponent(p.id) + '?section=instant'}>查看平仓明细</Link></td>
+                      </tr>;
+                    }
+                    const t = row.trade;
                     const tradeQuoteLabel = isCoinSettled(t) ? 'USD' : 'USDT';
                     const notionalUsd = t.notionalUsd ?? getPositionNotionalUsd(t.symbol, t, t.entryPrice);
                     // ROE 分母 = 初始保证金 = 名义@开仓/杠杆（固定、不含追加），与开仓中持仓同口径。
@@ -1508,7 +1527,7 @@ export function PositionPanel({
                     );
                   })}
                 </tbody>
-                <TruncationFoot total={tradeRecords.length} cols={12} />
+                <TruncationFoot total={positionHistoryCount} cols={12} />
               </table>
             )}
           </div>

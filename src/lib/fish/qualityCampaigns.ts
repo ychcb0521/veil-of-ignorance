@@ -85,7 +85,7 @@ export async function listLocalInstantCampaignData(owner: string) {
       : position && saved?.alert ? { ...position, sell: saved.alert, monitorResult: saved.monitorResult } : undefined;
     if (sale) {
       const settling = position ? buildSettlingInstantCampaignData(owner, position, sale) : projectPendingTemplateSale(owner, sale);
-      return settling ? [settling] : [];
+      if (settling) return [settling];
     }
     if (!position || saved?.monitorResult?.status === 'closed') return [];
     return [buildOpenInstantCampaignData(owner, position, saved?.monitorResult, saved?.risk?.mirror, saved?.risk?.through, saved?.manual)];

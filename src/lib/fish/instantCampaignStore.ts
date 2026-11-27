@@ -45,10 +45,56 @@ export function subscribeInstantCampaigns(owner: string, refresh: () => void) {
   };
 }
 
-async function readInstantJobs(owner: string, include: (job: Saved) => boolean): Promise<Saved[]> {
-  const legacy = await readFishPreferenceEntries(localPrefix(owner), include);
-  const templates = await readFishPreferenceEntries(templatePrefix(owner), include);
-  return [...legacy, ...templates].map(([, job]) => job);
+async function projectInstantJobs<T>(owner: string, project: (job: Saved) => T | undefined): Promise<T[]> {
+  // Filter after resolving the two queue generations. A stale open copy must
+  // never win over a confirmed sale, even when the caller only requests opens.
+  const winners = new Map<string, { rank: number; value?: T }>();
+  const collect = (job: Saved) => {
+    const rank = jobRank(job);
+    if (rank >= (winners.get(job.input.id)?.rank ?? -1)) {
+      winners.set(job.input.id, { rank, value: project(job) });
+    }
+    return false;
+  };
+  await readFishPreferenceEntries(localPrefix(owner), collect);
+  await readFishPreferenceEntries(templatePrefix(owner), collect);
+  return [...winners.values()].flatMap(({ value }) => value === undefined ? [] : [value]);
+}
+
+function readInstantJobs(owner: string, include: (job: Saved) => boolean) {
+  return projectInstantJobs(owner, job => include(job) ? job : undefined);
+}
+
+function jobRank(job: Saved) {
+  if (job.snapshot) return job.synced ? 4 : 3;
+  if ('sell' in job.input) return 2;
+  return job.opened ? 1 : 0;
+}
+
+export interface InstantPositionClose {
+  id: string;
+  symbol: string;
+  buyAt: number;
+  sellAt: number;
+  entryPrice?: number;
+  exitPrice?: number;
+}
+
+export async function readInstantPositionLedger(owner: string) {
+  const positions: InstantPositionFill[] = [];
+  const history: InstantPositionClose[] = [];
+  const rows = await projectInstantJobs<InstantPositionFill | InstantPositionClose>(owner, job => {
+    const sale = job.snapshot ?? ('sell' in job.input ? job.input : undefined);
+    if (!sale) return job.opened;
+    return { id: sale.id, symbol: sale.source.symbol, buyAt: sale.buyAt, sellAt: sale.sell.at,
+      entryPrice: job.snapshot?.entryPrice ?? job.opened?.entryPrice ?? sale.monitorResult?.entryPrice,
+      exitPrice: job.snapshot?.exitPrice ?? sale.sell.closePrice };
+  });
+  for (const row of rows) {
+    if ('sellAt' in row) history.push(row);
+    else positions.push(row);
+  }
+  return { positions, history };
 }
 
 const isOpenJob = (job: Saved) => !!job.opened && !job.snapshot && !('sell' in job.input);
@@ -137,6 +183,33 @@ async function cacheRemote(owner: string, snapshot: InstantCampaignSnapshot, not
     return previous?.synced && !changed ? previous : { input: snapshot, snapshot, synced: true };
   });
   if (changed && notify) publishInstantCampaigns(owner);
+  return changed;
+}
+
+/** Other devices can finish the simulation while this browser still has its opening fill. */
+export async function reconcileOpenInstantPositions(owner: string, signal: AbortSignal) {
+  const open = await readOpenInstantPositions(owner);
+  for (let start = 0; start < open.length && !signal.aborted; start += 40) {
+    const batch = new Map(open.slice(start, start + 40).map(position => [position.id, position]));
+    const { data, error } = await table().select('key,value').eq('user_id', owner)
+      .in('key', [...batch.keys()].map(id => KEY + id)).setHeader(INSTANT_CAMPAIGN_HEADER, '1')
+      .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(CLOUD_READ_MS)]));
+    if (error) throw Error(error.message);
+    let changed = false;
+    try {
+      for (const row of data ?? []) {
+        if (signal.aborted) return;
+        const closed = decodeSnapshot(row);
+        const position = closed && batch.get(closed.id);
+        if (position && closed && closed.recordId === position.recordId && closed.buyAt === position.buyAt
+          && closed.source.symbol === position.source.symbol) {
+          if (await cacheRemote(owner, closed, false)) changed = true;
+        }
+      }
+    } finally {
+      if (changed) publishInstantCampaigns(owner);
+    }
+  }
 }
 
 export function readLocalInstantCampaignJobs(owner: string) {
@@ -173,6 +246,7 @@ export async function readLocalInstantCampaignSnapshots(owner: string) {
 export async function listInstantCampaignSnapshots(owner: string, signal?: AbortSignal) {
   let warning: string | undefined;
   const snapshots = new Map<string, InstantCampaignSnapshot>();
+  let cacheChanged = false;
   try {
     const pageSize = 250;
     let after: string | undefined;
@@ -190,7 +264,7 @@ export async function listInstantCampaignSnapshots(owner: string, signal?: Abort
           continue;
         }
         snapshots.set(snapshot.id, snapshot);
-        try { await cacheRemote(owner, snapshot, false); }
+        try { if (await cacheRemote(owner, snapshot, false)) cacheChanged = true; }
         catch { warning = '云端战役已读取，本机暂时无法缓存。'; }
       }
       if (!data || data.length < pageSize) break;
@@ -201,6 +275,8 @@ export async function listInstantCampaignSnapshots(owner: string, signal?: Abort
   } catch (error) {
     if (signal?.aborted) throw error;
     warning = '即时交易云端暂未读完，可重试；已读取的战役仍可查看。';
+  } finally {
+    if (cacheChanged) publishInstantCampaigns(owner);
   }
   try {
     for (const local of await readLocalInstantCampaignSnapshots(owner)) {
@@ -214,7 +290,8 @@ export async function listInstantCampaignSnapshots(owner: string, signal?: Abort
 
 export async function readInstantCampaignJob(owner: string, id: string) {
   const [template, legacy] = await readFishPreferences<Saved>([templatePrefix(owner) + id, localPrefix(owner) + id]);
-  return template ?? legacy;
+  if (!template || !legacy) return template ?? legacy;
+  return jobRank(template) >= jobRank(legacy) ? template : legacy;
 }
 
 export async function loadInstantCampaignSnapshot(owner: string, id: string, signal?: AbortSignal, local?: Saved) {

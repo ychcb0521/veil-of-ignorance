@@ -5,7 +5,8 @@ import { useInstantCampaigns } from '../useInstantCampaigns';
 import type { FishCdaTracking } from '../useFishCdaTracking';
 
 vi.mock('@/lib/fish/instantCampaignStore', () => ({
-  readOpenInstantPositions: vi.fn(async () => []),
+  readInstantPositionLedger: vi.fn(async () => ({ positions: [], history: [] })),
+  reconcileOpenInstantPositions: vi.fn(async () => undefined),
   readPendingInstantCampaignJobs: vi.fn(),
   saveInstantCampaignInput: vi.fn(),
   saveInstantCampaignSnapshot: vi.fn(),
