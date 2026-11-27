@@ -151,7 +151,7 @@ export interface QualityResult {
   /** 被「加仓否决」拦下的加仓（时间、第几次、原因与读数）。 */
   additionVetoes?: { at: number; round: number; kind: string; label: string; reading: string; lockPeak?: number; lockAt?: number }[];
   /** 【用户要求】2026-11-03 未加仓理由：支撑线上移（新 C）却没加仓的每一次；additionSkipsFrom＝从这一刻起才有记录（旧结果续算时晚于买入）。 */
-  additionSkips?: import('./qualityAdditionCalculator').AdditionSkipRecord[]; additionSkipsFrom?: number; totalInvested?: number;
+  additionSkips?: import('./qualityAdditionCalculator').AdditionSkipRecord[]; additionSkipsFrom?: number; impulseTimingAuditFrom?: number; totalInvested?: number;
   /** 支撑线下移时按减仓计算器执行的减仓（时间、比例、移出成本、已实现盈亏、K 的前后值）。 */
   additionReductions?: import('./qualityAddition').QualityReductionFill[];
   averageEntryPrice?: number; remainingQuantity?: number; remainingCost?: number;
@@ -939,7 +939,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let finalPrice = closed ? stopFill ?? exitBar!.open : prices.at(-1)!.close;
     let sellStageBoundary=false;
     const additionsBlockedAt=boxAdditionBlockedAt(boxStopStates,prior?.additionsBlockedAt);
-    let additionFill=prior?.additionFill,additionFills=[...qualityAdditionFills(prior??{})], additionNote: string | undefined, additionVetoes=prior?.additionVetoes,additionReductions=prior?.additionReductions,additionSkips=prior?.additionSkips,additionSkipsFrom=prior?.additionSkipsFrom,additionGuardPlus=prior?.additionGuardPlus;
+    let additionFill=prior?.additionFill,additionFills=[...qualityAdditionFills(prior??{})], additionNote: string | undefined, additionVetoes=prior?.additionVetoes,additionReductions=prior?.additionReductions,additionSkips=prior?.additionSkips,additionSkipsFrom=prior?.additionSkipsFrom,impulseTimingAuditFrom=prior?.impulseTimingAuditFrom,additionGuardPlus=prior?.additionGuardPlus;
     const carriedAdditions=prior?.followBasis?.carriedAdditions??0;
     if(group.addition?.enabled && ((!additionFill&&!carriedAdditions)||group.addition.quantityMode==='calculator')) {
       const config=group.addition;
@@ -981,8 +981,9 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
           additionFills=calculated.fills;additionFill=additionFills[0];if(!additionFills.length&&unavailable)additionNote=unavailable;additionReductions=calculated.reductions;
           additionGuardPlus=calculated.guardPlus??additionGuardPlus;
           additionSkipsFrom=prior?(prior.additionSkipsFrom??since):entry;
-          if(calculated.skipped?.length||prior?.additionSkips?.length){const seen=new Map([...(prior?.additionSkips??[]),...(calculated.skipped??[])].map(v=>[`${v.at}:${v.round}`,v]));additionSkips=[...seen.values()].sort((a,b)=>a.at-b.at);}
-          if(calculated.vetoed?.length||prior?.additionVetoes?.length){const seen=new Map([...(prior?.additionVetoes??[]),...(calculated.vetoed??[])].map(v=>[`${v.at}:${v.round}`,v]));additionVetoes=[...seen.values()].sort((a,b)=>a.at-b.at);}
+          if(liveAt!=null)impulseTimingAuditFrom??=prior?since:entry;
+          if(calculated.skipped?.length||prior?.additionSkips?.length){const seen=new Map([...(prior?.additionSkips??[]),...(calculated.skipped??[])].map(v=>[JSON.stringify([v.at,v.round,v.kind,v.label,v.reading,v.support]),v]));additionSkips=[...seen.values()].sort((a,b)=>a.at-b.at);}
+          if(calculated.vetoed?.length||prior?.additionVetoes?.length){const seen=new Map([...(prior?.additionVetoes??[]),...(calculated.vetoed??[])].map(v=>[JSON.stringify([v.at,v.round,v.kind,v.label,v.reading]),v]));additionVetoes=[...seen.values()].sort((a,b)=>a.at-b.at);}
           if(calculated.stageBoundary){sellStageBoundary=true;closed=false;finalTime=calculated.stageBoundary.at;finalPrice=calculated.stageBoundary.price;trigger=undefined;exitBar=undefined;stopFill=undefined;}
           if(calculated.stop){const stop=calculated.stop;closed=true;finalTime=stop.at;finalPrice=stop.price;stopFill=stop.price;exitBar=prices.find(b=>b.openTime===stop.at);
             trigger={at:stop.at,reading:stop.cause?(stop.price/stop.support-1)*100:stop.support,fillPrice:stop.price,fillPeak:exitBar!.open,barOpenTime:stop.at,atOpen:stop.atOpen,cause:stop.cause??(stop.confirmCloses?{id:'addition-guard',kind:'addition-support',label:'防守线 K',direction:'<',threshold:stop.support,confirmCloses:stop.confirmCloses,...(stop.guardTimeframe?{guardTimeframe:stop.guardTimeframe}:{})}:{id:'addition-support',kind:'addition-support',label:'加仓支撑线 K',direction:'<=',threshold:stop.support})};
@@ -1046,7 +1047,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let vetoPath:import('./qualityVeto').QualityHoldingPath|undefined;
     if(trackVetoPath){vetoPath=prior?.vetoPath??{entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};for(const b of held)vetoPath=advanceQualityHolding(vetoPath,b);vetoPath=advanceQualityHolding({...vetoPath,peak:Math.max(vetoPath.peak,fillPeak)},{openTime:finalTime,open:finalPrice,high:finalPrice,low:finalPrice,close:finalPrice,volume:0,takerBuyVolume:0});}
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
-    return { ...base,...(isSelectedL0(group.payoffRiskVersion)?{selectedL0Pct:initialPayoffRiskPct??null}:{}),...(initialPayoffRiskPct!==undefined && (group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION) ? {initialDbl5RiskPct:initialPayoffRiskPct}:{}),...(mirrorLossReviews?{mirrorLossReviews}:{}),...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
+    return { ...base,...(isSelectedL0(group.payoffRiskVersion)?{selectedL0Pct:initialPayoffRiskPct??null}:{}),...(initialPayoffRiskPct!==undefined && (group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION) ? {initialDbl5RiskPct:initialPayoffRiskPct}:{}),...(mirrorLossReviews?{mirrorLossReviews}:{}),...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(impulseTimingAuditFrom!=null?{impulseTimingAuditFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       ...(additionGuardPlus&&additionGuardPlus.at<=finalTime?{additionGuardPlus}:{}),
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
       ...(position&&(additionFill||trackLedger) ? {additionFill,...(group.addition?.quantityMode==='calculator'||prior?.instantMonitorSwitches?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,

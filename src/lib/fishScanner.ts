@@ -302,6 +302,12 @@ export class FishScanner {
     });
   }
 
+  async readInstantImpulseWindows(source:InstantCampaignInput['source'],entry:number,end:number,signal:AbortSignal) {
+    const {load}=await this.qualityMarket([source.symbol],signal);
+    const {createStructureAdditionReader}=await import('./fish/qualityAdditionStructure');
+    return createStructureAdditionReader({row:{...source,timeLabel:'',fallbackZone:''},entry,end,load,signal}).confirmedImpulseWindows(end);
+  }
+
   async readInstantCampaignCandles(source: InstantCampaignInput['source'], interval: import('@/lib/deepRsa/marketData').ResearchInterval,
     from: number, to: number, signal: AbortSignal) {
     return this.instant(signal, async signal => {

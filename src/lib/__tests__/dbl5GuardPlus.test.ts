@@ -194,7 +194,10 @@ describe('DBL-5防守线+急拉-1115',()=>{
   expect(hit?.structureEvidence).toMatchObject({event:'IMPULSE_EARLY',guardCloses:1,buffer:0});
   expect(structureAdditionK(hit!.structureEvidence!,4)?.k).toBe(hit!.structureEvidence!.guardPlus!.impulse_guard_value);
   expect(await reader(rule,entry,end,[hit as QualityAdditionFill])).toBeUndefined();
-  expect(await make(START+22*STEP)(rule,entry,end,[])).toBeUndefined();
+  const skipped:unknown[]=[];
+  expect(await make(START+22*STEP)(rule,entry,end,[],undefined,s=>skipped.push(s))).toBeUndefined();
+  expect(skipped).toEqual([expect.objectContaining({reason:'impulse-window',at:hit!.at,availableAt:hit!.at,freshUntil:hit!.at+STEP,observedAt:hit!.at+STEP})]);
+  expect(await make().confirmedImpulseWindows(end)).toEqual([{at:hit!.at,price:hit!.reading,freshUntil:hit!.at+STEP}]);
   expect(await make(START+21*STEP+1_000)(rule,entry,end,[])).toMatchObject({at:START+21*STEP});
  });
  it('runs the actual holding ledger with the same frozen K in either lane and on resume',async()=>{

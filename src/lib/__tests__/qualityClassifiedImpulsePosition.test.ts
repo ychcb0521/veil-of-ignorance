@@ -39,7 +39,9 @@ it('预热已经形成的状态不补机会；已成交事件、过期实盘事�
  const p=position(1),read=createClassifiedImpulsePositionReader({row,entry,load,signal}),hit=await read(p,entry,entry+2*F,[]);
  const used=[{...hit!,quantity:1,notional:112}];expect(await read(p,entry,entry+2*F,used)).toBeUndefined();
  const warmed=createClassifiedImpulsePositionReader({row,entry:entry+F,load,signal});expect(await warmed(p,entry+F,entry+3*F,[])).toBeUndefined();
- expect(await createClassifiedImpulsePositionReader({row,entry,load,signal,liveAt:entry+2*F})(p,entry,entry+3*F,[])).toBeUndefined();
+ const skipped:unknown[]=[];
+ expect(await createClassifiedImpulsePositionReader({row,entry,load,signal,liveAt:entry+2*F})(p,entry,entry+3*F,[],undefined,s=>skipped.push(s))).toBeUndefined();
+ expect(skipped).toEqual([expect.objectContaining({reason:'impulse-window',at:entry+F,observedAt:entry+2*F,freshUntil:entry+2*F})]);
 });
 it('历史前缀与完整回放的较早机会相同，参数快照不随未来状态修订',async()=>{
  const p=position(1),a=createClassifiedImpulsePositionReader({row,entry,load,signal}),b=createClassifiedImpulsePositionReader({row,entry,load,signal});

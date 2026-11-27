@@ -1,3 +1,4 @@
+import { formatUTC8 } from '@/lib/timeFormat';
 import {isClassifiedImpulsePositionVersion,createClassifiedImpulsePositionReader} from './qualityClassifiedImpulsePosition';
 import {mirrorHardStopActive,mirrorHardStopRange} from './qualityMirrorHardStopStages';
 import { DBL5_PROFILES } from '@/lib/dbl5m';
@@ -295,6 +296,13 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const basis=round.gainBasis==='average'?'real-average' as const:'cost-line' as const,referencePrice=basis==='real-average'?realAverageBefore:support??o.entryPrice;
   const p8=(x:number)=>+x.toPrecision(8);
   const onSkip=(x:import('./qualityAdditionStructure').StructureSkip)=>{
+   if(x.reason==='impulse-window'){
+    const expired=x.observedAt>=x.freshUntil;
+    skip({at:x.at,round:roundNo,kind:expired?'impulse-expired':'impulse-not-yet-available',
+     label:expired?'急拉线已过加仓有效期':'急拉线尚未生效',
+     reading:`${x.source} · 位置读数 ${p8(x.support)} · 生效 ${formatUTC8(x.availableAt)}，截止 ${formatUTC8(x.freshUntil)}（不含），本次检查 ${formatUTC8(x.observedAt)}`});
+    return;
+   }
    if(x.reason==='guard-retest'){
     skip({at:x.at,round:roundNo,support:x.support,kind:'guard-retest',label:'等待防守线独立回踩',reading:'首根低点形成的箱底须经独立回踩确认；本次收盘尚未确认'});
     return;

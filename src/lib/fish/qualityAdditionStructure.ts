@@ -187,11 +187,19 @@ interface ReaderOptions {row:TradeSignal;entry:number;end:number;load:FishRecons
 /** 每根已收盘 5 分钟线上的支撑（箱体下轨 / 防守线），供「支撑线下移减仓」判断。 */
 export interface StructureSupportPoint {at:number;boxId:string|null;support:number|null;guard:number|null;close:number;guardPlus?:Dbl5GuardPlusRow;nativeAtr?:number}
 /** 箱体事件没能成为加仓时机的原因：涨幅门槛未达、没有旧 C、防守线断开、只用实线时防守线是虚线。 */
-export type StructureSkip={at:number;support:number;reason:'gain'|'no-old-c'|'no-guard'|'guard-range'|'guard-retest';close?:number;referencePrice?:number;thresholdPct?:number};
+type ImpulseTimingSkip = {reason:'impulse-window';at:number;support:number;availableAt:number;freshUntil:number;observedAt:number;source:string};
+export type StructureSkip=ImpulseTimingSkip | {at:number;support:number;reason:'gain'|'no-old-c'|'no-guard'|'guard-range'|'guard-retest';close?:number;referencePrice?:number;thresholdPct?:number};
+export interface ImpulseWindow { at:number; price:number; freshUntil:number }
 export type StructureSkipReporter=(skip:StructureSkip)=>void;
+/** The execution window is half-open. Only report during chronological consumption, never during lookahead. */
+export function impulseWindowEligible(at:number,support:number,availableAt:number,freshUntil:number,observedAt:number|undefined,source:string,onSkip?:StructureSkipReporter):boolean {
+ if(observedAt===undefined||observedAt>=availableAt&&observedAt<freshUntil)return true;
+ onSkip?.({reason:'impulse-window',at,support,availableAt,freshUntil,observedAt,source});
+ return false;
+}
 export function createStructureAdditionReader(o:ReaderOptions){
  const load=o.load.boxAdditionMarketLoad??o.load;
- const readers=new Map<string,{guardPlus?:boolean;supports:(until:number)=>Promise<readonly StructureSupportPoint[]>;read:(after:number,end:number,used:ReadonlySet<string>,gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'},onSkip?:StructureSkipReporter)=>Promise<Omit<QualityAdditionFill,'quantity'|'notional'>|undefined>}>();
+ const readers=new Map<string,{guardPlus?:boolean;impulses:(until:number)=>Promise<ImpulseWindow[]>;supports:(until:number)=>Promise<readonly StructureSupportPoint[]>;read:(after:number,end:number,used:ReadonlySet<string>,gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'},onSkip?:StructureSkipReporter)=>Promise<Omit<QualityAdditionFill,'quantity'|'notional'>|undefined>}>();
  const getReader=(rule:StructureAdditionRule,impulseOnly=false)=>{
   validateStructureAddition(rule);
   const key=JSON.stringify([...structureAdditionIdentity(rule),...(impulseOnly?[IMPULSE_1115_POSITION_VERSION]:[])]);let reader=readers.get(key);
@@ -204,7 +212,7 @@ export function createStructureAdditionReader(o:ReaderOptions){
    let cursor=from,dbl:Dbl5Checkpoint|undefined,plusCheckpoint:Dbl5GuardPlusCheckpoint|undefined,sbs:SbsCheckpoint|undefined,lastBox:StructureActiveBox|undefined;
    const decisions:{e:StructureAdditionEvidence;close:number}[]=[],invalid:number[]=[],supportPoints:StructureSupportPoint[]=[];
    /** 【用户要求】2026-11-03 未加仓理由：支撑上移了、但没有旧 C / 防守线，因此不能作为加仓位置的事件。 */
-   const dropped:(Omit<StructureSkip,'reason'>&{key:string;reason:Exclude<StructureSkip['reason'],'gain'>})[]=[];
+   const dropped:(Omit<StructureSkip,'reason'>&{key:string;reason:Exclude<StructureSkip['reason'],'gain'|'impulse-window'>})[]=[];
    const advance=async(cut:number,stop?:()=>boolean)=>{
     while(cursor<cut){
      if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
@@ -242,17 +250,22 @@ export function createStructureAdditionReader(o:ReaderOptions){
      if(stop?.())break;
     }
    };
-   reader={guardPlus:!!rule.guardPlusVersion&&!impulseOnly,supports:async until=>{await advance(Math.floor(until/STEP)*STEP);return supportPoints.filter(p=>p.at<=until);},read:async(after,until,used,gain,onSkip)=>{
+   reader={guardPlus:!!rule.guardPlusVersion&&!impulseOnly,impulses:async until=>{
+    await advance(Math.floor(until/STEP)*STEP);
+    if(invalid.some(at=>at<until))throw Error(BOX_ADDITION_INVALID_DATA);
+    return decisions.flatMap(({e})=>e.at<until&&e.guardPlus?.early_impulse_event?
+      [{at:e.at,price:e.supportPrice,freshUntil:e.guardPlus.early_impulse_event.fresh_until}]:[]);
+   },supports:async until=>{await advance(Math.floor(until/STEP)*STEP);return supportPoints.filter(p=>p.at<=until);},read:async(after,until,used,gain,onSkip)=>{
     const cut=Math.floor(until/STEP)*STEP;
     const reportDropped=(to:number)=>{if(onSkip)for(const d of dropped)if(d.at>after&&d.at<to&&!used.has(d.key))onSkip({at:d.at,support:d.support,reason:d.reason});};
-    const eligible=(e:StructureAdditionEvidence)=>{
+    const eligible=(e:StructureAdditionEvidence,report?:StructureSkipReporter)=>{
      if(e.at<=after||e.at>=until||used.has(`${e.algorithm}:${e.boxId}`)||impulseOnly&&invalid.some(t=>t<=e.at))return false;
      const early=e.guardPlus?.early_impulse_event;
-     return !early||o.liveAt===undefined||o.liveAt>=early.available_at&&o.liveAt<early.fresh_until;
+     return !early||impulseWindowEligible(e.at,e.supportPrice,early.available_at,early.fresh_until,o.liveAt,impulseOnly?IMPULSE_1115_POSITION_LABEL:DBL5_GUARD_PLUS_LABEL,report);
     };
     await advance(cut,()=>decisions.some(({e,close})=>eligible(e)&&(!gain||close>=gain.referencePrice*(1+gain.thresholdPct/100))));
     for(const {e,close} of decisions){
-     if(!eligible(e))continue;
+     if(!eligible(e,onSkip))continue;
      let priceGate:QualityAdditionFill['priceGate'];
      if(gain){if(!(gain.referencePrice>0)||!Number.isFinite(gain.referencePrice))throw Error('加仓涨幅基准价无效');if(close<gain.referencePrice*(1+gain.thresholdPct/100)){onSkip?.({at:e.at,support:e.supportPrice,reason:'gain',close,referencePrice:gain.referencePrice,thresholdPct:gain.thresholdPct});continue;}priceGate={...gain,basis:gain.basis??'real-average',observedPrice:close,gainPct:(close/gain.referencePrice-1)*100,confirmedAt:e.at};}
      if(invalid.some(t=>t<=e.at))throw Error(BOX_ADDITION_INVALID_DATA);
@@ -270,10 +283,11 @@ export function createStructureAdditionReader(o:ReaderOptions){
  const read=(rule:StructureAdditionRule,after:number,end:number,previous:readonly QualityAdditionFill[],gain?:Gain,onSkip?:StructureSkipReporter)=>
   getReader(rule).read(after,end,usedEvents(previous),gain,onSkip);
  const readerFor=(rule:StructureAdditionRule)=>{validateStructureAddition(rule);return readers.get(JSON.stringify(structureAdditionIdentity(rule)));};
+ const impulseRule=():StructureAdditionRule=>({...defaultStructureAddition(),trigger:'confirm',kSource:'guard',guardPlusVersion:DBL5_GUARD_PLUS_VERSION});
  return Object.assign(read,{
+  confirmedImpulseWindows:(until:number)=>getReader(impulseRule(),true).impulses(until),
   impulse1115:async(after:number,end:number,previous:readonly QualityAdditionFill[],gain?:Gain,onSkip?:StructureSkipReporter)=>{
-   const rule:StructureAdditionRule={...defaultStructureAddition(),trigger:'confirm',kSource:'guard',guardPlusVersion:DBL5_GUARD_PLUS_VERSION};
-   try{return await getReader(rule,true).read(after,end,usedEvents(previous),gain,onSkip);}
+   try{return await getReader(impulseRule(),true).read(after,end,usedEvents(previous),gain,onSkip);}
    catch(error){
     if(error instanceof FishError&&['history','gap','readings','skipped'].includes(error.kind))return;
     throw error;

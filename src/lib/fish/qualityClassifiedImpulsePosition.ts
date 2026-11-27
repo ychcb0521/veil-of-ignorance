@@ -5,7 +5,7 @@ import {DBL5_GUARD_PLUS_PARAMS,type Dbl5GuardPlusCheckpoint,type GuardPlusImpuls
 import {DBL5_MARKET_RULE_VERSION,dbl5TickAt} from '../dbl5mMarketRules';
 import {compileFishProgram,shortFishHash} from './algorithm';
 import {validateHoldingImpulse1115Rule,HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION} from './holdingImpulse1115Classification';
-import {structureAdditionK,type StructureAdditionEvidence,type StructureSkipReporter} from './qualityAdditionStructure';
+import {impulseWindowEligible,structureAdditionK,type StructureAdditionEvidence,type StructureSkipReporter} from './qualityAdditionStructure';
 import {qualityHistoryFrom} from './qualityInitialization';
 import {validateFishBars,fishDelay} from './shared';
 import type {QualityAdditionFill} from './qualityAddition';
@@ -68,11 +68,11 @@ export function createClassifiedImpulsePositionReader(o:{row:TradeSignal;entry:n
   return async(after:number,end:number,previous:readonly QualityAdditionFill[],gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'},onSkip?:StructureSkipReporter)=>{
    const used=new Set(previous.flatMap(f=>f.structureEvidence?[f.structureEvidence.boxId]:[]));
    if(gain&&(!(gain.referencePrice>0)||!Number.isFinite(gain.referencePrice)))throw Error('加仓涨幅基准价无效');
-   const eligible=(e:StructureAdditionEvidence)=>e.at>after&&e.at<end&&!used.has(e.boxId)&&(o.liveAt==null||o.liveAt>=e.at&&o.liveAt<e.at+STEP);
+   const eligible=(e:StructureAdditionEvidence,report?:StructureSkipReporter)=>e.at>after&&e.at<end&&!used.has(e.boxId)&&impulseWindowEligible(e.at,e.supportPrice,e.at,e.at+STEP,o.liveAt,classifiedImpulsePositionLabel(position.mainClass),report);
    const found=()=>decisions.some(({e,close})=>eligible(e)&&(!gain||close>=gain.referencePrice*(1+gain.thresholdPct/100)));
    if(!found())await advance(Math.floor(end/STEP)*STEP,found);
    for(const {e,close} of decisions){
-    if(!eligible(e))continue;
+    if(!eligible(e,onSkip))continue;
     if(gain&&close<gain.referencePrice*(1+gain.thresholdPct/100)){onSkip?.({at:e.at,support:e.supportPrice,reason:'gain',close,referencePrice:gain.referencePrice,thresholdPct:gain.thresholdPct});continue;}
     return {at:e.at,price:NaN,scanFrom:o.entry,reading:e.supportPrice,threshold:0,direction:'>' as const,metric:'confirmed_impulse_class',label:classifiedImpulsePositionLabel(position.mainClass),featureId:position.version,definitionKey:e.definitionKey,barOpenTime:e.at-STEP,structureEvidence:structuredClone(e),...(gain?{priceGate:{...gain,basis:gain.basis??'real-average' as const,observedPrice:close,gainPct:(close/gain.referencePrice-1)*100,confirmedAt:e.at}}:{})};
    }
