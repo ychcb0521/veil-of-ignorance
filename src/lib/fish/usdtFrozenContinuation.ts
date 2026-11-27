@@ -46,6 +46,10 @@ export async function advanceFrozenUsdtFollow(campaign: UsdtFollowCampaign, at: 
     if (actions.has(action.id) && JSON.stringify(actions.get(action.id)) !== JSON.stringify(action)) throw Error('交接后原动作发生变化');
     actions.set(action.id, action);
   }
+  // Publish any earlier decisions even if the opening quote is still pending.
+  // Retain the prior cursor so the next poll can retry this boundary.
+  if(next.checkpoint?.openingAdditionPreview?.at===end && next.checkpoint.openingAdditionPreview.price==null && !next.sale)
+    next.checkpoint=frozen.checkpoint;
   const resumed = { ...campaign, actions: [...actions.values()].sort((a,b) => a.at - b.at), frozenMonitor: next };
   return JSON.stringify(resumed) === JSON.stringify(campaign) ? undefined : resumed;
 }

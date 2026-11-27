@@ -1,3 +1,4 @@
+import { openingImpulseFill } from './usdtFollow';
 import { qualityAdditionFills } from './qualityAddition';
 import {instantMonitorExitDue,instantMonitorSale} from './instantMonitorExecution';
 import {isMirrorClockExit} from './qualityMirrorLossReview';
@@ -34,15 +35,21 @@ export function binanceManualAdvance(position: BinanceManualPosition, prior: Qua
     return {checkpoint:prior,decision:{kind:'close' as const,reason:observed.reason||'镜像限时终止',through:through(at),action:{id,action:'close' as const,at}}};
   }
 
-  for (const evidence of qualityAdditionFills(observed).slice(qualityAdditionFills(prior).length)) {
+  const additions=qualityAdditionFills(observed).slice(qualityAdditionFills(prior).length);
+  const opening=position.followBasis ? openingImpulseFill(observed) : undefined;
+  if (opening) additions.push(opening);
+  for (const evidence of additions) {
     const impulse = evidence.structureEvidence?.guardPlus?.early_impulse_event;
     const transitionCount = (position.followBasis?.carriedAdditions ?? 0) + qualityAdditionFills(prior).length + 1;
+    const transition=opening && evidence===opening ? observed.openingImpulseDecision : undefined;
+    const sellStages=observed.sellStageSwitches?.filter(s=>s.afterAdditions<=transitionCount);
+    const vetoStages=observed.vetoStageSwitches?.filter(s=>s.afterAdditions<=transitionCount);
     actions.push({ priority: 3, decision: { kind: 'add', evidence, through: through(evidence.at),
       action: { id, action: 'add', at: evidence.at, notional: evidence.notional,
         ...(impulse ? { impulseFreshUntil: impulse.fresh_until } : {}) },
       routeDecision: observed.routeDecision?.at != null && observed.routeDecision.at <= evidence.at ? observed.routeDecision : undefined,
-      sellStageSwitches: observed.sellStageSwitches?.filter(s => s.afterAdditions <= transitionCount),
-      vetoStageSwitches: observed.vetoStageSwitches?.filter(s => s.afterAdditions <= transitionCount),
+      sellStageSwitches: transition?.sellStage ? [...(sellStages??[]),transition.sellStage] : sellStages,
+      vetoStageSwitches: transition?.vetoStage ? [...(vetoStages??[]),transition.vetoStage] : vetoStages,
     } });
   }
   const reductions = (observed.additionReductions ?? []).slice(prior.additionReductions?.length ?? 0);
@@ -65,6 +72,12 @@ export function binanceManualAdvance(position: BinanceManualPosition, prior: Qua
   const decision = actions.filter(value => value.decision.action.at >= after)
     .sort((a, b) => a.decision.action.at - b.decision.action.at || a.priority - b.priority)[0]?.decision;
   if (decision) {
+    if (opening && decision.kind==='add' && decision.evidence===opening) {
+      // The checkpoint contains closed candles only. Binance appends this addition
+      // after reconciling the order, with its actual filled quantity and price.
+      const {openingImpulseDecision,openingAdditionPreview,...checkpoint}=observed;
+      return {decision,checkpoint};
+    }
     const moves = reductions.filter(evidence => evidence.fraction === 0 && evidence.at < decision.action.at);
     return { decision, checkpoint: moves.length ? { ...prior, additionReductions: [...(prior.additionReductions ?? []), ...moves] } : prior };
   }

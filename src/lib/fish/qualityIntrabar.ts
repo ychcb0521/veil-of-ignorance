@@ -1,6 +1,6 @@
 import { DBL5_MIRROR_MODE } from './qualityMirror';
 import { dbl5SellAsBox, makeDbl5Sell } from './qualityDbl5Sell';
-import {createBoxStopReader,type BoxStopState} from './qualityBoxStop';
+import {boxAdditionBlockedAt,createBoxStopReader,type BoxStopState} from './qualityBoxStop';
 import {MIRROR_DEADLINE_KIND,mirrorDeadlineAt,mirrorCompletedBy} from './qualityMirrorDeadline';
 import {postMirrorProtectionAt,type POST_MIRROR_PROTECTION_VERSION} from './qualityPostMirrorProtection';
 import {mirrorHardStopActive,type MirrorHardStopStage} from './qualityMirrorHardStopStages';
@@ -94,7 +94,7 @@ export async function findQualityIntrabarExit(o: {
   sellerPeak?:number;
   /** Ordinary sellers only: hard vetoes never wait for this overlay. */
   confirmOrdinary?: (at:number, seller:string, met:boolean) => Promise<{ confirmed:boolean; evidence:import('./qualityAdvantage').QualityAdvantageState }>;
-}): Promise<{ trigger?: QualityTrigger; prices: ResearchBar[]; mirrorFill?: QualityMirrorFill;boxStopStates?:Record<string,BoxStopState>;boxStopStateAt?:(at:number)=>Record<string,BoxStopState> }> {
+}): Promise<{ openingBlock?: (price:number)=>Promise<string|undefined>; trigger?: QualityTrigger; prices: ResearchBar[]; mirrorFill?: QualityMirrorFill;boxStopStates?:Record<string,BoxStopState>;boxStopStateAt?:(at:number)=>Record<string,BoxStopState> }> {
   const {signal}=o;
   if (o.entryGate && o.matchMode !== 'all') throw Error('买前否决只用于全部条件同时满足的动态筛选');
   const waitForTrade = o.zeroTradePolicy === 'wait' && o.matchMode === 'all' && isTuringCupSymbol(o.row.symbol);
@@ -383,5 +383,19 @@ export async function findQualityIntrabarExit(o: {
     for(const s of streams)if(!o.load.turingInitialization&&s.history.length>s.plan.warm+500) {s.history=s.history.slice(-s.plan.warm);s.cache=createFormulaEvaluationCache();}
     await fishDelay(0,signal);
   }
-  return {prices,mirrorFill,...boxState()};
+  // Consult the same armed price protections on the first trade. Keep their
+  // speculative state out of the closed-minute checkpoint.
+  const openingBlock = async (price:number) => {
+    const tick={openTime:o.end,open:price,high:price,low:price,close:price,volume:0,takerBuyVolume:null};
+    await refreshMirrorReference(tick);
+    const box=await boxReader.read(tick,{openingOnly:true});
+    if(box?.atOpen || boxAdditionBlockedAt(boxReader.states())!=null)return '开盘触发箱体保护';
+    if(checkDeadline(o.end) || staticSellAt(tick,true) || holding && (
+      checkRisk(o.end,advanceQualityHolding(holding,tick)) ||
+      qualityIntrabarStop(holding,tick,activeRisk(o.end).filter(v=>v.mirrorStage))))return '开盘触发持仓止损或限时退出';
+    const previousMirror=mirrorFill;
+    mirrorAt(tick,true);
+    if(previousMirror!==mirrorFill)return '开盘镜像减仓优先';
+  };
+  return {prices,mirrorFill,...boxState(),openingBlock};
 }

@@ -1,3 +1,5 @@
+import { watchMinuteBoundary } from '@/lib/fish/instantMinuteStream';
+import { MANAGED_CLOSE_GRACE } from '@/lib/fish/binanceManualMonitor';
 import { usdtMirrorRevision, type UsdtMirrorHistory, type UsdtMirrorPosition, type UsdtMirrorSnapshot } from '@/lib/fish/usdtPositionMirror';
 import type { UsdtCampaignBatch, UsdtLiveCampaign } from '@/lib/fish/usdtLiveCampaign';
 import type { BinanceManualAnchor, BinanceManualDecision, BinanceManualState } from '@/lib/fish/binanceManualMonitor';
@@ -311,9 +313,10 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
         if (!abort.signal.aborted) setIssue(error instanceof Error ? error.message : '交接持仓监测等待恢复');
       } finally { busy = false; }
     };
+    const stopBoundary=watchMinuteBoundary(() => void tick(), MANAGED_CLOSE_GRACE);
     const timer = setInterval(() => void tick(),6000);
     void tick();
-    return () => { abort.abort(); clearInterval(timer); };
+    return () => { abort.abort(); clearInterval(timer); stopBoundary(); };
   },[owner,token,data.connected,data.handoff?.authorized,data.handoff?.stage,readMirror]);
   const entryReports = useMemo(() => {
     const rows = data.statuses.filter(row => row.issue).map(row => ({ id: row.id, symbol: row.symbol, issue: row.issue!, orderId: row.orderId }));

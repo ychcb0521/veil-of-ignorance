@@ -277,7 +277,7 @@ export class FishScanner {
       const start = monitor.plan.initialization ? await marketStart?.(symbol) : undefined;
       const closedMinute = Math.floor(now / 60_000) * 60_000;
       if ((sample.source.exchange ?? 'binance') === 'binance' && !isTuringCupSymbol(symbol)
-        && !sample.binanceEntry && end === closedMinute && end % 300_000 === 0) {
+        && (!sample.binanceEntry || previous?.followBasis) && end === closedMinute && end % 300_000 === 0) {
         let opening: Promise<number | undefined> | undefined;
         load.currentMinuteOpen = at => {
           if (at !== closedMinute) return Promise.resolve(undefined);

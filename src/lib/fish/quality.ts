@@ -147,6 +147,8 @@ export interface QualityResult {
   mirrorFill?: QualityMirrorFill; remainingFraction?: number; realizedPnl?: number;
   mirrorRealizedPnl?: number; remainingPnl?: number; initialNotional?: number;
   additionFill?: QualityAdditionFill; additionFills?:QualityAdditionFill[]; additionNote?: string;
+  openingImpulseDecision?: {version:'binance-impulse-open-v1';fill:QualityAdditionFill;
+    sellStage?:QualitySellStageActivation;vetoStage?:QualityVetoStageActivation};
   openingAdditionPreview?:import('./qualityAdditionCalculator').InstantAdditionPreview;
   additionGuardPlus?:import('@/lib/dbl5GuardPlus').Dbl5GuardPlusRow;
   /** 被「加仓否决」拦下的加仓（时间、第几次、原因与读数）。 */
@@ -794,6 +796,14 @@ async function evaluateQualitySampleCore(sample:QualitySample,group:QualityGroup
     if(veto)vetoSwitches.push({...veto,at:result.endTime!,mode:group.vetoStageMode??'overlay',peakBasis:group.vetoPeakBasis??'stage'});
     state={...result,key,...(veto?{vetoPath:beginVetoStagePath(group,result)}:{}),...(switches.length?{activeSellStage:switches.at(-1),sellStageSwitches:switches}:{}),...(vetoSwitches.length?{activeVetoStage:vetoSwitches.at(-1),vetoStageSwitches:vetoSwitches}:{})};continue;
    }
+   const decision=result.openingImpulseDecision;
+   if(decision && nextCount===carried+qualityAdditionFills(result).length+1){
+     const seller=stages.find(s=>s.afterAdditions===nextCount);
+     const veto=vetoStages.find(s=>s.afterAdditions===nextCount);
+     result.openingImpulseDecision={...decision,
+       ...(seller?{sellStage:{...seller,at:decision.fill.at}}:{}),
+       ...(veto?{vetoStage:{...veto,at:decision.fill.at,mode:group.vetoStageMode??'overlay',peakBasis:group.vetoPeakBasis??'stage'}}:{})};
+   }
    const active=selected?switches.filter(s=>s.afterAdditions===selected.afterAdditions).at(-1)??{...selected,at:qualityAdditionFills(result)[selected.afterAdditions-carried-1]?.at??result.entryTime!}:undefined;
    const activeVeto=selectedVeto?vetoSwitches.filter(s=>s.afterAdditions===selectedVeto.afterAdditions).at(-1):undefined;
    const reason=result.status==='closed'&&!result.exitSnapshot?.cause&&active?`第 ${active.afterAdditions} 次加仓后，按 ${active.label} ${active.rule.direction} ${active.rule.threshold} 卖出；${result.reason}`:result.reason;
@@ -872,6 +882,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       return { ...prior!, evaluatedAt: now };
     }
     let trigger: QualityTrigger | undefined = prior?.pendingExit;
+    let openingBlock: ((price:number)=>Promise<string|undefined>)|undefined;
     let replayedPrices: ResearchBar[] | undefined;
     let mirrorFill = prior?.mirrorFill;
     let boxStopStates=prior?.boxStopStates;
@@ -904,6 +915,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         if (combo && !afterStaticSell && !afterBoxSell) conditions.push({ ...qualityMetricPlan(combo.after.snapshot, combo.after.rule.metric), rule: { direction: combo.after.rule.direction, threshold: combo.after.rule.threshold }, stage: 'after' as const });
         const replay = await findQualityIntrabarExit({ row,plan,scale,rule:indicatorRule,staticSell,afterStaticSell,boxSell,afterBoxSell,entry,holdingStartedAt:sample.binanceEntry?sample.source.timeMs:sample.enteredAt,actualMirrorFillOnly:!!sample.binanceEntry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,boxStopStates,mirror:group.mirrorTakeProfit,mirrorFill,ordinaryUntil,conditionsUntil,confirmOrdinary,continueAfterMirrorMarker,sellerPeak:prior?.entryPrice?prior.entryPrice*(1+(prior.peakPct??0)/100):undefined,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
           ...(combo ? { ruleStage: 'before' as const, switchPct: combo.switchPct } : {}) });
+        openingBlock = replay.openingBlock;
         trigger = replay.trigger; boxStopStates = replay.boxStopStates; boxStopStateAt = replay.boxStopStateAt; replayedPrices = replay.prices; mirrorFill = replay.mirrorFill;
       } else if (indicatorRule) {
         let cursor = Math.floor(since / plan.step) * plan.step;
@@ -1013,6 +1025,16 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       }
     }
     if(boxStopStateAt)boxStopStates=boxStopStateAt(finalTime);
+    let openingImpulseDecision:QualityResult['openingImpulseDecision'];
+    if(openingAdditionPreview?.openingFill){
+      const {openingFill,...display}=openingAdditionPreview;
+      openingAdditionPreview=display;
+      if(!closed && !trigger && !sellStageBoundary && openingFill.at===finalTime && openingFill.at===end){
+        const blocked=await openingBlock?.(openingFill.price);
+        if(blocked)openingAdditionPreview={...display,quantity:undefined,detail:blocked};
+        else openingImpulseDecision={version:'binance-impulse-open-v1',fill:openingFill};
+      }
+    }
     const savedAdditionBlock=boxAdditionBlockedAt(boxStopStates,prior?.additionsBlockedAt);
     if(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime)additionNote='首次箱体断裂已确认，本笔持仓停止后续加仓；第二次独立断裂时终止，其他卖出条件继续生效';
     // New additions may precede a mirror found by the initial price replay.
@@ -1051,6 +1073,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     if(trackVetoPath){vetoPath=prior?.vetoPath??{entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};for(const b of held)vetoPath=advanceQualityHolding(vetoPath,b);vetoPath=advanceQualityHolding({...vetoPath,peak:Math.max(vetoPath.peak,fillPeak)},{openTime:finalTime,open:finalPrice,high:finalPrice,low:finalPrice,close:finalPrice,volume:0,takerBuyVolume:0});}
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
     return { ...base,...(isSelectedL0(group.payoffRiskVersion)?{selectedL0Pct:initialPayoffRiskPct??null}:{}),...(initialPayoffRiskPct!==undefined && (group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION) ? {initialDbl5RiskPct:initialPayoffRiskPct}:{}),...(mirrorLossReviews?{mirrorLossReviews}:{}),...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(impulseTimingAuditFrom!=null?{impulseTimingAuditFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
+      ...(openingImpulseDecision?{openingImpulseDecision}:{}),
       ...(!closed&&!trigger&&openingAdditionPreview?.at===finalTime?{openingAdditionPreview}:{}),
       ...(additionGuardPlus&&additionGuardPlus.at<=finalTime?{additionGuardPlus}:{}),
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),

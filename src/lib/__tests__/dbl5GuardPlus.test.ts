@@ -239,7 +239,7 @@ describe('DBL-5防守线+急拉-1115',()=>{
    })};
   const opening=await findCalculatorAdditions(openingOptions);
   expect(opening.fills).toEqual([]);
-  expect(opening.openingPreview).toMatchObject({at,price:101.4,quantity:split.fills[0].quantity});
+  expect(opening.openingPreview).toMatchObject({at,price:101.4,quantity:split.fills[0].quantity,openingFill:{at,notional:split.fills[0].notional,structureEvidence:{eventId:split.fills[0].structureEvidence!.eventId}}});
   expect((await findCalculatorAdditions({...openingOptions,additionsBlockedAt:at})).openingPreview).toBeUndefined();
   const noPrice=await findCalculatorAdditions({...openingOptions,load:Object.assign(closedLoad,{currentMinuteOpen:async()=>undefined})});
   expect(noPrice.openingPreview).toMatchObject({at,detail:'等待本分钟开盘价'});

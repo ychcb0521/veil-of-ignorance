@@ -182,7 +182,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
   const history=new Map(rules.map(r=>[r.v.id,[{at:o.since,state:{...r.state}}]]));
   const record=(id:string,at:number,state:BoxStopState)=>{const list=history.get(id)!;if(JSON.stringify(list.at(-1)!.state)!==JSON.stringify(state))list.push({at,state:{...state}});};
   const statesAt=(at:number)=>Object.fromEntries(rules.map(r=>[r.v.id,{...history.get(r.v.id)!.filter(p=>p.at<=at).at(-1)?.state}]));
-  const read=async (minute:ResearchBar, options?:{observeNativeClose?:boolean;onlyActivated?:boolean;onRawReference?:(line:number,atr:number,buffer:number, confirmedAt:number, id:string)=>void}):Promise<QualityTrigger|undefined>=>{
+  const read=async (minute:ResearchBar, options?:{openingOnly?:boolean;observeNativeClose?:boolean;onlyActivated?:boolean;onRawReference?:(line:number,atr:number,buffer:number, confirmedAt:number, id:string)=>void}):Promise<QualityTrigger|undefined>=>{
     const candidates:QualityTrigger[]=[];
     for(const r of rules){
       const after=!!r.v.activation||r.v.mirrorStage?.stage==='after',boundary=o.activationAt?.();
@@ -265,7 +265,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
       const cause={id:r.parentId,label,...activationEvidence,...(r.channel?{boxStopChannel:r.channel,boxStopChannelsVersion:BOX_STOP_CHANNELS_VERSION}:{}),kind:BOX_STOP_KIND,direction:'<=' as const,threshold:line,boxStopEvidence:{version:r.rule.version,line,confirmedAt:r.state.confirmedAt!,confirmation:r.rule.confirmation,...(r.rule.guardRegime ? {guardRegime:r.rule.guardRegime} : {})}};
       if(r.rule.confirmation==='touch'){
         if(minute.low<=line*(1+1e-12)){const atOpen=minute.open<=line*(1+1e-12);candidates.push({at:minute.openTime,reading:atOpen?minute.open:line,fillPrice:atOpen?minute.open:line,fillPeak:minute.open,barOpenTime:minute.openTime,atOpen,cause});}
-      }else if(r.rule.confirmation==='close-1m'||(minute.openTime+60000)%r.step===0){
+      }else if(!options?.openingOnly&&(r.rule.confirmation==='close-1m'||(minute.openTime+60000)%r.step===0)){
         r.state.count=minute.close<=line*(1+1e-12)?r.state.count+1:0;
         record(r.v.id,minute.openTime+60000,r.state);
         if(r.state.count>=r.rule.closes)candidates.push({at:minute.openTime+60000,reading:minute.close,barOpenTime:minute.openTime,cause});

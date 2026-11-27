@@ -502,7 +502,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
               }
               if (repeatOpening && stored?.monitorResult) {
                 if (!hasManualIntent(record.id) && preview) {
-                  await save(record, { ...stored, monitorResult: { ...stored.monitorResult, openingAdditionPreview: preview } });
+                  await save(record, { ...stored, monitorResult: { ...stored.monitorResult, openingAdditionPreview: preview, openingImpulseDecision: result.openingImpulseDecision } });
                 }
                 retry.set(record.id, Date.now() + POLL_MS);
                 return;

@@ -23,6 +23,15 @@ const run=(g:QualityGroup,load:FishReconstructionLoader,now=T+10*M,s=sample,prev
 describe('ordinary static drawdown seller', () => {
   const stop = (threshold = 2) => makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', threshold, [], undefined, 'stop');
 
+  it('gives a gap stop priority over an impulse on the first trade without reading the new minute',async()=>{
+    const end=T+5*M, plan=qualityMetricPlan(group().snapshot,'raw').plan;
+    const result=await findQualityIntrabarExit({row:sample.source,plan,scale:1,entry:T,since:T,end,resumed:false,
+      holding:{entry:100,peak:100,minimum:100,dynamic:0},staticSell:{version:'sell-static-drawdown-v1',metric:'staticDrawdown',direction:'>=',threshold:2},
+      signal:signal(),load:async(row,from,to,p,s)=>{expect(to).toBeLessThanOrEqual(end);return loader(t=>bar(t))(row,from,to,p,s);}});
+    expect(await result.openingBlock!(98)).toContain('止损');
+    expect(await result.openingBlock!(100)).toBeUndefined();
+  });
+
   it('fills a 2% touch at 98, attributes the exit to the selected seller, and carries the same entry across resume', async () => {
     const g = freezeQualityPlan(stop());
     const path = vi.fn(loader(t => t === T+M ? { ...bar(t), low: 98, high: 110 } : bar(t)));

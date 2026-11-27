@@ -6,6 +6,16 @@ export function instantMinuteOpening(symbol: string, at: number) {
   return opening?.at === at ? opening.price : undefined;
 }
 
+/** Wake once the exchange minute-close grace has elapsed, independently of polling phase. */
+export function watchMinuteBoundary(wake: () => void, grace: number) {
+  let timer: ReturnType<typeof setTimeout>;
+  const schedule = () => {
+    timer = setTimeout(() => { wake(); schedule(); }, MINUTE - Date.now() % MINUTE + grace);
+  };
+  schedule();
+  return () => clearTimeout(timer);
+}
+
 /** Wake on market messages, independently of browser timer alignment. */
 export function watchInstantMinuteStreams(symbols: string[], wake: () => void) {
   const watched = new Set(symbols);

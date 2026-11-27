@@ -139,6 +139,47 @@ it('requires both realtime capture provenance and a sized, valid frozen template
   const altered = { ...instantMonitor, plan: { ...plan, positionManagement: { ...plan.positionManagement!, notional: 400 } } };
   expect(rows({ ...round, liveCapturedAt: at, instantMonitor: altered })[0].liveEntry).toBeUndefined();
 });
+it('submits the first verified impulse open once, before the minute closes', async () => {
+  const boundary=Math.floor(Date.now()/300_000)*300_000;
+  const entry=boundary-20_000, eventId='impulse-'+'a'.repeat(32);
+  const source={id:'opening-fixture',symbol,exchange:'binance' as const,timeMs:entry,timeLabel:'',fallbackZone:''};
+  const record:PreEntryRecord={id:source.id,roundId:'round',status:'matched',startTime:entry,cursor:entry,
+    matchedAt:entry,updatedAt:entry,readings:[],sample:{id:source.id,source,basis:'signal',groups:[],enteredAt:entry,importedAt:entry}};
+  const plan=freezeQualityPlan({...makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE,'>=',3,[]),
+    positionManagement:{version:QUALITY_POSITION_MANAGEMENT_VERSION,leverage:5,notional:100}});
+  const round:PreEntryRound={id:'round',startedAt:entry,updatedAt:entry,state:'complete',instantTrading:true,
+    liveCapturedAt:entry,hours:1,filters:[],instantMonitor:{version:INSTANT_TEMPLATE_MONITOR,templateId:'fixture',name:'fixture',plan}};
+  const monitor={status:'open' as const,endTime:boundary,openingAdditionPreview:{at:boundary,quantity:10,price:4,round:1,line:3.9,detail:'opening'}};
+  const fill={at:boundary,price:4,quantity:10,notional:40,structureEvidence:{guardPlus:{early_impulse_event:{
+    impulse_id:eventId,available_at:boundary,fresh_until:boundary+300_000}}}};
+  const decision={version:'binance-impulse-open-v1',fill};
+  const build=(result:object)=>usdtFollowCampaigns({admitted:[{record,round}],alerts:new Map(),
+    monitorResults:new Map([[record.id,result]])} as unknown as Parameters<typeof usdtFollowCampaigns>[0])[0];
+  const venue=exchange(),runner=createUsdtFollower(makeStore(file()),venue,owner,'hedge',entry,venue.readCampaign);
+  vi.useFakeTimers({toFake:['Date']});
+  try {
+    vi.setSystemTime(entry);
+    runner.ingest([build(monitor)],entry);
+    await runner.tick(entry);
+    expect(venue.order.mock.calls.filter(call=>call[3])).toHaveLength(1);
+    vi.setSystemTime(boundary+250);
+    const live=build({...monitor,openingImpulseDecision:decision});
+    const action={action:'add',id:'add-'+eventId,at:boundary,notional:40,impulseFreshUntil:boundary+300_000};
+    expect(live.actions).toContainEqual(action);
+    expect(build({...monitor,pendingExit:{at:boundary},openingImpulseDecision:decision}).actions).toHaveLength(1);
+    expect(build({...monitor,openingImpulseDecision:{...decision,fill:{...fill,quantity:0}}}).actions).toHaveLength(1);
+    runner.ingest([live]); await runner.tick();
+    const sent=()=>venue.order.mock.calls.filter(call=>call[3]);
+    expect(sent()).toHaveLength(2);
+    expect(sent()[1][2].side).toBe('BUY');
+    vi.setSystemTime(boundary+60_000);
+    const settled=build({...monitor,endTime:boundary+60_000,additionFills:[fill]});
+    expect(settled.actions).toEqual(live.actions);
+    runner.ingest([settled]); await runner.tick();
+    expect(sent()).toHaveLength(2);
+  } finally { vi.useRealTimers(); }
+});
+
 function exchange() {
   let id = 0;
   const orders = new Map<string, { id: string; order: UsdtOrder; at: number }>();
@@ -389,6 +430,16 @@ it('takes over a followed trade in place using its Binance remainder, counts ord
     expect(saved.managed).toBeUndefined();
   } finally { raw.close(); }
   const sample = binanceManualSample(switched), checkpoint = binanceManualSeed(switched, sample);
+  const openingAt=Math.ceil((effectiveAt+m)/300_000)*300_000;
+  const openingFill={at:openingAt,price:5,quantity:5,notional:25,structureEvidence:{guardPlus:{early_impulse_event:{
+    impulse_id:'impulse-'+'b'.repeat(32),available_at:openingAt,fresh_until:openingAt+300_000}}}} as NonNullable<typeof checkpoint.additionFill>;
+  const openingObserved={...checkpoint,endTime:openingAt,openingImpulseDecision:{version:'binance-impulse-open-v1' as const,fill:openingFill}};
+  const openingAdvance=binanceManualAdvance(switched,checkpoint,openingObserved);
+  expect(openingAdvance?.decision).toMatchObject({kind:'add',action:{id:'managed-'+switched.revision,at:openingAt,notional:25}});
+  expect(openingAdvance?.checkpoint).toMatchObject({endTime:openingAt,entryPrice:4.75});
+  expect(openingAdvance?.checkpoint.additionFills).toBeUndefined();
+  expect(openingAdvance?.checkpoint).not.toHaveProperty('openingImpulseDecision');
+  expect(binanceManualAdvance({...switched,followBasis:undefined},checkpoint,openingObserved)?.decision).toBeUndefined();
   expect(sample).toMatchObject({ enteredAt: effectiveAt, binanceEntry: { price: 4.75, quantity: 15, orderId: initial.orderId } });
   const simulatedExit = await evaluateInstantMonitor(sample, target, effectiveAt + m, async (_source, from, to, plan) =>
     Array.from({ length: (to - from) / plan.step }, (_, i) => ({ openTime: from + i * plan.step, open: 4.75,

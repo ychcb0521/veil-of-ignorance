@@ -1,3 +1,4 @@
+import { watchMinuteBoundary } from '@/lib/fish/instantMinuteStream';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MANAGED_CLOSE_GRACE, MANAGED_MINUTE, binanceManualId, type BinanceManualAnchor, type BinanceManualState } from '@/lib/fish/binanceManualMonitor';
 import { binanceManualAdvance, binanceManualSample, binanceManualSeed } from '@/lib/fish/binanceManualStrategy';
@@ -65,6 +66,8 @@ export function useBinanceManualMonitor(follow: ReturnType<typeof useUsdtFollow>
             if (signal.aborted) return;
             const next = binanceManualAdvance(position, base, result);
             if (next?.decision?.kind === 'add' && input.current.executionSafety !== USDT_EXECUTION_SAFETY) continue;
+            // Retry from the original closed checkpoint while the first trade is unavailable.
+            if (position.followBasis && !next?.decision && result.openingAdditionPreview?.at===end && result.openingAdditionPreview.price==null) continue;
             if (next) await advanceManualMonitor(id, position.revision, next.checkpoint, next.decision, signal, position.planEpoch);
             if (result.status !== 'waiting' && (result.endTime ?? 0) >= end - MANAGED_MINUTE) evaluated.set(evaluationKey, end);
           } catch (error) {
@@ -82,12 +85,14 @@ export function useBinanceManualMonitor(follow: ReturnType<typeof useUsdtFollow>
     const refresh = () => void sync();
     wake.current = refresh;
     const timer = window.setInterval(refresh, 6000);
+    const stopBoundary=watchMinuteBoundary(refresh, MANAGED_CLOSE_GRACE);
     document.addEventListener('visibilitychange', refresh);
     refresh();
     return () => {
       lifetime.abort();
       wake.current = undefined;
       window.clearInterval(timer);
+      stopBoundary();
       document.removeEventListener('visibilitychange', refresh);
     };
   }, [owner, connected, manualMonitor, readManualMonitor, advanceManualMonitor]);

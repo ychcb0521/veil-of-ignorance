@@ -80,6 +80,8 @@ export interface InstantAdditionPreview {
  line: number;
  price?: number;
  quantity?: number;
+ /** A winning confirmed impulse, independently verified against opening sell rules by the monitor. */
+ openingFill?: QualityAdditionFill;
  detail: string;
 }
 export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];openingPreview?:InstantAdditionPreview;stop?:SupportStop;stageBoundary?:{at:number;price:number};vetoed?:AdditionVetoRecord[];reductions?:QualityReductionFill[];skipped?:AdditionSkipRecord[];guardPlus?:Dbl5GuardPlusRow}>{
@@ -413,7 +415,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   // Its evidence never enters the positions ledger or advances the closed-minute cursor.
   if(!hit && !stop && !drop && pendingMirror==null && !o.ordinaryExit && (o.additionsBlockedAt??Infinity)>o.end && addEnd===o.end
     && o.end%STEP===0 && o.liveAt!=null && o.liveAt>=o.end && o.liveAt<o.end+MINUTE
-    && o.load.currentMinuteOpen && (primaryRule.impulse1115Position||alternative?.impulse1115Position)){
+    && o.load.currentMinuteOpen && (primaryRule.impulse1115Position||alternative?.impulse1115Position || primaryRule.structure?.guardPlusVersion || alternative?.structure?.guardPlusVersion)){
    try {
     const event=await readStructure.impulse1115(o.end-1,o.end+1,fills);
     if(event){
@@ -427,7 +429,10 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
        prices:[...o.prices,tick],pauseAfterAdditionCount:roundNo});
       const fill=preview.fills.find(f=>f.at===o.end);
       const reason=preview.vetoed?.find(v=>v.at===o.end)??preview.skipped?.find(v=>v.at===o.end);
-      openingPreview={...openingPreview,price,...(fill?{quantity:fill.quantity,detail:fill.label}:
+      const impulse=fill?.structureEvidence?.guardPlus?.early_impulse_event;
+      const openingFill=impulse?.available_at===o.end && impulse.impulse_id===event.structureEvidence?.guardPlus?.early_impulse_event?.impulse_id
+        && fill?.price===price && !preview.reductions?.some(r=>r.at===o.end) ? fill : undefined;
+      openingPreview={...openingPreview,price,...(fill?{quantity:fill.quantity,detail:fill.label,openingFill}:
        {detail:reason?[reason.label,reason.reading].filter(Boolean).join(' · '):preview.stop?'开盘触发退出条件':'本轮加仓条件未满足'})};
      }
     }

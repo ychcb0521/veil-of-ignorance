@@ -3,7 +3,7 @@ import { instantMonitorSize } from './instantMonitorExecution';
 import { instantPositionInput } from './instantCampaign';
 import { qualityAdditionFills } from './qualityAddition';
 import type { FishCdaTracking, ScreenedFishAdmission } from '@/hooks/useFishCdaTracking';
-import type { QualityGroup } from './quality';
+import type { QualityGroup, QualityResult } from './quality';
 import { INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue } from './instantMonitorSettings';
 import { isLegacyQualityPlan } from './qualityLegacyEngine';
 import { validUsdtLiveEntry, type UsdtLiveEntry } from './usdtLiveEntry';
@@ -51,6 +51,17 @@ function usesGuardPlus(plan?: QualityGroup): boolean {
     .some(rule=>!!rule.classifiedImpulsePositions?.length||!!rule.impulse1115Position||rule.source==='structure'&&!!rule.structure?.guardPlusVersion);
 }
 
+/** Only a complete, same-boundary monitor decision may enter the live action queue. */
+export function openingImpulseFill(monitor?: QualityResult) {
+  const decision=monitor?.openingImpulseDecision;
+  if (!monitor || monitor.status!=='open' || monitor.pendingExit || decision?.version!=='binance-impulse-open-v1') return;
+  const fill=decision.fill, event=fill?.structureEvidence?.guardPlus?.early_impulse_event;
+  if (!event?.impulse_id || fill.at!==monitor.endTime || event.available_at!==fill.at || event.fresh_until!==fill.at+300_000 ||
+      ![fill.price,fill.quantity,fill.notional].every(value=>Number.isFinite(value)&&value>0) ||
+      qualityAdditionFills(monitor).some(prior=>prior.at>=fill.at || prior.structureEvidence?.guardPlus?.early_impulse_event?.impulse_id===event.impulse_id)) return;
+  return fill;
+}
+
 function followCampaign({ record, round }: ScreenedFishAdmission, tracking: FishCdaTracking): UsdtFollowCampaign | undefined {
   const input = instantPositionInput(record, round);
   if (!input) return;
@@ -74,7 +85,9 @@ function followCampaign({ record, round }: ScreenedFishAdmission, tracking: Fish
   const actions: UsdtFollowAction[] = [{ id: 'open', at: input.buyAt, action: 'open' }];
   if (mirror) actions.push({ id: 'mirror', at: mirror.at, ...(mirror.fraction === 1
     ? { action: 'close' as const } : { action: 'mirror' as const, fraction: mirror.fraction, atOpen: mirror.atOpen }) });
-  for (const [index, fill] of qualityAdditionFills(monitor ?? {}).entries()) {
+  const opening=!sale && !manual && mirror?.fraction!==1 ? openingImpulseFill(monitor) : undefined;
+  const fills=qualityAdditionFills(monitor ?? {});
+  for (const [index, fill] of (opening ? [...fills,opening] : fills).entries()) {
     const impulse=fill.structureEvidence?.guardPlus?.early_impulse_event,classified=fill.structureEvidence?.impulseClassification;
     actions.push({ id: classified?'add-class-'+shortFishHash(fill.structureEvidence!.eventId):impulse?'add-'+impulse.impulse_id:'add-' + (index + 1), at: fill.at, action: 'add', notional: fill.notional,
       ...(classified?{impulseFreshUntil:classified.confirmedAt+300000}:impulse?{impulseFreshUntil:impulse.fresh_until}:{}) });
@@ -95,7 +108,7 @@ function followCampaign({ record, round }: ScreenedFishAdmission, tracking: Fish
   actions.sort((a, b) => a.at - b.at || order(a) - order(b));
   const campaign: UsdtFollowCampaign = { id: input.id, source: input.source, admittedAt: record.updatedAt,
     notional: 'notional' in size ? Number(size.notional) : size.marginUsdt * size.leverage, leverage: size.leverage, actions,
-    ...(usesGuardPlus(input.monitor?.plan)?{requiresGuardPlus:true}:{}),
+    ...((opening || usesGuardPlus(input.monitor?.plan) || usesGuardPlus(monitor?.instantMonitorSwitches?.at(-1)?.to.plan))?{requiresGuardPlus:true}:{}),
     ...(input.monitor ? { frozenMonitor: { version: 1, admission: { record, round }, checkpoint: monitor,
       manual, mirror, sale } as UsdtFrozenMonitor } : {}) };
   return validUsdtLiveEntry({ ...campaign, liveEntry }) ? { ...campaign, liveEntry } : campaign;
