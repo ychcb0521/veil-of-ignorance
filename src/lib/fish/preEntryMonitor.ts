@@ -47,6 +47,7 @@ export interface PreEntryRound {
   directAdmission?: true;
   instantTrading?: true;
   liveCapturedAt?: number;
+  liveConfirmedAt?: number;
   instantPosition?: import('./instantPositionSettings').InstantPositionSettings;
   instantMonitor?: import('./instantMonitorSettings').InstantMonitorSettings;
   workspaceDraft?: true;

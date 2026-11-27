@@ -6,7 +6,7 @@ import type { FishCdaTracking, ScreenedFishAdmission } from '@/hooks/useFishCdaT
 import type { QualityGroup, QualityResult } from './quality';
 import { INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue } from './instantMonitorSettings';
 import { isLegacyQualityPlan } from './qualityLegacyEngine';
-import { validUsdtLiveEntry, type UsdtLiveEntry } from './usdtLiveEntry';
+import { instantCapturePage, timelyCaptureConfirmation, validUsdtLiveEntry, type UsdtLiveEntry } from './usdtLiveEntry';
 import type { UsdtFrozenMonitor } from './usdtFrozenMonitor';
 
 export type UsdtFollowAction =
@@ -72,17 +72,23 @@ function followCampaign({ record, round }: ScreenedFishAdmission, tracking: Fish
   const size = instantMonitorSize(input.monitor, input.instantPosition);
   const frozen = input.monitor;
   const sizing = 'notional' in size ? size : undefined;
+  const capture = record.sample.source.instantCapture;
+  const confirmedAt = capture && round.liveConfirmedAt;
+  const openAt = confirmedAt ?? input.buyAt;
+  const admittedAt = confirmedAt ?? record.updatedAt;
+  const mayOpen = !capture || capture.at === round.liveCapturedAt && capture.page === instantCapturePage()
+    && confirmedAt !== undefined && input.buyAt <= confirmedAt && timelyCaptureConfirmation(capture.at, confirmedAt);
   let liveEntry: UsdtLiveEntry | undefined;
-  if ((!input.instantPosition || input.instantPosition.balanceObservedAt) && round.instantTrading && round.liveCapturedAt !== undefined && frozen?.version === INSTANT_TEMPLATE_MONITOR &&
+  if (mayOpen && (!input.instantPosition || input.instantPosition.balanceObservedAt) && round.instantTrading && round.liveCapturedAt !== undefined && frozen?.version === INSTANT_TEMPLATE_MONITOR &&
     sizing && !isLegacyQualityPlan(frozen.plan)) {
     try {
       if (!instantMonitorTemplateIssue({ id: frozen.templateId, name: frozen.name, plan: frozen.plan })) {
-        liveEntry = { version: 1, capturedAt: round.liveCapturedAt, templateId: frozen.templateId,
+        liveEntry = { version: 1, capturedAt: round.liveCapturedAt, ...(confirmedAt !== undefined ? {confirmedAt} : {}), templateId: frozen.templateId,
           notional: sizing.notional, leverage: sizing.leverage };
       }
     } catch { /* Invalid historical template data cannot authorize a live entry. */ }
   }
-  const actions: UsdtFollowAction[] = [{ id: 'open', at: input.buyAt, action: 'open' }];
+  const actions: UsdtFollowAction[] = [{ id: 'open', at: openAt, action: 'open' }];
   if (mirror) actions.push({ id: 'mirror', at: mirror.at, ...(mirror.fraction === 1
     ? { action: 'close' as const } : { action: 'mirror' as const, fraction: mirror.fraction, atOpen: mirror.atOpen }) });
   const opening=!sale && !manual && mirror?.fraction!==1 ? openingImpulseFill(monitor) : undefined;
@@ -105,9 +111,13 @@ function followCampaign({ record, round }: ScreenedFishAdmission, tracking: Fish
   // Within a minute a support reduction precedes its successor addition.
   const priority = { open: 0, 'support-reduction': 2, add: 3, mirror: 4, 'manual-reduction': 5, close: 6 };
   const order = (action: UsdtFollowAction) => action.action === 'mirror' && action.atOpen ? 1 : priority[action.action];
-  actions.sort((a, b) => a.at - b.at || order(a) - order(b));
-  const campaign: UsdtFollowCampaign = { id: input.id, source: input.source, admittedAt: record.updatedAt,
-    notional: 'notional' in size ? Number(size.notional) : size.marginUsdt * size.leverage, leverage: size.leverage, actions,
+  // Paper decisions before the live opening cannot add to or reduce the new real position.
+  // A prior full exit must still suppress opening and reach an already established ledger.
+  const liveActions = confirmedAt === undefined ? actions : actions.flatMap(action =>
+    action.at >= openAt ? [action] : action.action === 'close' ? [{ ...action, at:openAt }] : []);
+  liveActions.sort((a, b) => a.at - b.at || order(a) - order(b));
+  const campaign: UsdtFollowCampaign = { id: input.id, source: input.source, admittedAt,
+    notional: 'notional' in size ? Number(size.notional) : size.marginUsdt * size.leverage, leverage: size.leverage, actions:liveActions,
     ...((opening || usesGuardPlus(input.monitor?.plan) || usesGuardPlus(monitor?.instantMonitorSwitches?.at(-1)?.to.plan))?{requiresGuardPlus:true}:{}),
     ...(input.monitor ? { frozenMonitor: { version: 1, admission: { record, round }, checkpoint: monitor,
       manual, mirror, sale } as UsdtFrozenMonitor } : {}) };

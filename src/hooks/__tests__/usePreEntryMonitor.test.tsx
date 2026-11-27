@@ -409,8 +409,11 @@ it.each([true,false])('admits without a screening run while respecting the posit
   const h = renderHook(()=>usePreEntryMonitor('direct-owner',true,run));
   try {
     await waitFor(()=>expect(h.result.current.ready).toBe(true));
-    await act(()=>h.result.current.startAutomatic('direct',study(),false,match,
-      {screeningEnabled:false,plans:[],hours:48,updatedAt:t},true));
+    const captured=Date.now(), input=study();
+    input.samples[0].source.instantCapture={at:captured,page:'fixture'};
+    await act(()=>h.result.current.startAutomatic('direct',input,false,match,
+      {screeningEnabled:false,plans:[],hours:48,updatedAt:t},true,captured));
+    expect(h.result.current.library.rounds[0].liveConfirmedAt).toBeGreaterThanOrEqual(captured);
     expect(run).not.toHaveBeenCalled();
     expect(reserve).toHaveBeenCalledOnce();
     expect(h.result.current.library.rounds[0]).toMatchObject({directAdmission:true,state:'complete',instantPosition:{version:1}});

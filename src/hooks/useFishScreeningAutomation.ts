@@ -17,7 +17,7 @@ import type { AutomaticScreeningMatch } from './usePreEntryMonitor';
 import type { FishQualityState } from './useFishQuality';
 import type { useFishNotify } from './useFishNotify';
 
-import { USDT_ENTRY_MAX_AGE_MS } from '@/lib/fish/usdtLiveEntry';
+import { instantCapturePage, USDT_ENTRY_MAX_AGE_MS } from '@/lib/fish/usdtLiveEntry';
 
 function freshCapture(job: Job, now: number) {
   return job.instantTrading && job.liveCapturedAt !== undefined && now >= job.liveCapturedAt && now - job.liveCapturedAt <= USDT_ENTRY_MAX_AGE_MS;
@@ -315,7 +315,9 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       const isMail = (job: Job) => job.matched || completed.has(job.id) && records.get(job.id)?.status === 'matched';
       const canScreen = (job: Job) => (!job.instantTrading || current.current.positionReady) && (monitor.ready || job.instantTrading) &&
         (records.has(job.id) || jobSettings(job)?.screeningEnabled === false || jobSettings(job)?.plans.length || job.runner && !monitor.ready);
-      const next = jobs.filter(job => canScreen(job) && !isMail(job) && (resumeJobs.has(job.key) || job.nextCheckAt <= now))
+      // Only the originating page handles a still-fresh catch. Other tabs may recover its paper work after expiry.
+      const ownedCapture = (job: Job) => !job.source.instantCapture || job.source.instantCapture.page === instantCapturePage() || !freshCapture(job, Date.now());
+      const next = jobs.filter(job => ownedCapture(job) && canScreen(job) && !isMail(job) && (resumeJobs.has(job.key) || job.nextCheckAt <= now))
         .reduce<Job | undefined>((first, job) => {
           if (!first) return job;
           const fresh = !!freshCapture(job, now);
@@ -325,7 +327,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       if (next && !paused && !(monitor.automaticRunning ?? monitor.running)) void exclusive('scan', async () => {
         const job = await readJob(next.key);
         const active = current.current.monitor;
-        if (!current.current.ready || !job || !canScreen(job) || job.matched || !resumeJobs.has(job.key) && job.nextCheckAt > Date.now() || !active?.startAutomatic
+        if (!current.current.ready || !job || !ownedCapture(job) || !canScreen(job) || job.matched || !resumeJobs.has(job.key) && job.nextCheckAt > Date.now() || !active?.startAutomatic
           || (active.automaticRunning ?? active.running) || current.current.paused || lifetime.signal.aborted) return;
         // Persist the next attempt before starting, so a reload can safely resume the same frozen round.
         const settings = jobSettings(job);

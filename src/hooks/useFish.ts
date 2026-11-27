@@ -17,6 +17,8 @@ import {fishSignalInRoundWindow,reconcileFreshFish,type FishRoundWindow} from '@
 import { signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 
+import { instantCapturePage } from '@/lib/fish/usdtLiveEntry';
+
 /** 去掉「新鱼」标记（归入「鱼舱」）。 */
 export function withoutFresh(signal: TradeSignal): TradeSignal {
   if (!signal.freshCatch) return signal;
@@ -181,7 +183,10 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
               const caught = next.find(source => fishDedupKey(source) === key);
               if (caught) {
                 knownSignals.add(identity);
-                onNewFish.current?.(caught, liveCapture && settings.anchorMs == null ? at : undefined);
+                if (liveCapture && settings.anchorMs == null) {
+                  const detectedAt = Date.now();
+                  onNewFish.current?.({ ...caught, instantCapture: { at: detectedAt, page: instantCapturePage() } }, detectedAt);
+                } else onNewFish.current?.(caught);
               }
             }
             commit(next);

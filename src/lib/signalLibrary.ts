@@ -44,6 +44,8 @@ export interface TradeSignal {
   freshCatch?: boolean;
   /** 「鱼」最近一次被捕到的时刻（ms）：删除记号只压住在它之前捕到的那条（见 fish/tombstones.ts）。 */
   caughtAt?: number;
+  /** Issued only to the instant queue on the first hit of an unanchored live scan. */
+  instantCapture?: { at: number; page: string };
   /** Explicit cabin import time for deletion checks. The original capture time is preserved. */
   cabinImportedAt?: number;
   /** Immutable fishing-round snapshot retained in 鱼舱; separate from the next round’s fresh catch. */

@@ -323,7 +323,12 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     const reported = new Set(data.statuses.map(row => row.id));
     for (const campaign of campaigns) {
       const open = campaign.actions[0];
-      if (!reported.has(campaign.id) && campaign.liveEntry && open?.action === 'open' && campaign.admittedAt - open.at > USDT_ENTRY_MAX_AGE_MS) {
+      const admission = campaign.frozenMonitor?.admission;
+      const capture = admission?.record.sample.source.instantCapture;
+      if (!reported.has(campaign.id) && capture && admission.round.liveConfirmedAt !== undefined &&
+          admission.round.liveConfirmedAt - capture.at > USDT_ENTRY_MAX_AGE_MS) {
+        rows.push({ id: campaign.id, symbol: campaign.source.symbol, issue: '首次捕到至筛选确认超过 2 分钟，未提交首仓', orderId: undefined });
+      } else if (!reported.has(campaign.id) && campaign.liveEntry && open?.action === 'open' && campaign.admittedAt - open.at > USDT_ENTRY_MAX_AGE_MS) {
         rows.push({ id: campaign.id, symbol: campaign.source.symbol, issue: '筛选确认时已超过 2 分钟开仓时限', orderId: undefined });
       }
     }

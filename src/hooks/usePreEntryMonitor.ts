@@ -272,7 +272,9 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       if (automatic && record.status === 'matched' && !matchCheckpoint) {
         clearTimeout(lane.timer); lane.timer = undefined;
         const instantMonitor = round.instantMonitor ?? (round.instantTrading && owner ? readInstantMonitorSettings(owner) : undefined);
-        admittedRound = { ...round, ...(instantPosition ? { instantPosition } : {}), ...(instantMonitor ? { instantMonitor: structuredClone(instantMonitor) } : {}),
+        const capture = record.sample.source.instantCapture;
+        admittedRound = { ...round,
+          ...(capture && capture.at === round.liveCapturedAt ? { liveConfirmedAt: round.liveConfirmedAt ?? Date.now() } : {}), ...(instantPosition ? { instantPosition } : {}), ...(instantMonitor ? { instantMonitor: structuredClone(instantMonitor) } : {}),
           state: 'complete', updatedAt: record.updatedAt };
         unconfirmedAdmissions.current.set(round.id, admittedRound);
         matchCheckpoint = checkpointMatch(record, admittedRound);

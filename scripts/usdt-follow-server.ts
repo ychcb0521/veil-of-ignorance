@@ -39,6 +39,8 @@ function parseCampaigns(value: unknown, now: number): UsdtFollowCampaign[] {
       || row.liveEntry !== undefined && !validUsdtLiveEntry(row)
       || !Array.isArray(row.actions) || row.actions.length < 1 || row.actions.length > 250
       || row.actions[0]?.id !== 'open' || row.actions[0].action !== 'open') throw Error('即时交易战役格式无效');
+    if (row.liveEntry?.confirmedAt !== undefined && row.actions[0].at !== row.liveEntry.confirmedAt)
+      throw Error('实盘首仓动作与首次入选确认时间不一致');
     const ids = new Set<string>();
     for (const [index, action] of row.actions.entries()) {
       if (!action || ids.has(action.id) || !safeTime(action.at) || (index > 0 && row.actions[index - 1].at > action.at)) throw Error('即时交易动作顺序无效');

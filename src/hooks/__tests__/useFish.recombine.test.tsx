@@ -143,6 +143,19 @@ it('在捕捞过程中立即交出真正的新鱼，复用同一轮和重复捕�
  await act(async()=>{release();await run;});
  await act(async()=>{await result.current.start(settings);});
  expect(onNewFish).toHaveBeenCalledTimes(2);
+ expect(onNewFish.mock.calls.every(([source,stamp])=>stamp===undefined && !source.instantCapture)).toBe(true);
+});
+it('uses the wall clock at first detection even when scanning has already taken several minutes',async()=>{
+ const onNewFish=vi.fn(), clock=vi.spyOn(Date,'now').mockImplementation(()=>cut+(candleRequests?780000:600000));
+ try {
+   const {result}=renderHook(()=>useFish(undefined,{onNewFish}));
+   await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a}],includeDuplicates:true},true);});
+   expect(onNewFish.mock.calls.length).toBeGreaterThan(0);
+   for(const [source,at] of onNewFish.mock.calls){
+     expect(at).toBe(cut+780000);
+     expect(source.instantCapture).toEqual({at,page:expect.any(String)});
+   }
+ } finally {clock.mockRestore();}
 });
 it('交集捕捞只提交当前实际入舱的新鱼',async()=>{
  const onNewFish=vi.fn();const {result}=renderHook(()=>useFish(undefined,{onNewFish}));

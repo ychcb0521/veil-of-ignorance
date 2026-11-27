@@ -18,6 +18,7 @@ import { evaluateInstantMonitor } from '../instantMonitorExecution';
 import { makeQualitySellPlan } from '../qualitySellPlans';
 import { STATIC_DRAWDOWN_SELL_CHOICE } from '../qualityStaticDrawdownSell';
 import { freezeQualityPlan } from '../qualityPlanVersions';
+import { instantCapturePage } from '../usdtLiveEntry';
 import { QUALITY_POSITION_MANAGEMENT_VERSION } from '../qualityPositionManagement';
 import type { PreEntryRecord, PreEntryRound } from '../preEntryMonitor';
 import { USDT_FOLLOW_MONITOR_BASIS } from '../usdtFollowMonitorBasis';
@@ -139,6 +140,34 @@ it('requires both realtime capture provenance and a sized, valid frozen template
   const altered = { ...instantMonitor, plan: { ...plan, positionManagement: { ...plan.positionManagement!, notional: 400 } } };
   expect(rows({ ...round, liveCapturedAt: at, instantMonitor: altered })[0].liveEntry).toBeUndefined();
 });
+it.each([
+  { delay:19_000, recovered:false, expected:1 },
+  { delay:120_000, recovered:false, expected:1 },
+  { delay:120_001, recovered:false, expected:0 },
+  { delay:19_000, recovered:true, expected:0 },
+])('checks first capture at confirmation before sending a current-book limit buy ($delay ms, recovered=$recovered)', async ({delay,recovered,expected})=>{
+  const now=Date.now(), detected=now-delay, signalTime=now-520_000;
+  const source={id:'hit',symbol,exchange:'binance' as const,timeMs:signalTime,timeLabel:'',fallbackZone:'',
+    instantCapture:{at:detected,page:recovered?'previous-page':instantCapturePage()}};
+  const record:PreEntryRecord={id:'hit-row',roundId:'round',status:'matched',matchedAt:signalTime,updatedAt:now+1000,
+    startTime:signalTime,cursor:signalTime,readings:[],sample:{id:'sample',source,basis:'signal',groups:[],importedAt:now,enteredAt:signalTime}};
+  const plan=freezeQualityPlan({...makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE,'>=',3,[]),
+    positionManagement:{version:QUALITY_POSITION_MANAGEMENT_VERSION,leverage:5,notional:100}});
+  const round:PreEntryRound={id:'round',state:'complete',instantTrading:true,startedAt:detected,updatedAt:now,
+    liveCapturedAt:detected,liveConfirmedAt:now,hours:1,filters:[],instantMonitor:{version:INSTANT_TEMPLATE_MONITOR,templateId:'plan',name:'plan',plan}};
+  const tracking={admitted:[{round,record}],alerts:new Map(),enabled:false,active:0,awaitingMail:0,error:'',saving:false,setEnabled:async()=>{}};
+  const row=usdtFollowCampaigns(tracking)[0];
+  expect(row.actions[0].at).toBe(now);
+  expect(row.admittedAt).toBe(now);
+  expect(record.matchedAt).toBe(signalTime);
+  const venue=exchange(), runner=createUsdtFollower(makeStore(file()),venue,owner,'hedge',detected-1);
+  runner.ingest([row],now);await runner.tick(now);
+  runner.ingest([row],now+1);await runner.tick(now+1);
+  const sent=venue.order.mock.calls.filter(call=>call[3]);
+  expect(sent).toHaveLength(expected);
+  if(expected)expect(sent[0][2]).toMatchObject({side:'BUY',limitPrice:'4.003'});
+});
+
 it('submits the first verified impulse open once, before the minute closes', async () => {
   const boundary=Math.floor(Date.now()/300_000)*300_000;
   const entry=boundary-20_000, eventId='impulse-'+'a'.repeat(32);
