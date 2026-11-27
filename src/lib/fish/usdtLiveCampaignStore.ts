@@ -3,6 +3,8 @@ import { INSTANT_CAMPAIGN_HEADER } from '@/lib/authGateway';
 import { runAccountSyncRequest } from '@/lib/accountSyncTransport';
 import { readFishPreferenceEntries, readFishPreferences, updateFishPreference } from './fishPreferencesDb';
 import { publishInstantCampaigns } from './instantCampaignStore';
+import { binanceManualId, type BinanceManualPosition } from './binanceManualMonitor';
+import type { QualityResult } from './quality';
 import { isUsdtLiveCampaignId, usdtLiveCampaignId, type UsdtLiveCampaign } from './usdtLiveCampaign';
 import { binanceReplayEntry, laterInstantReplayEntry, type InstantReplayEntry } from './latestScreenedReplaySymbol';
 
@@ -66,9 +68,17 @@ async function saveUsdtCampaign(owner: string, incoming: Saved, notify = true) {
       if (existing.followId === followId && JSON.stringify(existing) === JSON.stringify(candidate)) {
         return incoming.synced && !previous.synced ? { ...previous, synced: true } : previous;
       }
-      const management = candidate.management ?? existing.management;
-      next = { ...incoming, campaign: { ...candidate, ...(followId ? { followId } : {}), ...(management ? { management } : {}) } };
-      if (incoming.synced && (followId !== candidate.followId || management !== candidate.management)) next.synced = undefined;
+      const actionByOrder = existing.actionByOrder || candidate.actionByOrder
+        ? { ...existing.actionByOrder, ...candidate.actionByOrder } : undefined;
+      let management = candidate.management ?? existing.management;
+      if (candidate.management && !candidate.management.checkpoint && existing.management?.checkpoint
+        && candidate.management.armedAt === existing.management.armedAt
+        && candidate.management.monitor.templateId === existing.management.monitor.templateId
+        && JSON.stringify(candidate.management.monitor.plan) === JSON.stringify(existing.management.monitor.plan)) {
+        management = { ...candidate.management, checkpoint: existing.management.checkpoint };
+      }
+      next = { ...incoming, campaign: { ...candidate, ...(actionByOrder ? { actionByOrder } : {}), ...(followId ? { followId } : {}), ...(management ? { management } : {}) } };
+      if (incoming.synced && (followId !== candidate.followId || management !== candidate.management || JSON.stringify(actionByOrder) !== JSON.stringify(candidate.actionByOrder))) next.synced = undefined;
     }
     changed = true;
     return next;
@@ -77,11 +87,34 @@ async function saveUsdtCampaign(owner: string, incoming: Saved, notify = true) {
   return saved;
 }
 
+type MonitorReceipt = { epoch: number; revision: number; detail: NonNullable<UsdtLiveCampaign['management']> };
+const monitorKey = (owner: string, id: string) => 'idb:usdt-live-monitor-v1/' + encodeURIComponent(owner) + '/' + id;
+
+/** Older executors return the frozen template without the checkpoint in their history response. */
+export function saveUsdtMonitorReceipt(owner: string, position: BinanceManualPosition, checkpoint: QualityResult, exitReason?: string) {
+  const epoch = position.planEpoch ?? 0;
+  return updateFishPreference<MonitorReceipt>(monitorKey(owner, binanceManualId(position.anchor)), prior => {
+    if (prior && (prior.epoch > epoch || prior.epoch === epoch && prior.revision >= position.revision)) return prior;
+    return { epoch, revision: position.revision, detail: { version: position.version, armedAt: position.armedAt,
+      monitor: position.monitor, checkpoint, exitReason } };
+  });
+}
+
+async function withManagedReceipt(owner: string, campaign: UsdtLiveCampaign) {
+  const managed = campaign.management;
+  if (!managed || managed.checkpoint) return campaign;
+  const [receipt] = await readFishPreferences<MonitorReceipt>([monitorKey(owner, usdtLiveCampaignId(campaign))]).catch(() => []);
+  const detail = receipt?.detail;
+  if (!detail || detail.armedAt !== managed.armedAt || detail.monitor.templateId !== managed.monitor.templateId
+    || JSON.stringify(detail.monitor.plan) !== JSON.stringify(managed.monitor.plan)) return campaign;
+  return { ...campaign, management: { ...detail, ...managed, checkpoint: detail.checkpoint } };
+}
+
 export async function saveUsdtCampaignBatch(owner: string, campaigns: readonly UsdtLiveCampaign[], observedAt: number) {
   for (const campaign of campaigns) {
     const row = decodeSaved({ campaign, observedAt });
     if (!row) throw Error('币安实盘战役回报无效');
-    await saveUsdtCampaign(owner, row);
+    await saveUsdtCampaign(owner, { ...row, campaign: await withManagedReceipt(owner, campaign) });
   }
 }
 
@@ -107,13 +140,13 @@ function readCloud(owner: string, signal?: AbortSignal) {
 
 export async function loadUsdtCampaign(owner: string, id: string, signal?: AbortSignal) {
   const [local] = await readFishPreferences<Saved>([localKey(owner, id)]).catch(() => [] as Saved[]);
-  if (local) return local.campaign;
+  if (local) return withManagedReceipt(owner, local.campaign);
   const { data, error } = await readCloud(owner, signal).eq('key', CLOUD + id).maybeSingle();
   if (error) throw Error('币安实盘战役暂时无法读取');
   const decoded = decodeSaved((data as { value?: unknown } | undefined)?.value);
   if (!decoded || usdtLiveCampaignId(decoded.campaign) !== id) throw Error('找不到这场币安实盘战役');
   await saveUsdtCampaign(owner, { ...decoded, synced: true }, false).catch(() => undefined);
-  return decoded.campaign;
+  return withManagedReceipt(owner, decoded.campaign);
 }
 
 export async function listCloudUsdtCampaigns(owner: string, signal?: AbortSignal) {

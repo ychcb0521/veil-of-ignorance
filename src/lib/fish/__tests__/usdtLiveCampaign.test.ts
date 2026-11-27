@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { createUsdtCampaignReader, reconstructUsdtCampaigns, type UsdtActualTrade } from '../../../../scripts/usdt-campaign-reader';
-import { findUsdtCampaignFollow, usdtCampaignAmounts, usdtLiveCampaignId } from '../usdtLiveCampaign';
+import { withUsdtOrderActions, findUsdtCampaignFollow, usdtCampaignAmounts, usdtLiveCampaignId } from '../usdtLiveCampaign';
 import { buildUsdtLiveCampaignData, mergeUsdtLiveCampaignRows } from '../usdtLiveCampaignProjection';
 import { usdtLiveRiskMetrics } from '../usdtLiveCampaignMetrics';
 import { paperCampaignPerformance } from '../qualityCampaignPerformance';
@@ -24,6 +24,20 @@ it('lists a newer exchange campaign above older simulated campaigns on the defau
     arithmeticExpectancy: null, geometricExpectancy: null };
   const paper = makeSortRow({ id: 'paper', time: new Date(at - 1000).toISOString() });
   expect(sortCampaignRows([paper, live], []).map(row => row.campaign.id)).toEqual([live.campaign.id, 'paper']);
+});
+
+it('attributes order reasons using the opening trade and actual fill IDs, including split fills', () => {
+  const [campaign] = reconstructUsdtCampaigns('BEATUSDT', [], [buy, sell]);
+  const fill = { id: buy.id, at, price: 1, quantity: 1, realized: 0, commission: 0, commissionAsset: 'USDT' };
+  const status = { id: 'fish-instant-test', symbol: campaign.symbol, state: 'closed' as const, executions: [
+    { actionId: 'open', orderId: buy.orderId, side: 'BUY' as const, fills: [fill] },
+    { actionId: 'close', orderId: sell.orderId, side: 'SELL' as const, fills: [{ ...fill, id: sell.id }] }] };
+  expect(withUsdtOrderActions(campaign, [status])).toMatchObject({
+    followId: status.id, actionByOrder: { [buy.orderId]: 'open', [sell.orderId]: 'close' }, fills: campaign.fills });
+  expect(withUsdtOrderActions(campaign, [{ ...status, executions: [
+    status.executions[0], { ...status.executions[1], fills: [{ ...fill, id: 'elsewhere' }] }] }]).actionByOrder)
+    .toEqual({ [buy.orderId]: 'open' });
+  expect(withUsdtOrderActions(campaign, [{ ...status, symbol: 'OTHERUSDT' }])).toBe(campaign);
 });
 
 it('keeps fills of the same opening order under open and records a later order as an addition', () => {

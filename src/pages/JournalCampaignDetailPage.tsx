@@ -1242,18 +1242,23 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const instantSummary = campaign?.comparison?.instant;
   const instantOpen = instantSummary?.openPosition;
   const liveUsdt = campaign?.comparison?.liveUsdt;
+  const monitorDetail = campaign?.comparison?.liveMonitorDetail;
+  const evidenceCampaign = monitorDetail?.campaign ?? campaign;
+  const sellEvidence = evidenceCampaign?.comparison?.sellEvidence;
+  const liveExitSignal = monitorDetail?.signal;
+  const liveMonitorPlan = monitorDetail?.campaign.comparison?.monitorPlan ?? liveUsdt?.management?.monitor.plan;
   const liveMetrics = useMemo(() => usdtLiveRiskMetrics(campaign), [campaign]);
   const instantCampaignId = campaign?.comparison?.section === 'instant' ? campaign.id : undefined;
   const watchInstant = !!instantOpen || !!instantSummary?.settlementPending || (!!liveUsdt && !liveUsdt.closedAt);
 
   useEffect(() => {
-    if (!id || id !== instantCampaignId || !campaignOwnerId || batchExport || !watchInstant) return;
+    if (!id || id !== instantCampaignId || !campaignOwnerId || batchExport || (!watchInstant && !liveUsdt?.followId)) return;
     const lifetime = new AbortController();
     let running = false;
     let queued = false;
     let fingerprint = '';
     const reconcile = (campaign: TradeCampaign) => JSON.stringify([campaign.closed_at, campaign.updated_at,
-      campaign.comparison?.valuedAt, campaign.comparison?.instant?.openPosition, campaign.comparison?.instant?.settlementPending, campaign.comparison?.instant?.timing, campaign.comparison?.instant?.manual, campaign.comparison?.liveUsdt, campaign.actual_evolution]);
+      campaign.comparison?.valuedAt, campaign.comparison?.instant?.openPosition, campaign.comparison?.instant?.settlementPending, campaign.comparison?.instant?.timing, campaign.comparison?.instant?.manual, campaign.comparison?.liveUsdt, campaign.comparison?.liveMonitorDetail, campaign.actual_evolution]);
     const reload = async () => {
       if (lifetime.signal.aborted) return;
       if (running) { queued = true; return; }
@@ -1275,9 +1280,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     };
     const refresh = () => void reload();
     const unsubscribe = subscribeInstantCampaigns(campaignOwnerId, refresh);
-    const interval = window.setInterval(refresh, 30_000);
+    const interval = watchInstant ? window.setInterval(refresh, 30_000) : undefined;
     return () => { lifetime.abort(); unsubscribe(); window.clearInterval(interval); };
-  }, [id, instantCampaignId, campaignOwnerId, batchExport, watchInstant]);
+  }, [id, instantCampaignId, campaignOwnerId, batchExport, watchInstant, liveUsdt?.followId]);
 
   useEffect(() => {
     if (!id || !campaignOwnerId || !viewerUserId || batchExport || paperCampaign) return;
@@ -3020,7 +3025,17 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       </header>
 
       <main className="max-w-[1600px] mx-auto px-6 py-4 space-y-4">
-        {campaign.comparison && <QualitySellEvidence evidence={campaign.comparison.sellEvidence} repair={campaign.comparison.repair}><ArchivedImpulseWindows key={campaign.id} campaign={campaign}/></QualitySellEvidence>}
+        {liveUsdt && <div className="text-xs text-muted-foreground">
+          {monitorDetail || liveUsdt.management
+            ? <>{liveUsdt.management ? '实盘托管监测' : '跟单信号的持仓监测'} · {monitorDetail?.campaign.comparison?.planLabel ?? liveUsdt.management?.monitor.name}。币安实际成交时间、价格和数量见下方「逐笔成交」。</>
+            : liveUsdt.followId ? '这笔跟单的持仓监测记录暂不可用。' : '这笔币安成交没有关联持仓监测记录。'}
+        </div>}
+        {liveUsdt && sellEvidence?.executedAt == null && (liveExitSignal || liveUsdt.management?.exitReason) &&
+          <div className="rounded border border-border/70 bg-card px-3 py-2 text-xs">
+            <span className="mr-2 font-medium">卖出原因</span>{liveExitSignal?.reason ?? liveUsdt.management?.exitReason}
+            {liveExitSignal && <span className="ml-2 text-muted-foreground">信号时间 {formatBeijingTime(liveExitSignal.at)}</span>}
+          </div>}
+        {evidenceCampaign && <QualitySellEvidence evidence={sellEvidence} repair={evidenceCampaign.comparison?.repair}><ArchivedImpulseWindows key={evidenceCampaign.id} campaign={evidenceCampaign}/></QualitySellEvidence>}
         {/* 回收站里的战役：克制的一条提示配「恢复」，其余内容照常可读（数据本来就不过滤已删除的行） */}
         {campaign.deleted_at && (
           <div
@@ -3058,7 +3073,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             title="战役元数据"
             testId="campaign-metadata"
             items={buildCampaignMetadataItems(campaign, objectiveOperationTime, campaignMetadataMetrics)}
-            footer={campaign.comparison?.instant ? <InstantCampaignMetadataButtons campaign={campaign}/>
+            footer={liveUsdt && liveMonitorPlan ? <QualityMonitorSettingsButton plan={liveMonitorPlan} campaign={monitorDetail?.campaign}/> : campaign.comparison?.instant ? <InstantCampaignMetadataButtons campaign={campaign}/>
               : campaign.comparison?.monitorPlan ? <QualityMonitorSettingsButton plan={campaign.comparison.monitorPlan} campaign={campaign}/> : undefined}
           />
 
@@ -3490,7 +3505,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
               </span>
             </div>
           </div>
-          {liveUsdt ? <UsdtLiveCampaignFills campaign={liveUsdt} /> : <CampaignLegsList
+          {liveUsdt ? <UsdtLiveCampaignFills campaign={liveUsdt} monitor={monitorDetail} /> : <CampaignLegsList
             campaign={campaign}
             initialExpectedMaxLoss={legsInitialExpectedMaxLoss}
             /* 「占比」列按战役主方向取一侧：主多看多单、主空看空单（导出 PNG 从同一个战役对象取，两处一致） */

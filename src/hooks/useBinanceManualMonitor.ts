@@ -1,3 +1,4 @@
+import { saveUsdtMonitorReceipt } from '@/lib/fish/usdtLiveCampaignStore';
 import { watchMinuteBoundary } from '@/lib/fish/instantMinuteStream';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MANAGED_CLOSE_GRACE, MANAGED_MINUTE, binanceManualId, type BinanceManualAnchor, type BinanceManualState } from '@/lib/fish/binanceManualMonitor';
@@ -68,7 +69,12 @@ export function useBinanceManualMonitor(follow: ReturnType<typeof useUsdtFollow>
             if (next?.decision?.kind === 'add' && input.current.executionSafety !== USDT_EXECUTION_SAFETY) continue;
             // Retry from the original closed checkpoint while the first trade is unavailable.
             if (position.followBasis && !next?.decision && result.openingAdditionPreview?.at===end && result.openingAdditionPreview.price==null) continue;
-            if (next) await advanceManualMonitor(id, position.revision, next.checkpoint, next.decision, signal, position.planEpoch);
+            if (next) {
+              await advanceManualMonitor(id, position.revision, next.checkpoint, next.decision, signal, position.planEpoch);
+              // Archive after executor acknowledgement, independently of the next trading decision.
+              void saveUsdtMonitorReceipt(owner, position, next.decision?.kind === 'close' ? result : next.checkpoint,
+                next.decision?.kind === 'close' ? next.decision.reason : undefined).catch(() => undefined);
+            }
             if (result.status !== 'waiting' && (result.endTime ?? 0) >= end - MANAGED_MINUTE) evaluated.set(evaluationKey, end);
           } catch (error) {
             issues.push(position.anchor.symbol + ' · ' + (error instanceof Error ? error.message : '持仓策略等待数据'));

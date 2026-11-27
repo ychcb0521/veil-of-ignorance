@@ -405,6 +405,8 @@ export interface TradeCampaign {
     /** Entry risk from the exact linked campaign's frozen opening configuration. */
     liveEntryRiskPct?: number | null;
     liveUsdt?: import('@/lib/fish/usdtLiveCampaign').UsdtLiveCampaign;
+    /** Detail-only projection. Exchange fills and amounts remain on the parent campaign. */
+    liveMonitorDetail?: { campaign: TradeCampaign; signal?: { at: number; reason: string } };
     instant?: {
       switches?: import('@/lib/fish/instantMonitorSwitchCheckpoint').InstantMonitorSwitch[];
       metadata?: import('@/lib/fish/instantCampaignMetadata').InstantCampaignMetadata;

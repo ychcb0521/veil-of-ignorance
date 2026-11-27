@@ -635,6 +635,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     managedArchive: (id: string) => {
       const managed = rows.get(id)?.managed;
       return managed && { version: managed.version, monitor: managed.monitor, armedAt: managed.armedAt,
+        ...(managed.checkpoint ? { checkpoint: managed.checkpoint } : {}),
         ...(managed.checkpoint?.selectedL0Pct !== undefined ? { selectedL0Pct: managed.checkpoint.selectedL0Pct } : {}),
         ...(managed.checkpoint?.instantMonitorSwitches ? { switches: managed.checkpoint.instantMonitorSwitches } : {}),
         ...(managed.checkpoint?.status === 'closed' ? { exitReason: managed.checkpoint.reason } : {}) };

@@ -3,7 +3,7 @@ import type { useUsdtFollow } from './useUsdtFollow';
 import { usdtMirrorRevision, type UsdtMirrorHistory, type UsdtMirrorSnapshot } from '@/lib/fish/usdtPositionMirror';
 import { readFishPreferences, updateFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { readUsdtCampaigns, saveUsdtCampaignBatch, syncClosedUsdtCampaigns } from '@/lib/fish/usdtLiveCampaignStore';
-import type { UsdtLiveCampaign } from '@/lib/fish/usdtLiveCampaign';
+import { withUsdtOrderActions, type UsdtLiveCampaign } from '@/lib/fish/usdtLiveCampaign';
 
 type Follow = ReturnType<typeof useUsdtFollow>;
 const recentHistory = 86_400_000;
@@ -63,8 +63,10 @@ function usePositionHistories(snapshot: UsdtMirrorSnapshot | undefined, read: Fo
   return hasPositions ? histories : EMPTY_HISTORIES;
 }
 
-export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follow, 'connected' | 'positionMirror' | 'campaignMirror' | 'readPositions' | 'readCampaigns' | 'readPositionHistory'>,
+export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follow, 'connected' | 'positionMirror' | 'campaignMirror' | 'readPositions' | 'readCampaigns' | 'readPositionHistory'> & Partial<Pick<Follow, 'statuses'>>,
   onCampaigns?: (rows: readonly UsdtLiveCampaign[]) => void) {
+  const statuses = useRef(follow.statuses);
+  statuses.current = follow.statuses;
   const { connected, positionMirror, campaignMirror, readPositions, readCampaigns, readPositionHistory } = follow;
   const [positionView, setPositionView] = useState<{
     owner: string; snapshot?: UsdtMirrorSnapshot; receivedAt?: number; issue?: string;
@@ -139,9 +141,10 @@ export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follo
       if (signal.aborted) return;
       // Start settlement calibration before archive storage and cloud sync.
       campaignObserver.current?.(batch.campaigns);
-      await saveUsdtCampaignBatch(owner, batch.campaigns, batch.observedAt);
+      const campaigns = batch.campaigns.map(row => withUsdtOrderActions(row, statuses.current ?? []));
+      await saveUsdtCampaignBatch(owner, campaigns, batch.observedAt);
       if (signal.aborted) return;
-      setOpenCampaigns({ owner, rows: batch.campaigns.filter(row => !row.closedAt) });
+      setOpenCampaigns({ owner, rows: campaigns.filter(row => !row.closedAt) });
       await updateFishPreference<number>(cursorKey, cursor =>
         resetCursor && cursor === previous ? batch.observedAt : Math.max(cursor ?? 0, batch.observedAt));
       await syncClosedUsdtCampaigns(owner, signal);

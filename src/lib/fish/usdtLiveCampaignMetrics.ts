@@ -60,12 +60,16 @@ function riskPercent(value: number | null | undefined) {
   return value != null && Number.isFinite(value) && value > 0 && value <= 100 ? value : undefined;
 }
 
-export function linkedUsdtEntryRiskPct(live: UsdtLiveCampaign, owner: string, paper?: TradeCampaign) {
+export function matchesUsdtFollowCampaign(live: UsdtLiveCampaign, owner: string, paper?: TradeCampaign): paper is TradeCampaign {
   if (!paper || paper.id !== live.followId || paper.user_id !== owner || paper.comparison?.section !== 'instant'
-    || paper.direction !== (live.direction === 'long' ? 'main_long' : 'main_short')) return;
+    || paper.direction !== (live.direction === 'long' ? 'main_long' : 'main_short')) return false;
   const market = paper.comparison.instant?.source.binanceSymbol ?? paper.symbol;
-  if (market.replace(/\//g, '').toUpperCase() !== live.symbol) return;
-  const comparison = paper.comparison;
+  return market.replace(/\//g, '').toUpperCase() === live.symbol;
+}
+
+export function linkedUsdtEntryRiskPct(live: UsdtLiveCampaign, owner: string, paper?: TradeCampaign) {
+  if (!matchesUsdtFollowCampaign(live, owner, paper)) return;
+  const comparison = paper.comparison!;
   const firstSwitch = comparison.instant?.switches?.[0];
   const plan = firstSwitch ? firstSwitch.from.plan : comparison.monitorPlan;
   const opening = plan?.router?.structure ?? plan;

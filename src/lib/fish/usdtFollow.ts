@@ -1,7 +1,7 @@
 import {shortFishHash} from './algorithm';
 import { instantMonitorSize } from './instantMonitorExecution';
 import { instantPositionInput } from './instantCampaign';
-import { qualityAdditionFills } from './qualityAddition';
+import { qualityAdditionFills, type QualityAdditionFill } from './qualityAddition';
 import type { FishCdaTracking, ScreenedFishAdmission } from '@/hooks/useFishCdaTracking';
 import type { QualityGroup, QualityResult } from './quality';
 import { INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue } from './instantMonitorSettings';
@@ -62,6 +62,13 @@ export function openingImpulseFill(monitor?: QualityResult) {
   return fill;
 }
 
+export function followAdditionId(fill: QualityAdditionFill, index: number) {
+  const structure = fill.structureEvidence;
+  if (structure?.impulseClassification) return 'add-class-' + shortFishHash(structure.eventId);
+  const impulse = structure?.guardPlus?.early_impulse_event;
+  return impulse ? 'add-' + impulse.impulse_id : 'add-' + (index + 1);
+}
+
 function followCampaign({ record, round }: ScreenedFishAdmission, tracking: FishCdaTracking): UsdtFollowCampaign | undefined {
   const input = instantPositionInput(record, round);
   if (!input) return;
@@ -95,7 +102,7 @@ function followCampaign({ record, round }: ScreenedFishAdmission, tracking: Fish
   const fills=qualityAdditionFills(monitor ?? {});
   for (const [index, fill] of (opening ? [...fills,opening] : fills).entries()) {
     const impulse=fill.structureEvidence?.guardPlus?.early_impulse_event,classified=fill.structureEvidence?.impulseClassification;
-    actions.push({ id: classified?'add-class-'+shortFishHash(fill.structureEvidence!.eventId):impulse?'add-'+impulse.impulse_id:'add-' + (index + 1), at: fill.at, action: 'add', notional: fill.notional,
+    actions.push({ id: followAdditionId(fill, index), at: fill.at, action: 'add', notional: fill.notional,
       ...(classified?{impulseFreshUntil:classified.confirmedAt+300000}:impulse?{impulseFreshUntil:impulse.fresh_until}:{}) });
   }
   for (const [index, fill] of (monitor?.additionReductions ?? []).entries()) {

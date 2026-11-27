@@ -1,6 +1,6 @@
 import { accountFeatureDefs } from '@/lib/featureSource';
 import { loadQualityStudy, prepareQualityCampaignRead } from './qualityStore';
-import { listQualityCampaignDataFromStudy, qualityCampaignDetailFromStudy, type QualityCampaignData } from './qualityCampaignProjection';
+import { buildQualityCampaignData, listQualityCampaignDataFromStudy, qualityCampaignDetailFromStudy, type QualityCampaignData } from './qualityCampaignProjection';
 import { readQualityCampaignProjection, withStoredQualityCampaignStudy, type QualityCampaignReadRequest, type QualityCampaignReadResult } from './qualityCampaignReader';
 import { mergeQualityWorkspaceExecution } from './qualityWorkspaceExecutionMerge';
 import { paperCampaignPerformance, qualityCampaignPerformanceFromStudy } from './qualityCampaignPerformance';
@@ -15,7 +15,9 @@ import { readInstantPositionProgress } from './instantPositionProgress';
 import { buildInstantCampaignData, buildOpenInstantCampaignData, buildSettlingInstantCampaignData, type InstantCampaignInput } from './instantCampaign';
 import { instantMonitorSize } from './instantMonitorExecution';
 import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot, readInstantCampaignJob, readLocalInstantCampaignJobs } from './instantCampaignStore';
-import { linkedUsdtEntryRiskPct } from './usdtLiveCampaignMetrics';
+import { linkedUsdtEntryRiskPct, matchesUsdtFollowCampaign } from './usdtLiveCampaignMetrics';
+import { screenedSellReason, validScreenedSale } from './screenedCda';
+import { hasQualityCampaign } from './qualityCampaignArchive';
 import { isUsdtLiveCampaignId } from './usdtLiveCampaign';
 import { buildUsdtLiveCampaignData, mergeUsdtLiveCampaignRows } from './usdtLiveCampaignProjection';
 import { listCloudUsdtCampaigns, loadUsdtCampaign, readUsdtCampaigns } from './usdtLiveCampaignStore';
@@ -147,18 +149,41 @@ export async function loadQualityCampaignData(owner: string, id: string, signal?
   if (instant) {
     if (isUsdtLiveCampaignId(id)) {
       const real = await loadUsdtCampaign(owner, id, signal);
-      let entryRiskPct: number | null | undefined;
+      let linked: QualityCampaignData | undefined;
+      let signalReason: { at: number; reason: string } | undefined;
       if (real.followId && isInstantCampaignId(real.followId) && !isUsdtLiveCampaignId(real.followId)) {
         // Only the exact opening snapshot is needed. A paper row's later visibility does not change entry risk.
         const job = await readInstantCampaignJob(owner, real.followId).catch(() => undefined);
         throwIfReadAborted(signal);
-        const snapshot = job?.snapshot ?? (!job?.opened
+        const [progress] = job?.opened && !job.snapshot
+          ? await readInstantPositionProgress(owner, [job.opened.recordId]).catch(() => []) : [];
+        const sale = job && 'sell' in job.input ? job.input : undefined;
+        const snapshot = job?.snapshot ?? (!job?.opened || real.closedAt && !progress?.alert && !sale
           ? await loadInstantCampaignSnapshot(owner, real.followId, signal, job).catch(() => undefined) : undefined);
-        const linked = snapshot ? buildInstantCampaignData(owner, snapshot)
-          : job?.opened ? buildOpenInstantCampaignData(owner, job.opened) : undefined;
-        entryRiskPct = linkedUsdtEntryRiskPct(real, owner, linked?.campaign);
+        const alert = snapshot?.sell ?? sale?.sell ?? progress?.alert;
+        const result = sale?.monitorResult ?? progress?.monitorResult;
+        linked = snapshot ? buildInstantCampaignData(owner, snapshot)
+          : job?.opened ? (alert && buildSettlingInstantCampaignData(owner, job.opened, { ...job.opened, sell: alert, monitorResult: result }))
+            || buildOpenInstantCampaignData(owner, job.opened, result, progress?.risk?.mirror, progress?.risk?.through, progress?.manual)
+          : sale ? projectPendingTemplateSale(owner, sale) : undefined;
+        if (validScreenedSale(alert)) signalReason = { at: alert.at, reason: screenedSellReason(alert) };
       }
-      return applyTrash(buildUsdtLiveCampaignData(owner, real, entryRiskPct));
+      const data = buildUsdtLiveCampaignData(owner, real, linkedUsdtEntryRiskPct(real, owner, linked?.campaign));
+      const comparison = data.campaign.comparison!;
+      const managed = real.management;
+      if (managed) {
+        const result = managed.checkpoint;
+        if (result && hasQualityCampaign(result)) {
+          const source = { id, symbol: real.symbol, timeMs: real.openedAt, timeLabel: '', fallbackZone: '' };
+          const sample = { id: result.sampleId, source, basis: 'signal' as const, groups: [], enteredAt: real.openedAt, importedAt: managed.armedAt };
+          const detail = buildQualityCampaignData(owner, { sample, plan: managed.monitor.plan, result,
+            detectors: [], observeHours: 0, firstEvaluatedAt: managed.armedAt }, 'sell', id);
+          comparison.liveMonitorDetail = { campaign: detail.campaign };
+        }
+      } else if (matchesUsdtFollowCampaign(real, owner, linked?.campaign)) {
+        comparison.liveMonitorDetail = { campaign: linked.campaign, signal: signalReason };
+      }
+      return applyTrash(data);
     }
     const job = await readInstantCampaignJob(owner, id);
     throwIfReadAborted(signal);
