@@ -1,3 +1,4 @@
+import {LocalResultAction,useOpenLocalResult} from './FishLocalResultFiles';
 import {useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {detectorReadingText,percentilePosition} from '@/lib/fish/filterDetectorReadings';
 import {formatUTC8} from '@/lib/timeFormat';
@@ -161,6 +162,7 @@ function RebuildHistoricalIndex({owner,onReady}:{owner:string;onReady:()=>void})
 }
 
 export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSelectRecords,onViewDetectors,pickRecords,selectBeforeLoad,legacySelection}:Props){
+  const openLocal=useOpenLocalResult();
   const [historicalOnly,setHistoricalOnly]=useState(false);
   const [directory,setDirectory]=useState<Directory>(),[issue,setIssue]=useState(''),[attempt,setAttempt]=useState(0);
   const [selected,setSelected]=useState('');
@@ -199,11 +201,11 @@ export function FishArchiveBrowse({owner,scope,query,edits,marks,onDelete,onSele
     return <div key={item.id} className="rounded border">
       <div className="flex items-center"><button type="button" aria-expanded={expanded} className="flex w-full items-center justify-between gap-4 p-2 text-left" onClick={()=>{setOpened('');setSelected(expanded?'':item.id);}}>
         <span>{item.title}{!nested&&<> · {formatUTC8(item.at)}</>}</span><span>{item.count} 条</span>
-      </button>{onDelete&&!nested&&<DirectoryDeleteButton item={item} onChoose={onDelete}/>}</div>
+      </button><LocalResultAction id={item.id}/>{onDelete&&!nested&&<DirectoryDeleteButton item={item} onChoose={onDelete}/>}</div>
       {expanded&&<div className="space-y-2 border-t p-2">
         {item.children?item.children.map(child=>renderGroup(child,true)):<>
           {selectBeforeLoad&&opened!==item.id&&item.pages.length>0&&<button type="button" className="rounded-md border px-2 py-1 hover:bg-muted"
-            onClick={()=>setOpened(item.id)}>载入所选目录</button>}
+            onClick={()=>{if(pickRecords||!openLocal(item.id,'cloud' in directory?directory.cloud.revisions:undefined,item.count))setOpened(item.id);}}>载入所选目录</button>}
           {onViewDetectors&&'cloud' in directory&&!directory.cloud.detectorPreview&&item.count>0&&<button type="button" className="underline" onClick={()=>onViewDetectors(item.id)}>{legacySelection?'载入旧版完整档案查看探测值和百分位':'查看原始探测值和百分位'}</button>}
           {onSelectRecords&&!legacySelection&&item.count>0&&<button type="button" className="rounded-md border px-2 py-1 text-primary hover:bg-muted" onClick={()=>onSelectRecords(item.id)}>选取本目录记录</button>}
           {item.pages.length ? (!selectBeforeLoad||opened===item.id)&&<ArchiveRecords key={JSON.stringify([owner,item.id,'local' in directory?directory.local.id:directory.cloud.revisions,item.pages])}

@@ -1,6 +1,6 @@
 import type { QualityMonitorRecord } from './qualityMonitorLibrary';
 
-type Block = [number, number, string];
+export type Block = [number, number, string];
 type Folder = FileSystemDirectoryHandle & {
   values(): AsyncIterable<FileSystemFileHandle | FileSystemDirectoryHandle>;
   queryPermission(options: {mode: 'read'}): Promise<PermissionState>;
@@ -12,14 +12,14 @@ export interface DiskRound {
   count: number; data: string; pageSize: number; pages: Block[]; settings: Block;
 }
 const hex = /^[a-f0-9]{64}$/;
-const block = (v: unknown): v is Block => Array.isArray(v) && v.length === 3 &&
+export const validBlock = (v: unknown): v is Block => Array.isArray(v) && v.length === 3 &&
   Number.isSafeInteger(v[0]) && v[0] >= 0 && Number.isSafeInteger(v[1]) && v[1] > 0 && typeof v[2] === 'string' && hex.test(v[2]);
 
 export function validDiskRound(v: DiskRound, owner: string): boolean {
   return v?.version === 1 && v.owner === owner && typeof v.id === 'string' && v.id.startsWith('monitor-')
     && typeof v.title === 'string' && Number.isSafeInteger(v.at) && /^recent-v1-[a-f0-9]{64}$/.test(v.bodyId)
     && /^[a-f0-9]{64}\.vmon$/.test(v.data) && v.pageSize === 32 && Number.isSafeInteger(v.count) && v.count >= 0
-    && Array.isArray(v.pages) && v.pages.length === Math.ceil(v.count / v.pageSize) && v.pages.every(block) && block(v.settings);
+    && Array.isArray(v.pages) && v.pages.length === Math.ceil(v.count / v.pageSize) && v.pages.every(validBlock) && validBlock(v.settings);
 }
 
 export async function diskRounds(folder: Folder, owner: string) {
@@ -34,7 +34,7 @@ export async function diskRounds(folder: Folder, owner: string) {
   return rounds.sort((a,b) => b.at-a.at);
 }
 
-async function readBlock(file: File, [start,size,digest]: Block) {
+export async function readBlock(file: File, [start,size,digest]: Block) {
   if (start + size > file.size) throw Error('本机监测文件不完整。');
   const part = file.slice(start, start + size);
   const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', await part.arrayBuffer()));

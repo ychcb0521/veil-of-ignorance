@@ -1,3 +1,4 @@
+import {FishLocalResultFiles,LocalResultAction} from './FishLocalResultFiles';
 import {browseInformationStudy} from '@/lib/fish/browseInformationStudy';
 import type {BrowseRow} from '@/lib/fish/libraryBrowse';
 import {Popover,PopoverTrigger,PopoverContent} from './ui/popover';
@@ -351,7 +352,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const expandedItem=(item:FishDirectoryItem)=>selectedId===item.id||!!item.children?.some(child=>selectedId===child.id);
   const renderItem = (item: FishDirectoryItem,nested=false):ReactNode => <div key={item.id} className={'group/archive rounded-lg border border-border/60 '+(edits?.[item.id]?.hidden?'opacity-60':'')} data-testid={prefix+'-archive-item'}>
           <div className="flex items-center">{!nested&&(onSelectDirectory||purgeMode)&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||confirmPurge||(purgeMode ? !item.purgeable : !!edits?.[item.id]?.hidden)} checked={checkedSet.has(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={expandedItem(item)} onClick={()=>{setPicked(undefined);setBodyId('');setSelectedId(expandedItem(item)?'':item.id);}}><ChevronDown className={'h-3 w-3 '+(expandedItem(item)?'rotate-180':'')}/>{kind!=='algorithm'&&(!item.content||item.at>0)&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span>{roundsView&&(browseArchive?.scope==='screen'||hasDirectContent)&&item.templateGroup&&<span>{item.templateGroup.title}</span>}<span className="text-muted-foreground">{item.summary}</span></button>
-            {!trashView&&!purgeMode&&!picker&&roundAction?.(item.id,item.revision)}
+            {!trashView&&!purgeMode&&!picker&&<>{roundAction?.(item.id,item.revision)}<LocalResultAction id={item.id}/></>}
             {!nested&&trashOwner&&!picker&&!edits?.[item.id]?.hidden&&<DirectoryDeleteButton item={{id:item.id,at:item.at,title:edits?.[item.id]?.name||item.label}} onChoose={setTrashSelection}/>}
             {item.settings&&<FishDirectorySettingsButton name={settingsEntry(item)[0].name} entries={settingsEntry(item)} disabled={!!busy}/>}
             {!nested&&(onSetHidden||onRename||onDeleteRecords)&&<DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={'管理'+noun+' '+item.id} disabled={loading||!!loadError||!!busy} className="mr-2 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted group-hover/archive:opacity-100 group-focus-within/archive:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"><MoreHorizontal className="h-3.5 w-3.5"/></button></DropdownMenuTrigger><DropdownMenuContent align="end">{onRename&&<DropdownMenuItem onSelect={()=>{setEditingId(item.id);setDraftName(edits?.[item.id]?.name??'');setDeleteId('');setError('');}}><Pencil className="mr-2 h-3 w-3"/>编辑名称</DropdownMenuItem>}{onDeleteRecords&&<DropdownMenuItem className="text-destructive" onSelect={()=>onDeleteRecords(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录记录</DropdownMenuItem>}{onSetHidden&&(!trashOwner||edits?.[item.id]?.hidden)&&(edits?.[item.id]?.hidden?<DropdownMenuItem onSelect={()=>void hide(item.id,false)}><Undo2 className="mr-2 h-3 w-3"/>恢复目录</DropdownMenuItem>:<DropdownMenuItem className="text-destructive" onSelect={()=>setDeleteId(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
@@ -393,10 +394,11 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       </button>
     </PopoverContent>
   </Popover>;
-  return <FishLibraryRowExportContext.Provider value={managedExports?registerExport:null}><Dialog open={open} onOpenChange={changeOpen}>
+  const renderDirectory=(localToolbar?:ReactNode)=><FishLibraryRowExportContext.Provider value={managedExports?registerExport:null}><Dialog open={open} onOpenChange={changeOpen}>
     <DialogTrigger asChild><button type="button" className={action} aria-label={picker?.triggerLabel ?? '打开'+name}><Database aria-hidden className="h-3 w-3"/>{picker?.triggerLabel ?? name}</button></DialogTrigger>
     <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-hidden p-4 sm:p-5">
       {trashOwner&&!picker&&!directoryStatus&&<div ref={setTrashToolbar} className="absolute right-10 top-2.5"/>}
+      {localToolbar}
       {directoryStatus?<><DialogHeader><DialogTitle className="text-sm">{name}</DialogTitle><DialogDescription className="sr-only">核对目录显示状态</DialogDescription></DialogHeader>{directoryStatus}</>:<>
       <DialogHeader className="shrink-0 space-y-1 text-left">
         <div className={'group/library-header flex min-h-7 flex-wrap items-center gap-1.5 '+(trashOwner&&!picker?'pr-14':'pr-6')}>
@@ -492,4 +494,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       </>}
     </DialogContent>
   </Dialog></FishLibraryRowExportContext.Provider>;
+  return browseArchive?.owner&&!picker
+    ? <FishLocalResultFiles key={browseArchive.owner+'/'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} active={open&&!trashView}
+        hidden={id=>trash.marks.has(id)||!!edits?.[id]?.hidden}>{renderDirectory}</FishLocalResultFiles>
+    : renderDirectory();
 }
