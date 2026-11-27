@@ -36,10 +36,10 @@ export async function diskRounds(folder: Folder, owner: string) {
 
 export async function readBlock(file: File, [start,size,digest]: Block) {
   if (start + size > file.size) throw Error('本机监测文件不完整。');
-  const part = file.slice(start, start + size);
-  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', await part.arrayBuffer()));
+  const bytes = await file.slice(start, start + size).arrayBuffer();
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   if (Array.from(hash, b=>b.toString(16).padStart(2,'0')).join('') !== digest) throw Error('本机监测数据校验失败。');
-  return new Response(part.stream().pipeThrough(new DecompressionStream('gzip'))).json();
+  return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).json();
 }
 
 export async function readDiskPage(file: File, round: DiskRound, page: number): Promise<QualityMonitorRecord[]> {

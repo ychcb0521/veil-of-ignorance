@@ -109,8 +109,9 @@ export interface FishDirectoryPicker {
   footer: (close: () => void) => ReactNode;
 }
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
-export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,workingItems,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more,browseArchive,directoryStatus,trashAccount,cleanupDirectory,selectBeforeLoad=false,directorySearch,roundAction}:{
+export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,workingItems,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more,browseArchive,directoryStatus,trashAccount,cleanupDirectory,selectBeforeLoad=false,directorySearch,roundAction,roundPreview}:{
   roundAction?:(id:string,revision?:unknown)=>ReactNode;
+  roundPreview?:(id:string,revision?:unknown)=>ReactNode;
   workingItems?:()=>FishDirectoryItem[];
   trashAccount?:{owner?:string;scope:DirectoryScope};cleanupDirectory?:DirectoryCleanup;
   browseArchive?:{owner?:string;scope:BrowseScope;directoryOnly?:boolean;fullReady?:boolean;loadFull?:()=>void};
@@ -350,6 +351,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
     id:item.id, name:formatUTC8(item.at)+' '+(edits?.[item.id]?.name||item.label), load:item.settings,
   }] : [];
   const expandedItem=(item:FishDirectoryItem)=>selectedId===item.id||!!item.children?.some(child=>selectedId===child.id);
+  const localPreview=selected&&confirmBodyLoad&&bodyId!==selected.id&&!importSelection&&
+    !manage&&!purgeMode&&!trashView?roundPreview?.(selected.id,selected.revision):null;
   const renderItem = (item: FishDirectoryItem,nested=false):ReactNode => <div key={item.id} className={'group/archive rounded-lg border border-border/60 '+(edits?.[item.id]?.hidden?'opacity-60':'')} data-testid={prefix+'-archive-item'}>
           <div className="flex items-center">{!nested&&(onSelectDirectory||purgeMode)&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||confirmPurge||(purgeMode ? !item.purgeable : !!edits?.[item.id]?.hidden)} checked={checkedSet.has(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={expandedItem(item)} onClick={()=>{setPicked(undefined);setBodyId('');setSelectedId(expandedItem(item)?'':item.id);}}><ChevronDown className={'h-3 w-3 '+(expandedItem(item)?'rotate-180':'')}/>{kind!=='algorithm'&&(!item.content||item.at>0)&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span>{roundsView&&(browseArchive?.scope==='screen'||hasDirectContent)&&item.templateGroup&&<span>{item.templateGroup.title}</span>}<span className="text-muted-foreground">{item.summary}</span></button>
             {!trashView&&!purgeMode&&!picker&&<>{roundAction?.(item.id,item.revision)}<LocalResultAction id={item.id}/></>}
@@ -365,7 +368,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
           {deleteId===item.id&&<div role="alert" className="flex flex-wrap items-center gap-2 border-t px-3 py-2 text-[11px]"><span>删除这项目录？可在已删除目录中恢复。</span><button type="button" disabled={loading||!!loadError||!!busy} className={action+' text-destructive'} onClick={()=>void hide(item.id,true)}>确认删除目录</button><button type="button" className={action} onClick={()=>setDeleteId('')}>取消</button></div>}
           {item.children&&expandedItem(item)&&<div className="space-y-2 border-t p-2">{item.children.map(child=>renderItem(child,true))}</div>}
           {selectedId===item.id&&confirmBodyLoad&&bodyId!==item.id&&<div className="border-t px-4 py-2">
-            <button type="button" className={action} onClick={()=>setBodyId(item.id)}>载入所选目录</button>
+            {localPreview}
+            <button type="button" className={action} onClick={()=>setBodyId(item.id)}>{localPreview?'载入完整归档':'载入所选目录'}</button>
           </div>}
           {selectedId===item.id&&(!confirmBodyLoad||bodyId===item.id)&&!item.content&&!snapshot&&<p role={archiveError?'alert':'status'} className={'border-t px-4 py-3 text-[10.5px] '+(archiveError?'text-destructive':'text-muted-foreground')}>{archiveError??'正在读取归档…'}{archiveError&&<button type="button" className="ml-2 underline" onClick={()=>setLoadAttempt(attempt=>attempt+1)}>重试读取归档</button>}</p>}
           {selectedId===item.id&&(!confirmBodyLoad||bodyId===item.id)&&item.content&&<div className="border-t" data-testid={prefix+'-archive-content'}>{item.content(()=>changeOpen(false),importSelection)}</div>}
