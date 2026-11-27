@@ -17,6 +17,7 @@ it('shows the latest 12 entries while the whole study is pending and reads only 
  expect(store.body).not.toHaveBeenCalled();expect(screen.getByText(/展开时读取该项正文/)).toBeInTheDocument();
  expect(screen.getByText('共 14 项目录 · 已显示 12 项')).toBeInTheDocument();expect(screen.queryByRole('button',{name:'导出监测库数据'})).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'打开监测归档 round-0'}));
+ expect(store.body).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'载入所选目录'}));
  await screen.findByText('所选正文');expect(store.body).toHaveBeenCalledTimes(1);
  expect(screen.queryByRole('button',{name:'复制至组合表'})).toBeNull();
  const viewport=screen.getByTestId('monitor-directory-scroll');
@@ -60,6 +61,7 @@ it('shows a newly completed local round immediately instead of shadowing it with
  render(<FishMonitorLibrary study={study} ready account="alice" renderStudy={()=> <p>最新本机轮次</p>}/>);
  fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
  fireEvent.click(screen.getByRole('button',{name:'打开监测归档 local-new'}));
+ fireEvent.click(screen.getByRole('button',{name:'载入所选目录'}));
  expect(screen.getByText('最新本机轮次')).toBeInTheDocument();expect(store.directory).not.toHaveBeenCalled();expect(store.body).not.toHaveBeenCalled();
 });
 it('retains a partial index after the automatic lookup fails and retries without reading bodies',async()=>{

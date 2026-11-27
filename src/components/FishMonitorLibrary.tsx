@@ -1,5 +1,6 @@
 import {formatUTC8} from '@/lib/timeFormat';
 import type {DirectoryCleanup} from './FishDirectoryTrash';
+import {FishLocalMonitorFiles} from './FishLocalMonitorFiles';
 import {FishScrollBoundary} from './FishScrollBoundary';
 import {FishStudyRecoveryStatus} from './FishStudyRecoveryStatus';
 import {createLibraryRoundReader} from '@/lib/fish/libraryRounds';
@@ -20,6 +21,7 @@ import type {TradeSignal} from '@/lib/signalLibrary';
 const EMPTY_MONITOR_DIRECTORY:FishDirectoryItem[]=[];
 export function FishMonitorLibrary({study,ready=true,account,requestWorkspace,cleanupDirectory,loadError,onRetry,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onPurgeDirectory,onRename,loadArchive,picker,onOpenChange,openRequest}:{cleanupDirectory?:DirectoryCleanup;requestWorkspace?:()=>void;ready?:boolean;account?:string;loadError?:string;onRetry?:()=>void;study:FishQualityStudy;picker?:FishDirectoryPicker;openRequest?:FishDirectoryRequest;onOpenChange?:(open:boolean)=>void;onJump?:(s:TradeSignal)=>void;canJump?:(s:TradeSignal)=>boolean;onOpenCampaign?:()=>void;renderTemplate?:FishTemplateRenderer;renderStudy?:(snapshot:FishQualityStudy, close?: () => void)=>ReactNode;onCopyStudy?:(snapshot:FishQualityStudy,sourceRoundId?:string)=>Promise<boolean>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;onPurgeDirectory?:(ids:readonly string[])=>Promise<{removed:readonly string[];retained:readonly string[]}>;onRename?:(id:string,name:string)=>Promise<boolean>;loadArchive?:(archive:QualityMonitorArchive, updateDirectory?:boolean)=>Promise<QualityMonitorArchiveStudy>}){
  const library=study.monitorLibrary;
+ const [libraryOpen,setLibraryOpen]=useState(false);
  const [recentSession,setRecentSession]=useState(false),[pageSize,setPageSize]=useState(RECENT_MONITOR_PAGE_SIZE);
  const [search,setSearch]=useState('');
  const [checkedIndex,setCheckedIndex]=useState('');
@@ -28,7 +30,7 @@ export function FishMonitorLibrary({study,ready=true,account,requestWorkspace,cl
  const recent=useRecentMonitorDirectory(account,recentSession&&!usingLocalRecent),directory=recent.directory;
  const usingCloudRecent=recentSession&&!usingLocalRecent&&!!directory,usingRecent=usingLocalRecent||usingCloudRecent;
  const recentPending=recentSession&&!usingLocalRecent&&!!account&&!directory&&recent.loading;
- const changeOpen=useCallback((open:boolean)=>{setRecentSession(open);if(open){setPreferLocal(ready&&!!library);setCheckedIndex('');setPageSize(RECENT_MONITOR_PAGE_SIZE);setSearch('');}onOpenChange?.(open);},[onOpenChange,ready,library]);
+ const changeOpen=useCallback((open:boolean)=>{setLibraryOpen(open);setRecentSession(open);if(open){setPreferLocal(ready&&!!library);setCheckedIndex('');setPageSize(RECENT_MONITOR_PAGE_SIZE);setSearch('');}onOpenChange?.(open);},[onOpenChange,ready,library]);
  const recentItems=useMemo<FishDirectoryItem[]>(()=>!directory?[]:directory.entries.filter(entry=>!directory.edits?.[entry.id]?.hidden).map(entry=>{
   const read=(signal?:AbortSignal)=>readRecentMonitorBody(directory,entry,signal);
   return {id:entry.id,at:entry.at,label:entry.templateDirectory.title+' · '+entry.label,summary:entry.summary,
@@ -88,10 +90,10 @@ export function FishMonitorLibrary({study,ready=true,account,requestWorkspace,cl
  const partialIndex=usingCloudRecent&&directory.entries.length<directory.total
    ? JSON.stringify([account,directory.sourceRevision,directory.entries.length]) : '';
  const checkIndex=()=>{setCheckedIndex(partialIndex);recent.retry();};
- return <FishLibraryTimeDirectory workingItems={study.workspaceExecution?getItems:undefined} selectBeforeLoad={!!account} trashAccount={{owner:account,scope:'monitor'}} cleanupDirectory={cleanupDirectory} browseRounds={!usingRecent} loading={recentPending||!usingRecent&&!ready&&!loadError} loadError={usingRecent||recentPending?undefined:loadError} onRetry={onRetry}
+ return <FishLocalMonitorFiles key={account??''} owner={account} active={libraryOpen&&!picker}>{(localToolbar,roundLink)=><FishLibraryTimeDirectory roundAction={roundLink} workingItems={study.workspaceExecution?getItems:undefined} selectBeforeLoad={!!account} trashAccount={{owner:account,scope:'monitor'}} cleanupDirectory={cleanupDirectory} browseRounds={!usingRecent} loading={recentPending||!usingRecent&&!ready&&!loadError} loadError={usingRecent||recentPending?undefined:loadError} onRetry={onRetry}
   directorySearch={usingRecent?<FishDirectorySearch label="搜索监测目录" placeholder="搜索轮次、模板或日期…" value={search}
     onChange={value=>{setSearch(value);setPageSize(RECENT_MONITOR_PAGE_SIZE);}}/>:undefined}
-  notice={usingRecent?<p role="status" className="text-xs text-muted-foreground">目录按时间倒序排列，展开时读取该项正文。{!ready?(loadError?<>完整研究尚未恢复。{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试完整研究</button>}</>:null):<button type="button" className="ml-2 underline" onClick={()=>setRecentSession(false)}>查看全部轮次</button>}{!ready&&!!directory!.olderMonitorRounds?<>另有 {directory!.olderMonitorRounds} 轮尚无独立目录。{requestWorkspace&&<button type="button" className="underline" onClick={()=>{setPreferLocal(true);requestWorkspace();}}>载入旧版完整研究</button>}</>:''}</p>:recentSession&&recent.error?<p role="alert" className="text-xs text-muted-foreground">{recent.error} <button type="button" className="underline" onClick={recent.retry}>重试近期目录</button>{requestWorkspace&&<button type="button" className="ml-2 underline" onClick={()=>{setPreferLocal(true);requestWorkspace();}}>载入旧版完整研究</button>}</p>:undefined}
+  notice={<>{localToolbar}{usingRecent?<p role="status" className="text-xs text-muted-foreground">目录按时间倒序排列，展开时读取该项正文。{!ready?(loadError?<>完整研究尚未恢复。{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试完整研究</button>}</>:null):<button type="button" className="ml-2 underline" onClick={()=>setRecentSession(false)}>查看全部轮次</button>}{!ready&&!!directory!.olderMonitorRounds?<>另有 {directory!.olderMonitorRounds} 轮尚无独立目录。{requestWorkspace&&<button type="button" className="underline" onClick={()=>{setPreferLocal(true);requestWorkspace();}}>载入旧版完整研究</button>}</>:''}</p>:recentSession&&recent.error?<p role="alert" className="text-xs text-muted-foreground">{recent.error} <button type="button" className="underline" onClick={recent.retry}>重试近期目录</button>{requestWorkspace&&<button type="button" className="ml-2 underline" onClick={()=>{setPreferLocal(true);requestWorkspace();}}>载入旧版完整研究</button>}</p>:undefined}</>}
   more={usingRecent && (pageSize<visibleRecent
     ? <FishScrollBoundary key={'rows-'+pageSize} onReach={()=>setPageSize(n=>n+RECENT_MONITOR_PAGE_SIZE)}/>
     : partialIndex && (recent.loading ? <p role="status">正在读取更早目录…</p>
@@ -100,5 +102,5 @@ export function FishMonitorLibrary({study,ready=true,account,requestWorkspace,cl
   loadingStatus={recentPending?<p role="status" className="text-xs text-muted-foreground">正在读取近期目录…</p>:<FishStudyRecoveryStatus owner={account}/>} renderTemplate={renderTemplate} name="监测库" prefix="monitor" kind={usingRecent?'time':'template'} openRequest={openRequest} picker={picker} onOpenChange={changeOpen} items={usingRecent?shownRecent:recentPending?EMPTY_MONITOR_DIRECTORY:getItems} edits={usingCloudRecent?directory?.edits:library?.directoryEdits} onSetHidden={ready&&!usingRecent?onSetHidden:undefined} onPurgeDirectory={picker||!ready||usingRecent?undefined:onPurgeDirectory} onRename={ready&&!usingRecent?onRename:undefined} onCopyStudy={ready?onCopyStudy:undefined} renderStudy={renderStudy} recordCount={ready?records.length:0} download={()=>downloadMonitorRecords(records,settings)} transferMenu={!picker?(ready?actions=><FishStoredLibraryTransferMenu scope="monitor" actions={actions}/>:()=>null):undefined}
   description={usingRecent?`${search?'匹配':'共'} ${visibleRecent} 项目录 · 已显示 ${shownRecent.length} 项`:`${library?.records.length??0} 条记录 · ${rounds.filter(r=>!r.legacy).length} 轮监测 · ${archives.length} 份完整归档${rounds.some(r=>r.legacy)?' · 含历史快照':''}`}
   info={<><p>模板下的监测轮次和归档按时间排列，保留每份运行的条件和结果。目录菜单可编辑名称、删除并恢复目录，保存后保留原时间和全部内容。</p><p>展开目录后可选择记录导入组合表，原归档保留。</p><p>早期轮次只展示仍保存的记录和条件，不补造缺失读数。完整下载、导入及导出保留。</p></>}
-  empty="暂无监测归档。运行完成后可在组合表保存到监测库。"/>;
+  empty="暂无监测归档。运行完成后可在组合表保存到监测库。"/>}</FishLocalMonitorFiles>;
 }
