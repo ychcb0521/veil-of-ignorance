@@ -402,3 +402,20 @@ it('runs a checked working-table batch in an isolated draft without loading or w
  await waitFor(()=>expect(storage.draftSave).toHaveBeenCalled());expect(storage.save).not.toHaveBeenCalled();
  h.unmount();
 });
+
+it.each([true,false])('admits without a screening run while respecting the position reservation (%s)', async available => {
+  const reserve = vi.spyOn(admissions,'reserveInstantAdmission').mockResolvedValue(available);
+  const run = vi.fn(), match = vi.fn();
+  const h = renderHook(()=>usePreEntryMonitor('direct-owner',true,run));
+  try {
+    await waitFor(()=>expect(h.result.current.ready).toBe(true));
+    await act(()=>h.result.current.startAutomatic('direct',study(),false,match,
+      {screeningEnabled:false,plans:[],hours:48,updatedAt:t},true));
+    expect(run).not.toHaveBeenCalled();
+    expect(reserve).toHaveBeenCalledOnce();
+    expect(h.result.current.library.rounds[0]).toMatchObject({directAdmission:true,state:'complete',instantPosition:{version:1}});
+    expect(h.result.current.library.records[0]).toMatchObject({id:'direct:0:instant-direct',
+      matchedAt:available ? t : undefined, status:available ? 'matched' : 'unmatched'});
+    expect(match).toHaveBeenCalledTimes(available ? 1 : 0);
+  } finally { reserve.mockRestore(); }
+});

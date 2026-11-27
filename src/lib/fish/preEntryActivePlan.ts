@@ -8,9 +8,17 @@ export const FISH_AUTOMATIC_SCREENING_KEY = 'fish-automatic-screening.v1';
 export function readAutomaticScreeningSettings(owner: string): PreEntrySettings | undefined {
   try {
     const saved = JSON.parse(readPersistedStateRaw(getUserPrefix(owner) + FISH_AUTOMATIC_SCREENING_KEY) ?? 'null');
-    if (saved?.plans?.length === 1 && saved.plans[0]?.preEntryThreeStage &&
+    if ((saved?.plans?.length === 1 && saved.plans[0]?.preEntryThreeStage ||
+        saved?.screeningEnabled === false && Array.isArray(saved.plans) && !saved.plans.length) &&
         Number.isFinite(saved.updatedAt) && Number.isFinite(saved.hours) && saved.hours > 0 && saved.hours <= 8784) return saved;
   } catch { /* A malformed local value cannot serve as a screening plan. */ }
+}
+
+/** Missing preferences opt new catches into direct admission only after account hydration. */
+export function newInstantScreeningSettings(owner: string): PreEntrySettings | undefined {
+  if (readPersistedStateRaw(getUserPrefix(owner) + FISH_AUTOMATIC_SCREENING_KEY) == null)
+    return {screeningEnabled:false, plans:[], hours:DEFAULT_PRE_ENTRY_HOURS, updatedAt:0};
+  return readAutomaticScreeningSettings(owner);
 }
 
 /** 2026-11-08 用户已确认保存截图中选中的「三阶筛选 2」。只选择原对象，不改参数或版本。 */

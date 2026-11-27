@@ -115,7 +115,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   const [pairSaving, setPairSaving] = useState(false);
   const automatic = state.automaticScreening, cda = state.cdaTracking;
   const instantReady = state.instantPreferenceStatus ? state.instantPreferenceStatus === 'ready' : state.ready;
-  const beforeReady = instantReady && (!!automatic?.settings || !!state.preEntry?.ready);
+  const beforeReady = instantReady;
   const settingsReady = settingsView === 'before' ? beforeReady : instantReady;
   const settingsIssue = !instantReady && state.instantPreferenceStatus === 'error'
     ? '即时交易设置读取失败' : instantReady && settingsView === 'before' ? state.preEntry?.error : undefined;
@@ -124,6 +124,8 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   const closeSettings = () => setSettingsView(null);
   const pending = automatic?.pending ?? 0;
   const screeningPending = automatic?.screeningPending ?? (pending > 0 && !!(automatic?.settings ?? state.preEntry?.library.settings)?.plans.length);
+  const direct = instantReady && (!automatic?.settings || automatic.settings.screeningEnabled === false);
+  const directProcessing = pending ? automatic?.directPending : direct;
   const needsSettings = pending > 0 && beforeReady && !screeningPending;
   const screening = !automatic?.paused && (!!state.preEntry?.automaticRunning || screeningPending && !automatic?.waitingReason);
   const realPositions = follow?.connected && !live?.issue ? live?.snapshot?.positions : undefined;
@@ -135,8 +137,8 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   const verifiedExecutor = follow?.executionSafety === USDT_EXECUTION_SAFETY;
   const { label: stage, icon: StageIcon } = holding ? { label: '持仓中', icon: BriefcaseBusiness }
     : !automatic?.paused && automatic?.waitingReason ? { label: automatic.waitingReason, icon: Clock3 }
-    : screening ? { label: '筛选中', icon: Filter }
-    : automatic?.paused && pending > 0 ? { label: '筛选已暂停', icon: Pause }
+    : screening ? { label: directProcessing ? '处理信号中' : '筛选中', icon: Filter }
+    : automatic?.paused && pending > 0 ? { label: directProcessing ? '信号处理已暂停' : '筛选已暂停', icon: Pause }
     : capturing ? { label: '捕捞中', icon: Pickaxe } : { label: '等待中', icon: Clock3 };
   const followStatus = follow?.connected
     ? follow.paused ? '已暂停开仓和加仓' : verifiedExecutor ? '本机实盘跟随中' : '本机执行端待更新'
@@ -146,7 +148,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
     {children}{follow && <FishUsdtPositions key={follow.owner} follow={follow} live={live}
       monitorTemplates={activeQualityPlanTemplates({ planTemplates: state.study.planTemplates ?? state.templateCatalog })}/>}
   </div>}
-    summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
+    summary={<FishQualityInfo label="即时交易说明"><p>捕捞信号按买前设置入选，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={<>
       {instant?.positions.map(position => {
         const preview = cda?.monitorResults?.get(position.recordId)?.openingAdditionPreview;
@@ -161,7 +163,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
       {state.instantMonitor?.pendingCloud && <span role="status">买后设置 · 云端同步中</span>}
       {automatic && <>
       {needsSettings && <span>请先保存买前设置</span>}
-      {screening && holding && <span role="status" className={qualityRowItem}><Filter aria-hidden className="h-3 w-3"/>筛选中</span>}
+      {screening && holding && <span role="status" className={qualityRowItem}><Filter aria-hidden className="h-3 w-3"/>{directProcessing ? '处理信号中' : '筛选中'}</span>}
       {state.preEntry?.automaticRunning && screening && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
       {(cda?.error || cda?.campaignIssue) && <span role="alert" className="text-destructive">{cda.error || cda.campaignIssue}</span>}
       {screeningIssue && <span role="alert" className="text-destructive">{screeningIssue}</span>}
@@ -171,7 +173,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
     </>}>
     <button type="button" className={automatic?.paused ? qualityPrimaryAction : qualityPauseAction} disabled={!automatic}
       onClick={() => automatic?.setAutoPaused(!automatic.paused)}>
-      {automatic?.paused ? <><Play className="h-3 w-3"/>继续筛选</> : <><Pause className="h-3 w-3"/>暂停筛选</>}
+      {automatic?.paused ? <><Play className="h-3 w-3"/>{direct ? '继续处理' : '继续筛选'}</> : <><Pause className="h-3 w-3"/>{direct ? '暂停处理' : '暂停筛选'}</>}
     </button>
     <Popover open={settingsView === 'menu' || settingsView === 'live'} onOpenChange={open => open ? setSettingsView('menu') : closeSettings()}>
       <PopoverTrigger asChild>
@@ -185,7 +187,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
         onCloseAutoFocus={event => { if (settingsDialog) event.preventDefault(); }}>
         {settingsView === 'menu' && <>
           <button type="button" className={settingsItem} disabled={!state.preEntry || !automatic?.saveSettings}
-            title={automatic?.settings?.plans[0]?.label ?? '沿用动态筛选'} onClick={() => setSettingsView('before')}>
+            title={automatic?.settings?.screeningEnabled === false ? '未启用买前筛选' : automatic?.settings?.plans[0]?.label ?? '未启用买前筛选'} onClick={() => setSettingsView('before')}>
             <Settings2 aria-hidden className="h-3 w-3"/>买前设置
           </button>
           <button type="button" className={settingsItem} disabled={!state.instantMonitor}

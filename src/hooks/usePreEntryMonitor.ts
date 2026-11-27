@@ -7,7 +7,7 @@ import { readInstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
 import { createPreEntryCheckpoint } from '@/lib/fish/preEntryCheckpoint';
 import {newPreEntryHours, selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { emptyPreEntryLibrary, isAutomaticPreEntryRound, mergePreEntryLibraries, archivePreEntrySettings, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord, type PreEntrySettings } from '@/lib/fish/preEntryMonitor';
+import { DIRECT_ADMISSION_RECORD, emptyPreEntryLibrary, isAutomaticPreEntryRound, mergePreEntryLibraries, archivePreEntrySettings, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord, type PreEntrySettings } from '@/lib/fish/preEntryMonitor';
 import { loadPreEntryLibrary } from '@/lib/fish/preEntryMonitorStore';
 import { loadPreEntryLibraryV2 } from '@/lib/fish/preEntryMonitorV2Store';
 import { loadPreEntryLibraryV3 } from '@/lib/fish/preEntryMonitorV3Store';
@@ -285,6 +285,13 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       // Save the frozen batch before executing it. Storage failure must not create an unrecorded run.
       await saveSnapshot(current.current);
       if (!live() || aborter.signal.aborted) return;
+      if (round.instantTrading && round.directAdmission) {
+        const record = current.current.records.find(row => row.roundId === round.id);
+        if (!record) throw Error('直接入选的原始信号缺失');
+        accept({ ...record, status:'matched', matchedAt:record.startTime, entryTimeBasis:'signal',
+          updatedAt:Date.now(), detail:'未启用买前筛选，按原信号时点直接入选' });
+        return;
+      }
       await runner.current({ study, signal: aborter.signal, task: 'pre-entry',
         preEntry: { round, records: current.current.records.filter(r => r.roundId === round.id), onRecord: accept },
         onProgress: p => { if (!automatic && live() && (p.done === p.total || performance.now() - lastProgressPaint >= 150)) {
@@ -383,6 +390,21 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
             if (generation === epoch.current) setAutomaticError(reason instanceof Error ? reason.message : '入选结果尚未保存');
           }
         }
+        return;
+      }
+      if (instantTrading && automaticSettings?.screeningEnabled === false) {
+        const samples = qualityRunSamples(study);
+        const sample = samples[0];
+        const at = Date.now(), startTime = sample && qualitySignalTime(sample.source);
+        if (samples.length !== 1 || !Number.isSafeInteger(startTime) || startTime <= 0 || startTime > at) {
+          reportError('直接入选需要有效的原信号时间'); return;
+        }
+        const round: PreEntryRound = {id:automaticId, instantTrading, liveCapturedAt, directAdmission:true,
+          startedAt:at, updatedAt:at, filters:[], hours:0, state:'running'};
+        const record: PreEntryRecord = {id:automaticId + ':0:' + DIRECT_ADMISSION_RECORD, roundId:automaticId,
+          sample:structuredClone(sample), startTime, cursor:startTime, status:'queued', readings:[], updatedAt:at};
+        commit(mergePreEntryLibraries(current.current, {version:1, rounds:[round], records:[record]}));
+        await execute(round, newQualityStudy(study.startedAt), onMatch);
         return;
       }
       if (!settings?.plans.length) return;

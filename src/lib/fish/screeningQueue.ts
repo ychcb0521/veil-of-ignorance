@@ -14,6 +14,7 @@ export interface ScreeningJob {
   key: string;
   id: string;
   source: TradeSignal;
+  optionalScreening?: true;
   settings?: PreEntrySettings;
   instantTrading?: true;
   nextCheckAt: number;

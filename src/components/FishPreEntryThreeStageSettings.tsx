@@ -42,7 +42,7 @@ function copyAsThreeStage(p:QualityGroup):QualityGroup {
 }
 export interface AutomaticPreEntryEditor {
   settings?: PreEntrySettings;
-  save: (plans: QualityGroup[], hours: number) => Promise<void>;
+  save: (plans: QualityGroup[], hours: number, enabled?: boolean) => Promise<void>;
 }
 type LiveEditorProps={state:FishQualityState;selectedCount:number;done:()=>void;onUseTemplate?:()=>void;automatic?:AutomaticPreEntryEditor;dialog?:boolean};
 const noDefinitions:ReturnType<typeof useFeatureDefinitions>=[];
@@ -81,6 +81,8 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,di
     return [plan];
   });
   const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(frozen?frozen.hours:newPreEntryHours(initialSettings?.hours))),[error,setError]=useState('');
+  const [screeningEnabled, setScreeningEnabled] = useState(!automatic ||
+    !!automatic.settings?.plans.length && automatic.settings.screeningEnabled !== false);
   const [savingAutomatic, setSavingAutomatic] = useState(false);
   const [vetoDrafts,setVetoDrafts]=useState<Record<string,AdditionVetoDraft>>({}),[hardDrafts,setHardDrafts]=useState<Record<string,HoldingVetoDraft[]>>({});
   const [metricTimes,setMetricTimes]=useState<Record<string,AdditionMetricTime>>({});
@@ -167,6 +169,13 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,di
   });
   const save=(start:boolean)=>guardAction(()=>{
     if(readOnly||!monitor||!done)return;
+    if (automatic && !screeningEnabled) {
+      setSavingAutomatic(true);
+      void automatic.save([], newPreEntryHours(automatic.settings?.hours), false).then(done, cause => {
+        setError(cause instanceof Error ? cause.message : '买前设置保存失败');
+      }).finally(() => setSavingAutomatic(false));
+      return;
+    }
     if(!hours.trim()||!Number.isFinite(Number(hours))||Number(hours)<=0||Number(hours)>8784)throw Error('单标的筛选时限须大于 0 且不超过 8784 小时');
     if(!plans.length)throw Error('请先新增三阶方案');
     const next=plans.map(p=>{
@@ -257,8 +266,14 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,di
         {active?.initialization ? '载入常规方案' : '载入已存图灵杯方案'}
       </button>}
       {!automatic&&active&&<SaveTemplateButton index={0} ariaLabel="把当前筛选方案存为模板" defaultName={active.label} disabledReason={!state.savePlanTemplate||!state.ready?'模板尚未恢复':!monitor.ready?'筛选库尚未读取完成':!savedDraft?'请先保存当前三阶方案':undefined} onSave={name=>state.savePlanTemplate!(active.id,name)}/>}
-      <TemplatePicker purpose="entry" allowTuring={!automatic} disabled={!state.ready} actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate}} onUse={template=>guardAction(()=>usePlan(qualityPlanFromTemplate(template,id()),template.entryHours))}/>
+      {screeningEnabled && <TemplatePicker purpose="entry" allowTuring={!automatic} disabled={!state.ready} actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate}} onUse={template=>guardAction(()=>usePlan(qualityPlanFromTemplate(template,id()),template.entryHours))}/>}
     </div></div>}
+    {automatic && <label className="my-3 flex items-center gap-2">
+      <input type="checkbox" checked={screeningEnabled} disabled={savingAutomatic} onChange={event=>{setScreeningEnabled(event.target.checked);setError('');}}/>
+      启用买前筛选
+    </label>}
+    {automatic && !screeningEnabled && <p>新捕到的信号按原信号时间直接入选，随后应用仓位和买后设置。</p>}
+    {screeningEnabled && <>
     {!readOnly&&!active&&!!initialSettings?.plans.some(plan=>!automatic || plan.initialization !== TURING_SCREENING_INITIALIZATION_VERSION)&&<label className="block text-[11px]">{automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'}<select aria-label={automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'} className={field+' mt-1 w-full'} value="" onChange={e=>{
       const saved=initialSettings.plans.find(p=>p.id===e.target.value);
       if (saved) {
@@ -401,6 +416,7 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,di
     </>}
     {!readOnly&&!active&&<label className="screening-form-label mt-4">单标的筛选时限<span className="screening-time-field"><input aria-label="单标的筛选时限（小时）" className={field} type="number" min="0.016666666666666666" max="8784" step="any" value={hours} onChange={e=>setHours(e.target.value)}/>小时</span></label>}
     {!readOnly&&<p className="mt-4 text-muted-foreground">首次满足即停止；到达时限仍未满足则结束。{automatic ? '保存后供新捕到的鱼使用。' : '修改时限后，从头重新筛选生效。'}</p>}
+    </>}
     {error&&<p role="alert" className="text-[11px] text-destructive">{error}</p>}
     {!readOnly&&!automatic&&monitor&&!monitor.ready && <div className="flex flex-wrap items-center gap-2 text-[11px]">
       <p role={monitor.error ? 'alert' : 'status'} className={monitor.error ? 'text-destructive' : 'text-muted-foreground'}>

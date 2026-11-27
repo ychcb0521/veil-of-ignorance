@@ -37,13 +37,14 @@ export const preEntryRecordPending = (record: Pick<PreEntryRecord, 'status'>) =>
   record.status === 'queued' || record.status === 'scanning' || record.status === 'paused';
 export const PRE_ENTRY_INTRABAR_VERSION = 'pre-entry-intrabar-v2' as const;
 export const PRE_ENTRY_ZERO_TRADE_VERSION = 'pre-entry-zero-trade-v3' as const;
-export interface PreEntrySettings { updatedAt: number; plans: QualityGroup[]; hours: number }
+export interface PreEntrySettings { screeningEnabled?: false; updatedAt: number; plans: QualityGroup[]; hours: number }
 export interface PreEntryRound {
   timeBasis?:import('./qualityAdmissionTime').QualityMonitorTimeBasis; skippedTimeRows?:number;
   engine?: typeof PRE_ENTRY_INTRABAR_VERSION | typeof PRE_ENTRY_ZERO_TRADE_VERSION | typeof PRE_ENTRY_CONDITIONS_VERSION | import('./preEntryThreeStage').PreEntryThreeStageVersion; plans?: QualityGroup[];
   id: string; startedAt: number; updatedAt: number; filters: QualityBuyFilter[];
   hours: number; state: 'running' | 'paused' | 'complete';
   automatic?: boolean;
+  directAdmission?: true;
   instantTrading?: true;
   liveCapturedAt?: number;
   instantPosition?: import('./instantPositionSettings').InstantPositionSettings;
@@ -51,6 +52,7 @@ export interface PreEntryRound {
   workspaceDraft?: true;
   workspaceSaved?: true;
 }
+export const DIRECT_ADMISSION_RECORD = 'instant-direct';
 export const isAutomaticPreEntryRound = (round: PreEntryRound) => !!(round.automatic || round.instantTrading || round.instantMonitor);
 
 /** A live catch can still have unopened minutes inside its frozen screening window. */

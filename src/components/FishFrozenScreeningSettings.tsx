@@ -34,6 +34,7 @@ function ExpressionView({ expression }: { expression: EntryMarketExpression }) {
 
 export function FishFrozenScreeningSettings({ screening, label, templateName }: { screening?: InstantCampaignMetadata['screening']; label?: string; templateName?: QualityTemplateName }) {
   const plan = screening?.plan;
+  if (screening?.directAdmission) return <p>未启用买前筛选，按原信号时间直接入选。{screening.matchedAt && formatBeijingTime(screening.matchedAt)}</p>;
   if (!screening || !plan) return <><p>{label}</p><p className="text-muted-foreground">{unavailable}</p></>;
   const c = plan.preEntryThreeStage, old = plan.preEntryConditions;
   const paths = c?.requiredPaths;

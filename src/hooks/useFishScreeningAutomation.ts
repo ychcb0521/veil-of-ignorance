@@ -3,7 +3,7 @@ import { signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
 import { fishEmailQuotaRetryAt, fishNotifyMissing } from '@/lib/fish/notify';
 import { readPersistedStateRaw, subscribePersistedStateHydration, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
-import { FISH_AUTOMATIC_SCREENING_KEY, readAutomaticScreeningSettings, selectedPreEntryPlan } from '@/lib/fish/preEntryActivePlan';
+import { DEFAULT_PRE_ENTRY_HOURS, FISH_AUTOMATIC_SCREENING_KEY, newInstantScreeningSettings, readAutomaticScreeningSettings, selectedPreEntryPlan } from '@/lib/fish/preEntryActivePlan';
 import { TURING_SCREENING_INITIALIZATION_VERSION } from '@/lib/fish/qualityInitialization';
 import { isAutomaticPreEntryRound, type PreEntrySettings } from '@/lib/fish/preEntryMonitor';
 import { isScreeningJob, readLocalScreeningQueue, readLocalScreeningValue, readScreeningQueue, readScreeningValue,
@@ -43,7 +43,7 @@ function createQueueSession(owner?: string) {
 type Monitor = NonNullable<FishQualityState['preEntry']>;
 
 /** The authenticated app shell owns capture work and email receipts across panel changes. */
-export function useFishScreeningAutomation(owner: string | undefined, ready: boolean, monitor: Monitor | undefined, notify: ReturnType<typeof useFishNotify>, positionReady = true) {
+export function useFishScreeningAutomation(owner: string | undefined, ready: boolean, monitor: Monitor | undefined, notify: ReturnType<typeof useFishNotify>, positionReady = true, preferencesReady = true) {
   const [saved, setSaved] = useState(() => ({ owner, value: owner ? readAutomaticScreeningSettings(owner) : undefined }));
   const settings = saved.owner === owner ? saved.value : owner ? readAutomaticScreeningSettings(owner) : undefined;
   useEffect(() => {
@@ -57,17 +57,24 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
     return () => { unsubscribe(); window.removeEventListener('storage', onStorage); };
   }, [owner]);
 
-  const saveSettings = useCallback(async (plans: QualityGroup[], hours: number) => {
+  const saveSettings = useCallback(async (plans: QualityGroup[], hours: number, enabled = true) => {
     if (!owner) throw Error('请先登录后保存筛选鱼条件');
+    const previous = readAutomaticScreeningSettings(owner);
+    const updatedAt = Math.max(Date.now(), (previous?.updatedAt ?? 0) + 1);
+    if (!enabled) {
+      await persistFishAccountPreference(owner, FISH_AUTOMATIC_SCREENING_KEY, {
+        plans: previous?.plans ?? [], hours: previous?.hours ?? DEFAULT_PRE_ENTRY_HOURS, updatedAt, screeningEnabled:false,
+      } satisfies PreEntrySettings);
+      return;
+    }
     if (!Number.isFinite(hours) || hours <= 0 || hours > 8784) throw Error('单标的筛选时限须大于 0 且不超过 8784 小时');
     if (plans.length !== 1 || !plans[0].preEntryThreeStage) throw Error('请保存一套三阶筛选方案');
     if (plans[0].initialization === TURING_SCREENING_INITIALIZATION_VERSION) throw Error('图灵杯方案适用于手动回放，请为新鱼选择常规筛选方案');
     validatePreEntryThreeStage(plans[0].preEntryThreeStage);
-    const previous = readAutomaticScreeningSettings(owner);
     const frozen = structuredClone(freezeSavedPlans(previous?.plans, plans));
     if (planVersionChanges(frozen[0]).length) throw Error('冻结的算法版本已变化，请保留原方案并使用可执行的副本');
     await persistFishAccountPreference(owner, FISH_AUTOMATIC_SCREENING_KEY, {
-      plans: frozen, hours, updatedAt: Math.max(Date.now(), (previous?.updatedAt ?? 0) + 1),
+      plans: frozen, hours, updatedAt,
     } satisfies PreEntrySettings);
   }, [owner]);
 
@@ -78,8 +85,8 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
   const [storageIssue, setStorageIssue] = useState(false);
   const [attemptIssues, setAttemptIssues] = useState({ scan: '', mail: '' });
   const [jobs, setJobs] = useState(() => [...queue.entries.values()].filter(isScreeningJob));
-  const current = useRef({ ready, monitor, notify, paused, positionReady });
-  current.current = { ready, monitor, notify, paused, positionReady };
+  const current = useRef({ ready, monitor, notify, paused, positionReady, preferencesReady });
+  current.current = { ready, monitor, notify, paused, positionReady, preferencesReady };
   const currentQueue = useRef(queue);
   currentQueue.current = queue;
   const wake = useRef<(resume?: boolean) => void>();
@@ -127,10 +134,9 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
     const identity = encodeURIComponent(signalDedupKey(source));
     const legacyKey = prefix + 'job:' + identity;
     const instantKey = prefix + 'instant-job:' + identity;
-    const monitor = current.current.monitor;
-    const settings = readAutomaticScreeningSettings(owner) ?? (monitor?.ready ? monitor.library.settings : undefined);
+    const settings = current.current.preferencesReady ? newInstantScreeningSettings(owner) : undefined;
     const job: Job = { key: instantKey, id: 'pre-entry-auto-' + identity, source, nextCheckAt: 0,
-      settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined, instantTrading: true,
+      optionalScreening:true, settings, instantTrading: true,
       ...(liveCapturedAt !== undefined ? { liveCapturedAt } : {}) };
     const add = async () => {
       if (queue.entries.has(legacyKey) || queue.entries.has(instantKey)) return;
@@ -300,10 +306,15 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       const ids = new Set(jobs.map(job => job.id));
       const records = new Map(monitor.library.records.filter(record => ids.has(record.roundId)).map(record => [record.roundId, record]));
       const completed = new Set(monitor.library.rounds.filter(round => ids.has(round.id) && round.state === 'complete').map(round => round.id));
-      const defaultSettings = readAutomaticScreeningSettings(owner) ?? monitor.library.settings;
+      const preference = readAutomaticScreeningSettings(owner);
+      const legacy = preference?.screeningEnabled === false
+        ? preference.plans.length ? { ...preference, screeningEnabled:undefined } : monitor.library.settings
+        : preference ?? monitor.library.settings;
+      const currentChoice = current.current.preferencesReady ? newInstantScreeningSettings(owner) : undefined;
+      const jobSettings = (job: Job) => job.settings ?? (job.optionalScreening ? currentChoice : legacy);
       const isMail = (job: Job) => job.matched || completed.has(job.id) && records.get(job.id)?.status === 'matched';
       const canScreen = (job: Job) => (!job.instantTrading || current.current.positionReady) && (monitor.ready || job.instantTrading) &&
-        (records.has(job.id) || (job.settings ?? defaultSettings)?.plans.length || job.runner && !monitor.ready);
+        (records.has(job.id) || jobSettings(job)?.screeningEnabled === false || jobSettings(job)?.plans.length || job.runner && !monitor.ready);
       const next = jobs.filter(job => canScreen(job) && !isMail(job) && (resumeJobs.has(job.key) || job.nextCheckAt <= now))
         .reduce<Job | undefined>((first, job) => {
           if (!first) return job;
@@ -317,9 +328,9 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
         if (!current.current.ready || !job || !canScreen(job) || job.matched || !resumeJobs.has(job.key) && job.nextCheckAt > Date.now() || !active?.startAutomatic
           || (active.automaticRunning ?? active.running) || current.current.paused || lifetime.signal.aborted) return;
         // Persist the next attempt before starting, so a reload can safely resume the same frozen round.
-        const settings = job.settings ?? readAutomaticScreeningSettings(owner) ?? active.library.settings;
+        const settings = jobSettings(job);
         resumeJobs.delete(job.key);
-        if (!await save({ ...job, settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined,
+        if (!await save({ ...job, settings,
           runner: tab.current, nextCheckAt: Date.now() + MINUTE })) return;
         if (lifetime.signal.aborted || current.current.paused || !current.current.ready) return;
         let matchedWrite: Promise<boolean> | undefined;
@@ -376,7 +387,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       queue.channel = undefined;
     };
   }, [owner, pauseKey, persist, prefix, publish, queue, save]);
-  useEffect(() => { wake.current?.(); }, [ready, positionReady, monitor?.ready, monitor?.instantReady, monitor?.automaticRunning, monitor?.library.settings, paused, settings, notify.config, jobs.length, storageIssue]);
+  useEffect(() => { wake.current?.(); }, [ready, preferencesReady, positionReady, monitor?.ready, monitor?.instantReady, monitor?.automaticRunning, monitor?.library.settings, paused, settings, notify.config, jobs.length, storageIssue]);
 
   const matchedIds = useMemo(() => {
     if (!jobs.length || !monitor) return undefined;
@@ -387,21 +398,23 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
   const fallback = selectedPreEntryPlan((settings ?? monitor?.library.settings)?.plans);
   const pendingIds = pendingJobs.length && !fallback ? new Set(pendingJobs.map(job => job.id)) : undefined;
   const screeningPending = pendingJobs.length > 0 && (!!fallback
-    || pendingJobs.some(job => selectedPreEntryPlan(job.settings?.plans))
+    || pendingJobs.some(job => job.optionalScreening || selectedPreEntryPlan(job.settings?.plans))
     || !!pendingIds && !!monitor?.library.records.some(record => pendingIds.has(record.roundId)));
+  const directPending = pendingJobs.length > 0 && pendingJobs.every(job => job.settings?.screeningEnabled === false);
   const pending = pendingJobs.length;
   const needsArchive = (job: Job) => !job.instantTrading || job.id === monitor?.missingCheckpoint ||
-    !fallback && !selectedPreEntryPlan(job.settings?.plans) && !job.runner;
+    !job.optionalScreening && !fallback && !selectedPreEntryPlan(job.settings?.plans) && !job.runner;
   const needsHistory = !monitor?.ready && (pendingJobs.some(needsArchive) || !!monitor?.instantLoadError);
   let waitingReason: string | undefined;
   if (pending && !monitor?.automaticRunning && !paused) {
-    if (!queue.ready) waitingReason = '正在读取待筛队列';
+    if (preferencesReady && pendingJobs.some(job => job.optionalScreening && !job.settings) && owner && !newInstantScreeningSettings(owner)) waitingReason = '买前设置无效，请重新保存';
+    else if (!queue.ready) waitingReason = '正在读取待筛队列';
     else if (!monitor?.ready && queue.readFailed) waitingReason = '待筛队列读取失败，正在重试';
     else if (!positionReady && pendingJobs.every(job => job.instantTrading)) waitingReason = '等待仓位设置';
     else if (needsHistory && pendingJobs.every(needsArchive)) {
       waitingReason = monitor?.missingCheckpoint ? '正在恢复该信号的原始筛选进度' : '正在恢复待处理信号的原始条件';
     }
   }
-  return { enqueue, paused, setAutoPaused, pending, needsHistory, waitingReason, screeningPending, awaitingMail: jobs.length - pending, storageIssue,
+  return { enqueue, paused, setAutoPaused, pending, directPending, needsHistory, waitingReason, screeningPending, awaitingMail: jobs.length - pending, storageIssue,
     attemptIssue: attemptIssues.scan || attemptIssues.mail, settings, saveSettings };
 }

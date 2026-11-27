@@ -372,3 +372,17 @@ it('saves and reopens the independent DBL-5 distance switch, fractional threshol
  expect(screen.getByLabelText(atr)).toHaveValue(3.25);
  expect(screen.getByLabelText(version)).toHaveValue(DBL5_RETEST_GUARD_VERSION);
 });
+
+it('requires an explicit instant screening selection even when the manual workspace has a plan',async()=>{
+  const {state}=singleFixture(),save=vi.fn().mockResolvedValue(undefined), done=vi.fn();
+  render(<TooltipProvider><FishPreEntrySettings state={state} selectedCount={0} done={done} automatic={{save}}/></TooltipProvider>);
+  const toggle=screen.getByLabelText('启用买前筛选');
+  expect(toggle).not.toBeChecked();
+  expect(screen.queryByLabelText('三阶方案名称')).toBeNull();
+  fireEvent.click(toggle);
+  expect(screen.getByLabelText('三阶方案名称')).toBeVisible();
+  fireEvent.click(toggle);
+  fireEvent.click(screen.getByRole('button',{name:'保存筛选鱼条件'}));
+  expect(save).toHaveBeenCalledWith([],48,false);
+  await vi.waitFor(()=>expect(done).toHaveBeenCalledOnce());
+});

@@ -234,3 +234,12 @@ it('keeps the entire draft if a newer row, new row, or unfinished round has no e
  await removePublishedPreEntryDrafts(draftOwner,'alice',['r']);
  expect(await readPreEntrySnapshot(draftOwner)).toEqual(paused);
 });
+
+it('recovers a direct admission checkpoint with no screening plan',async()=>{
+  const lib=fixture();
+  const round={...lib.rounds[0],instantTrading:true as const,directAdmission:true as const};
+  const record={...lib.records[0],id:'r:0:instant-direct'};
+  const checkpoint={version:1 as const,rounds:[round],records:[record]};
+  await writePreEntrySnapshot('direct',checkpoint,true);
+  expect(await readAutomaticPreEntryCheckpoint('direct','r',true)).toEqual(checkpoint);
+});

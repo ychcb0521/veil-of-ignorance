@@ -7,7 +7,7 @@ import type { EntryStageEvidence } from './preEntryThreeStageScan';
 export interface InstantCampaignMetadata {
   position?: PreEntryRound['instantPosition'];
   fishing?: { algorithms: { label: string; reading?: number; unit?: string; interval?: string }[]; combination?: 'and' | 'or' };
-  screening?: { plan?: QualityGroup; hours: number; engine?: PreEntryRound['engine']; matchedAt?: number;
+  screening?: { directAdmission?: true; plan?: QualityGroup; hours: number; engine?: PreEntryRound['engine']; matchedAt?: number;
     evidence?: Pick<EntryStageEvidence, 'admission' | 'readings'> };
 }
 
@@ -28,7 +28,7 @@ export function instantCampaignMetadata(record: PreEntryRecord, round: PreEntryR
   return {
     ...(round.instantPosition ? { position: round.instantPosition } : {}),
     ...(algorithms.length ? { fishing: { algorithms, combination: fish?.algorithms?.length ? fish.combination ?? 'and' : undefined } } : {}),
-    screening: { plan, hours: round.hours, engine: round.engine, matchedAt: record.matchedAt,
+    screening: { ...(round.directAdmission ? {directAdmission:true as const} : {}), plan, hours: round.hours, engine: round.engine, matchedAt: record.matchedAt,
       ...(record.threeStage ? { evidence: { admission: record.threeStage.admission, readings: record.threeStage.readings } } : {}) },
   };
 }

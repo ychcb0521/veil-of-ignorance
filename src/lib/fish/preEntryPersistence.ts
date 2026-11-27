@@ -1,4 +1,4 @@
-import { emptyPreEntryLibrary, isAutomaticPreEntryRound, mergePreEntryLibraries, preEntryRecordPending, type PreEntryLibrary, type PreEntryRecord, type PreEntryRound } from './preEntryMonitor';
+import { DIRECT_ADMISSION_RECORD, emptyPreEntryLibrary, isAutomaticPreEntryRound, mergePreEntryLibraries, preEntryRecordPending, type PreEntryLibrary, type PreEntryRecord, type PreEntryRound } from './preEntryMonitor';
 import {screenBrowse} from './screenBrowse';
 import type {BrowseGroup,BrowseRow} from './libraryBrowse';
 import type {LibraryDirectoryEdits} from './libraryDirectoryEdits';
@@ -150,12 +150,12 @@ export async function readAutomaticPreEntryCheckpoint(owner: string, id: string,
         if (!validPreEntryLibrary(meta.result)) { if (requireIntact) reject(Error('自动筛选进度目录无效')); return; }
         const round = meta.result.rounds.find(round => round.id === id);
         if (!round) return;
-        const plan = round.plans?.[0];
-        if (!isAutomaticPreEntryRound(round) || !plan) { if (requireIntact) reject(Error('自动筛选的冻结方案不完整')); return; }
-        const row = store.get(rowPrefix(owner) + `${id}:0:${plan.id}`);
+        const planId = round.instantTrading && round.directAdmission ? DIRECT_ADMISSION_RECORD : round.plans?.[0]?.id;
+        if (!isAutomaticPreEntryRound(round) || !planId) { if (requireIntact) reject(Error('自动筛选的冻结方案不完整')); return; }
+        const row = store.get(rowPrefix(owner) + `${id}:0:${planId}`);
         row.onsuccess = () => {
           const record = row.result as PreEntryRecord | undefined;
-          if (record?.roundId === id && record.id === `${id}:0:${plan.id}`) value = { version: 1, rounds: [round], records: [record] };
+          if (record?.roundId === id && record.id === `${id}:0:${planId}`) value = { version: 1, rounds: [round], records: [record] };
           else if (requireIntact) reject(Error('自动筛选的原始进度不完整'));
         };
       };

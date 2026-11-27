@@ -65,7 +65,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const holdingsReady = usdtFollow.pairingReady && (!usdtFollow.paired || usdtFollow.connected && !!usdtLive.snapshot && !usdtLive.issue);
   const fastReady = preferenceStatus === 'ready' && instantMonitor.restoreStatus === 'ready' && preEntry.instantReady && holdingsReady;
   const automatic = useFishScreeningAutomation(owner, automaticReady || fastReady, executionMonitor, notify,
-    preferenceStatus === 'ready' && !!instantPosition.settings && (!usdtFollow.paired || balanceCalibration.ready));
+    preferenceStatus === 'ready' && !!instantPosition.settings && (!usdtFollow.paired || balanceCalibration.ready), preferenceStatus === 'ready');
   let waitingReason = automatic.waitingReason;
   if (!automaticReady && automatic.pending && !automatic.paused) {
     if (preferenceStatus !== 'ready') waitingReason = preferenceStatus === 'error' ? '账号设置读取失败' : '正在读取即时交易设置';

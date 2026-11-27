@@ -185,3 +185,16 @@ it('screens a fresh live capture before overdue work, then processes the backlog
   await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
   expect(startAutomatic.mock.calls.map(([,source]) => source.symbol)).toEqual(['FRESH','BACKLOG']);
 });
+
+it('freezes direct admission for a new catch without inheriting manual conditions',async()=>{
+  vi.useFakeTimers({now:T});
+  const owner='direct-selection',config={updatedAt:T,hours:4,plans:[{id:'manual',label:'manual',preEntryThreeStage:emptyPreEntryThreeStage()}]};
+  const startAutomatic=vi.fn(async()=>{});
+  const monitor={ready:true,running:false,library:{rounds:[],records:[],settings:config},startAutomatic};
+  const h=renderHook(()=>useFishScreeningAutomation(owner,true,monitor as never,{config:{enabled:false}} as never));
+  await act(async()=>{h.result.current.setAutoPaused(true);h.result.current.enqueue(signal('NEW'),T);});
+  writePersistedStateRaw('sim_'+owner+'_'+FISH_AUTOMATIC_SCREENING_KEY,JSON.stringify(config));
+  await act(async()=>{h.result.current.setAutoPaused(false);await vi.advanceTimersByTimeAsync(2000);});
+  expect(startAutomatic).toHaveBeenCalledWith(expect.any(String),signal('NEW'),false,expect.any(Function),
+    expect.objectContaining({screeningEnabled:false,plans:[]}),true,T);
+});
