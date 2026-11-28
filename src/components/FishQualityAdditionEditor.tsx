@@ -89,7 +89,7 @@ export function BreakevenFloorNotes({immediate=false,followPosition=false,intrab
  <p><b className="font-medium text-foreground">例外</b>：开盘直接跳空到 F 下方时，按开盘价卖出。</p>
  <p><b className="font-medium text-foreground">取舍</b>：m 越大，F 离 K 越远，防守线的噪音容忍度保留越多，但加仓量也越小。本次加仓以防守线为 K 时生效。</p>
 </div>;}
-export interface AdditionDraft extends RoundDraft {marginRejectExit?:QualityAdditionRule['marginRejectExit'];alternativeRounds?:QualityAdditionRoundRule[];attackFromRound?:number;positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[];
+export interface AdditionDraft extends RoundDraft {atrRejectExit?:QualityAdditionRule['atrRejectExit'];marginRejectExit?:QualityAdditionRule['marginRejectExit'];alternativeRounds?:QualityAdditionRoundRule[];attackFromRound?:number;positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[];
   /** 设在「最多加仓次数」之后的旧切换阶段：原样保留，不在轮次里显示。 */
   laterSellStages?:QualitySellStage[]}
 const conditionDraft=(f?:QualityBuyFilter):ConditionDraft=>f
@@ -147,7 +147,7 @@ export function additionDraft(rule:QualityAdditionRule|undefined=undefined,sellS
  rule??={...defaultQualityAddition(),positionVersion:HOLDING_LEDGER_ADDITION_VERSION};
  const count=rule.maxRounds??Math.max(rule.repeat===false?1:3,...Object.keys(rule.roundExits?.overrides??{}).map(Number)),stages=orderedSellStages({sellStages:[...(sellStages??[])]}),stageAt=(n:number)=>stages.find(s=>s.afterAdditions===n);
  const first=roundDraft(rule.rounds?.[0]??rule,stageAt(1),rule.enabled),later=stages.filter(s=>s.afterAdditions>count);
- return {...first,...(rule.marginRejectExit?{marginRejectExit:rule.marginRejectExit}:{}),...roundExitDraft(additionExitForRound(rule,1)),alternativeRounds:structuredClone(rule.alternativeRounds),attackFromRound:rule.attackFromRound,...(rule.positionVersion?{positionVersion:rule.positionVersion}:{}),
+ return {...first,...(rule.atrRejectExit?{atrRejectExit:rule.atrRejectExit}:{}),...(rule.marginRejectExit?{marginRejectExit:rule.marginRejectExit}:{}),...roundExitDraft(additionExitForRound(rule,1)),alternativeRounds:structuredClone(rule.alternativeRounds),attackFromRound:rule.attackFromRound,...(rule.positionVersion?{positionVersion:rule.positionVersion}:{}),
   enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),
   otherRounds:Array.from({length:count-1},(_,i)=>({...roundDraft(rule.rounds?.[i+1]??rule,stageAt(i+2),rule.enabled),...roundExitDraft(additionExitForRound(rule,i+2))})),
   ...(later.length?{laterSellStages:later}:{})};
@@ -217,7 +217,7 @@ export function parseAdditionDraft(d:AdditionDraft,defs:readonly DeepDigFeatureD
  const rounds=Array.from({length:n},(_,i)=>{try{const r=parseRound(i?d.otherRounds[i-1]??d:d,d.enabled,defs);return r.structure?{...r,structure:freezeStructureVersions(r.structure)}:r;}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}});
  const firstExit=parseRoundExit(d);
  const exits=buildRoundExits(firstExit,[firstExit,...Array.from({length:n-1},(_,i)=>parseRoundExit(d.otherRounds[i]??d))]);
- const rule:QualityAdditionRule={enabled:d.enabled,...(d.marginRejectExit?{marginRejectExit:d.marginRejectExit}:{}),...(d.positionVersion?{positionVersion:d.positionVersion}:{}),quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,
+ const rule:QualityAdditionRule={enabled:d.enabled,...(d.atrRejectExit?{atrRejectExit:d.atrRejectExit}:{}),...(d.marginRejectExit?{marginRejectExit:d.marginRejectExit}:{}),...(d.positionVersion?{positionVersion:d.positionVersion}:{}),quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,
   ...(d.alternativeRounds?.length?{alternativeRounds:structuredClone(d.alternativeRounds),attackFromRound:d.attackFromRound}:{}),...rounds[0],...firstExit,
   ...(exits?{roundExits:exits}:{})};
  validateQualityAddition(rule);return rule;
@@ -296,13 +296,13 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
  const setLimit=(value:string)=>{const limit=Math.min(100,Math.max(1,Math.floor(Number(value)||1)));const others=Array.from({length:Math.max(limit-1,all.otherRounds.length)},(_,i)=>all.otherRounds[i]??copyRound(all));setSelectedRound(Math.min(index,limit-1));setDraft({...all,maxRounds:value,repeat:limit>1,otherRounds:others});};
  const removeRound = () => {
   if (!onRemoveRound || count <= 1) return;
-  const {enabled, quantityMode, quantity, marginRejectExit, positionVersion, alternativeRounds, attackFromRound, laterSellStages,
+  const {enabled, quantityMode, quantity, atrRejectExit, marginRejectExit, positionVersion, alternativeRounds, attackFromRound, laterSellStages,
     otherRounds, repeat, maxRounds, ...first} = all;
   const rounds = [first, ...Array.from({length:Math.max(count-1, otherRounds.length)}, (_,i) => otherRounds[i] ?? copyRound(first))];
   rounds.splice(index,1);
   const removed = index+1;
   const shift = (n:number) => n > removed ? n-1 : n;
-  const next:AdditionDraft = {...rounds[0], enabled, quantityMode, quantity, marginRejectExit, positionVersion,
+  const next:AdditionDraft = {...rounds[0], enabled, quantityMode, quantity, atrRejectExit, marginRejectExit, positionVersion,
     repeat:count>2, maxRounds:String(count-1), otherRounds:rounds.slice(1),
     alternativeRounds:alternativeRounds?.filter((_,i)=>i!==index), attackFromRound:attackFromRound && shift(attackFromRound),
     laterSellStages:laterSellStages?.filter(s=>s.afterAdditions!==removed).map(s=>({...s,afterAdditions:shift(s.afterAdditions)}))};
@@ -401,6 +401,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
     </InfoBlock>
    </div>
   </FishQualityInfo></div><label className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"><input aria-label="启用条件加仓" type="checkbox" checked={d.enabled} onChange={e=>patch({enabled:e.target.checked})} className="h-3.5 w-3.5 accent-[hsl(var(--primary))]"/>启用</label></div>
+  <label className="flex items-center gap-2 text-[11px]"><input type="checkbox" disabled={!all.enabled} checked={!!all.atrRejectExit} onChange={e=>setDraft({...all,atrRejectExit:e.target.checked?'atr-price-reject-exit-v1':undefined})}/>真实波动率占现价（%）否决加仓时仍启用本轮卖出设置</label>
   <label className="flex items-center gap-2 text-[11px]"><input type="checkbox" disabled={!all.enabled} checked={!!all.marginRejectExit} onChange={e=>setDraft({...all,marginRejectExit:e.target.checked?'margin-reject-exit-v1':undefined})}/>本金不足时仍启用本次加仓的卖出设置</label>
   <label className="flex flex-wrap items-center gap-2 text-[11px]">加仓执行口径<select aria-label="加仓执行口径" className={field} value={all.positionVersion??'legacy-mirror'} onChange={e=>setDraft({...all,positionVersion:e.target.value==='legacy-mirror'?undefined:HOLDING_LEDGER_ADDITION_VERSION})}><option value={HOLDING_LEDGER_ADDITION_VERSION}>通用持仓账 · 镜像可选</option><option value="legacy-mirror">历史口径 · 镜像成交后</option></select></label>
   <p className="text-[10.5px] leading-relaxed text-muted-foreground">{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'镜像不是加仓前提。未发生卖出时，按全部实际持仓、落袋盈亏 0 计算；发生镜像或减仓后，按当时余仓、剩余成本及已实现净盈亏计算。预算不足或已清仓时不加仓。':'此方案保留历史镜像前置规则。需要无镜像加仓时，选择通用持仓账并保存新方案或副本；旧模板和历史轮次不变。'}</p>

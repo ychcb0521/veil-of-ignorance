@@ -39,6 +39,7 @@ export const additionUsesNativePosition = (rule: Pick<QualityAdditionRule,'impul
   !rule.impulsePosition?.skipNative && !rule.impulse1115Position?.skipNative && !rule.classifiedImpulsePositions?.some(p=>p.skipNative);
 
 export interface QualityAdditionRule {
+  atrRejectExit?: 'atr-price-reject-exit-v1';
   marginRejectExit?: 'margin-reject-exit-v1';
   classifiedImpulsePositions?:ClassifiedImpulsePosition[];
   impulsePosition?: ImpulseAdditionPosition;
@@ -246,6 +247,7 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   ...([rule,...(rule.rounds??[])].some(r=>r.gainBasis==='average')?[['gain-basis-average-v1',[rule,...(rule.rounds??[])].map(r=>r.gainBasis??null)]]:[]),
   ...(rule.geometricLock?.enabled?[['geometric-lock-v1',rule.geometricLock.multiple,rule.geometricLock.pct]]:[]),
   ...(rule.roundExits ? [[ADDITION_ROUND_EXITS_VERSION, Object.entries(rule.roundExits.overrides).map(([round,exit])=>[Number(round),additionExitIdentity(exit)])]] : []),
+  ...(rule.atrRejectExit?[[rule.atrRejectExit]]:[]),
   ...(rule.marginRejectExit?[[rule.marginRejectExit]]:[]),
   ...(rule.kStopVersion?[[rule.kStopVersion]]:[]),
   ...(rule.breakevenFloor?.enabled?[[rule.breakevenFloor.version??'breakeven-floor-v1',rule.breakevenFloor.atr]]:[]),

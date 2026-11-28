@@ -94,7 +94,7 @@ export function settleManagedUsdtDecision(row: UsdtCampaignLedger, key: string, 
     realizedPnl: remaining.realized - (managed.followBasis?.realizedBefore ?? 0) };
   if (!units && insufficientMargin && pending.kind === 'add' && managed.monitor.plan.addition?.marginRejectExit === 'margin-reject-exit-v1') {
     const rejected = [...(prior.marginRejectedAdditions ?? []), pending.evidence];
-    const round = (managed.followBasis?.carriedAdditions ?? 0) + (prior.additionFills?.length ?? (prior.additionFill ? 1 : 0)) + rejected.length;
+    const round = (managed.followBasis?.carriedAdditions ?? 0) + (prior.additionFills?.length ?? (prior.additionFill ? 1 : 0)) + rejected.length + (prior.atrRejectedAdditions?.length ?? 0);
     checkpoint.marginRejectedAdditions = rejected;
     checkpoint.additionSkips = [...(prior.additionSkips ?? []), { at: pending.evidence.at, round, kind: 'margin-rejected',
       label: '本金不足，已启用本轮卖出设置', reading: '币安拒单，实际加仓数量为 0' }];
@@ -120,7 +120,7 @@ export function settleManagedUsdtDecision(row: UsdtCampaignLedger, key: string, 
         routeDecision: pending.routeDecision ?? prior.routeDecision,
         sellStageSwitches: pending.sellStageSwitches ?? prior.sellStageSwitches,
         vetoStageSwitches: pending.vetoStageSwitches ?? prior.vetoStageSwitches,
-        ...(newVetoStage?.afterAdditions === (managed.followBasis?.carriedAdditions ?? 0) + (prior.marginRejectedAdditions?.length ?? 0) + additions.length ? { vetoPath: { entry: managed.entryPrice,
+        ...(newVetoStage?.afterAdditions === (managed.followBasis?.carriedAdditions ?? 0) + (prior.marginRejectedAdditions?.length ?? 0) + (prior.atrRejectedAdditions?.length ?? 0) + additions.length ? { vetoPath: { entry: managed.entryPrice,
           peak: newVetoStage.peakBasis === 'holding' ? peak : price, minimum: price, dynamic: 0 } } : {}) };
     } else if (pending.kind === 'mirror') {
       checkpoint.mirrorFill = { ...pending.evidence, executedAt:Math.max(...actual.map(fill=>fill.at)), price, fraction: Math.min(1, quantity / managed.entryQuantity),

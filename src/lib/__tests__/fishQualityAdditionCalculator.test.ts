@@ -8,7 +8,8 @@ import { makeQualityBuyFilter, makeQualityHoldingVeto } from '@/lib/fish/quality
 import {evaluateCampaignAddSizing} from '@/lib/campaignAddSizingCheck';
 import {describe,it,expect} from 'vitest';
 import {evaluateQualitySample,newQualityStudy,qualityDefinition,type QualityGroup,type QualitySample} from '@/lib/fish/quality';
-import { CDA_HOURLY_DEF, definitionKey } from '@/lib/deepDig/features';
+import { INDICATOR_ENTRY_VETO_VERSION } from "@/lib/fish/qualityAdditionVeto";
+import { ATR_PRICE_PCT_DEF, CDA_HOURLY_DEF, definitionKey } from '@/lib/deepDig/features';
 import {ADDITION_INDICATOR_INCREASE_VERSION, defaultQualityAddition, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCoverage';
 import {chartAtr} from '@/lib/atr';
@@ -433,4 +434,24 @@ it('arms sixth and seventh margin-rejected sell rules on five actual additions a
   expect(exit.status).toBe('closed');
   expect(exit.endPrice).toBeCloseTo(seventh.sizing!.support);
   expect(exit.additionFills).toEqual(actual);
+});
+
+it('arms sell rules only for a qualified ATRP rejection and resumes with zero added inventory', async () => {
+ const g=group(),metric=makeQualityBuyFilter('atr-price-pct-v1:ATRP','>',0,true,[ATR_PRICE_PCT_DEF]);
+ Object.assign(g.addition!,{maxRounds:1,entryVetoes:[{kind:'indicator',enabled:true,indicator:{...metric,version:INDICATOR_ENTRY_VETO_VERSION,direction:'>='}}]});
+ const market=loader(i=>i<2?rising(i):bar(T+i*M,110,0,105));
+ const original=await run(g,market,3);
+ expect(original.atrRejectedAdditions).toBeUndefined();
+ expect(original.additionFills??[]).toHaveLength(0);
+ g.addition!.atrRejectExit='atr-price-reject-exit-v1';
+ const open=await run(g,market,2);
+ expect(open.status).toBe('open');
+ expect(open.atrRejectedAdditions).toMatchObject([{at:T+M,quantity:0,notional:0,sizing:{support:107}}]);
+ expect(open.additionFills??[]).toHaveLength(0);
+ const closed=await run(g,market,3,open);
+ expect(closed.status).toBe('closed');
+ expect(closed.endPrice).toBe(107);
+ expect(closed.totalInvested).toBe(100);
+ expect(closed.atrRejectedAdditions).toEqual(open.atrRejectedAdditions);
+ expect((await run(g,market,3)).endPrice).toBe(closed.endPrice);
 });

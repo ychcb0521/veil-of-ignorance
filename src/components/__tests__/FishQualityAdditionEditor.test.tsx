@@ -528,6 +528,14 @@ it('moves later round settings into the deleted slot and saves the shortened seq
 });
 it('preserves the original draft when margin rejection exits are switched back off',()=>{
  render(<Editor initial={{...defaultQualityAddition(),enabled:true}}/>);
+ const atrOption=screen.getByLabelText('真实波动率占现价（%）否决加仓时仍启用本轮卖出设置');
+ const before=save();
+ expect(atrOption).not.toBeChecked();
+ fireEvent.click(atrOption);
+ expect(additionDraft(save()).atrRejectExit).toBe('atr-price-reject-exit-v1');
+ expect(save().marginRejectExit).toBeUndefined();
+ fireEvent.click(atrOption);
+ expect(save()).toEqual(before);
  const option=screen.getByLabelText('本金不足时仍启用本次加仓的卖出设置');
  const original=save();
  expect(option).not.toBeChecked();

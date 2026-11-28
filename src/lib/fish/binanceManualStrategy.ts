@@ -40,7 +40,7 @@ export function binanceManualAdvance(position: BinanceManualPosition, prior: Qua
   if (opening) additions.push(opening);
   for (const evidence of additions) {
     const impulse = evidence.structureEvidence?.guardPlus?.early_impulse_event;
-    const transitionCount = (position.followBasis?.carriedAdditions ?? 0) + (prior.marginRejectedAdditions?.length ?? 0) + qualityAdditionFills(prior).length + 1;
+    const transitionCount = (position.followBasis?.carriedAdditions ?? 0) + (prior.marginRejectedAdditions?.length ?? 0) + (observed.atrRejectedAdditions?.filter(f=>f.at<evidence.at).length ?? 0) + qualityAdditionFills(prior).length + 1;
     const transition=opening && evidence===opening ? observed.openingImpulseDecision : undefined;
     const sellStages=observed.sellStageSwitches?.filter(s=>s.afterAdditions<=transitionCount);
     const vetoStages=observed.vetoStageSwitches?.filter(s=>s.afterAdditions<=transitionCount);
@@ -79,7 +79,9 @@ export function binanceManualAdvance(position: BinanceManualPosition, prior: Qua
       return {decision,checkpoint};
     }
     const moves = reductions.filter(evidence => evidence.fraction === 0 && evidence.at < decision.action.at);
-    return { decision, checkpoint: moves.length ? { ...prior, additionReductions: [...(prior.additionReductions ?? []), ...moves] } : prior };
+    const atrRejected=observed.atrRejectedAdditions?.filter(f=>f.at<=decision.action.at);
+    const checkpoint=atrRejected?.length ? {...prior,atrRejectedAdditions:atrRejected} : prior;
+    return { decision, checkpoint: moves.length ? { ...checkpoint, additionReductions: [...(prior.additionReductions ?? []), ...moves] } : checkpoint };
   }
   if (observed.status === 'open' && ((observed.endTime ?? 0) > after || observed.mirrorLossReviews&&JSON.stringify(observed.mirrorLossReviews)!==JSON.stringify(prior.mirrorLossReviews)) && actions.length === 0) return { checkpoint: observed };
 }
