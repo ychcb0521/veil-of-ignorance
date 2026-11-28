@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createUsdtFollower } from '../../../../scripts/usdt-follow-engine';
-import { createUsdtExchange, formatQuantity, quantityUnits, usdtOrderId, type UsdtExchange } from '../../../../scripts/usdt-exchange';
+import { createUsdtExchange, UsdtApiError, formatQuantity, quantityUnits, usdtOrderId, type UsdtExchange } from '../../../../scripts/usdt-exchange';
 import { openUsdtFollowStore, type UsdtOrder } from '../../../../scripts/usdt-follow-store';
 import { serveUsdtFollower } from '../../../../scripts/usdt-follow-server';
 import { usdtFollowCampaigns, type UsdtFollowCampaign } from '../usdtFollow';
@@ -704,4 +704,50 @@ it.each([[true,true],[false,true],[true,false]])('records rejected round only fo
   expect(recovered.checkpoint!.remainingQuantity).toBe(10);
   expect(recovered.checkpoint!.additionFills ?? []).toEqual([]);
   expect(recovered.checkpoint!.marginRejectedAdditions ?? []).toEqual(enabled && margin ? [add] : []);
+});
+
+it('按币安账户回读区分杠杆已设置和超出合约上限', async () => {
+  const market = { symbol: 'BULLAUSDT', step: '1', min: 1, max: 100000, minNotional: 5 };
+  for (const confirmed of [false, true]) {
+    let configReads = 0;
+    const exchange = createUsdtExchange(async (method, path) => {
+      if (path.endsWith('/symbolConfig')) {
+        configReads++;
+        return [{ symbol: market.symbol, marginType: 'ISOLATED', leverage: confirmed && configReads === 2 ? 10 : 5 }];
+      }
+      if (path.endsWith('/dual')) return { dualSidePosition: false };
+      if (path.endsWith('/leverageBracket')) return [{ symbol: market.symbol, brackets: [{ initialLeverage: 10, notionalFloor: 0, notionalCap: 5000 }] }];
+      if (method === 'POST' && path.endsWith('/leverage')) throw new UsdtApiError(400, -4028);
+      if (method !== 'GET') throw Error('意外写请求');
+      return [];
+    });
+    const check = exchange.check(market, 'one-way', 0, 0, true, 20, undefined, undefined, undefined, undefined, 514.63);
+    if (confirmed) await expect(check).resolves.toBe(10);
+    else await expect(check).rejects.toThrow('方案杠杆 20 倍，币安未确认实盘杠杆 10 倍');
+  }
+});
+
+it.each([10, 50])('账户档位上限 %s 倍，首仓优先 20 倍且保持原名义金额', async maximum => {
+  const at = Date.now(), name = file(), venue = exchange(), signal = campaign(at);
+  signal.leverage = signal.liveEntry!.leverage = 20;
+  const setLeverage = vi.fn();
+  const exchangeCheck = createUsdtExchange(async (method, path, params) => {
+    if (path.endsWith('/symbolConfig')) return [{ symbol, marginType: 'ISOLATED', leverage: 5 }];
+    if (path.endsWith('/dual')) return { dualSidePosition: true };
+    if (path.endsWith('/leverageBracket')) return [{ symbol, brackets: [{ initialLeverage: maximum, notionalFloor: 0, notionalCap: 5000 }] }];
+    if (method === 'POST' && path.endsWith('/leverage')) {
+      setLeverage(Number(params!.leverage));
+      return { symbol, leverage: params!.leverage };
+    }
+    if (method !== 'GET') throw Error('意外写请求');
+    return [];
+  }).check;
+  const runner = createUsdtFollower(makeStore(name), { ...venue, check: exchangeCheck }, owner, 'hedge', at);
+  runner.ingest([signal], at);
+  await runner.tick(at);
+  const target = Math.min(20, maximum);
+  expect(setLeverage).toHaveBeenCalledWith(target);
+  expect(venue.order.mock.calls[0][2].quantity).toBe('24.981');
+  expect(createUsdtFollower(makeStore(name), venue, owner, 'hedge', at).statuses()[0])
+    .toMatchObject({ executionLeverage: target, limitUsdt: 100, quantity: 24.981 });
 });

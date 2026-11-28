@@ -157,14 +157,15 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       return price;
     },
     async check(market: UsdtMarket, mode: UsdtPositionMode, held: number, entry: number, opening: boolean, leverage: number,
-      managed?: 'existing-position' | 'frozen-leverage', knownProtection?: readonly string[], unsettledBuyId?: string, confirmOpening?: () => void) {
+      managed?: 'existing-position' | 'frozen-leverage', knownProtection?: readonly string[], unsettledBuyId?: string, confirmOpening?: () => void, openingNotional?: number) {
       const { symbol } = market;
-      const [positions, regular, algo, settings, modes] = await Promise.all([
+      const [positions, regular, algo, settings, modes, tiers] = await Promise.all([
         request('GET', '/fapi/v3/positionRisk', { symbol }),
         request('GET', '/fapi/v1/openOrders', { symbol }),
         request('GET', '/fapi/v1/openAlgoOrders', { symbol }),
         request('GET', '/fapi/v1/symbolConfig', { symbol }),
         request('GET', '/fapi/v1/positionSide/dual'),
+        opening && openingNotional !== undefined ? request('GET', '/fapi/v1/leverageBracket', { symbol }) : undefined,
       ]);
       if (modes.dualSidePosition !== (mode === 'hedge')) throw Error('币安持仓模式已变化');
       if (![positions, regular, algo, settings].every(Array.isArray)) throw Error('币安仓位或挂单读数不可用');
@@ -183,16 +184,34 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       const config = settings.find((item: Json) => item.symbol === symbol);
       if (!config) throw Error('币安合约配置不可用');
       if (opening) {
+        let target = leverage;
+        if (openingNotional !== undefined) {
+          const brackets = Array.isArray(tiers) && tiers.find(item => item.symbol === symbol)?.brackets;
+          const tier = Array.isArray(brackets) && brackets.find(item =>
+            openingNotional >= Number(item.notionalFloor) && openingNotional < Number(item.notionalCap));
+          const maximum = Number(tier?.initialLeverage);
+          if (!Number.isSafeInteger(maximum) || maximum < 1) throw Error('币安未确认计划名义仓位适用的杠杆档位，未提交买单');
+          target = Math.min(leverage, maximum);
+        }
         if (config.marginType !== 'ISOLATED') {
           confirmOpening?.();
           try { await request('POST', '/fapi/v1/marginType', { symbol, marginType: 'ISOLATED' }); }
           catch (error) { if (!(error instanceof UsdtApiError) || error.code !== -4046) throw error; }
         }
-        if (Number(config.leverage) !== leverage) {
+        if (Number(config.leverage) !== target) {
           confirmOpening?.();
-          const result = await request('POST', '/fapi/v1/leverage', { symbol, leverage: String(leverage) });
-          if (result.symbol !== symbol || Number(result.leverage) !== leverage) throw Error('币安未确认方案杠杆');
+          try {
+            const result = await request('POST', '/fapi/v1/leverage', { symbol, leverage: String(target) });
+            if (result.symbol !== symbol || Number(result.leverage) !== target) throw Error('币安未确认实盘杠杆');
+          } catch (error) {
+            if (!(error instanceof UsdtApiError) || error.code !== -4028) throw error;
+            const settings = await request('GET', '/fapi/v1/symbolConfig', { symbol });
+            const actual = Array.isArray(settings) && settings.find(item => item.symbol === symbol);
+            if (actual?.marginType !== 'ISOLATED' || Number(actual.leverage) !== target)
+              throw Error(`${symbol} 方案杠杆 ${leverage} 倍，币安未确认实盘杠杆 ${target} 倍（-4028），未提交买单`);
+          }
         }
+        return target;
       } else if (config.marginType !== 'ISOLATED' || Number(config.leverage) !== leverage) {
         throw Error('币安逐仓或杠杆设置与冻结方案不一致');
       }

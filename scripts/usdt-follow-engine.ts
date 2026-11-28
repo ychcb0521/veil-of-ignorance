@@ -367,8 +367,9 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       : campaign.actions.find(action => action.action === 'close');
     if (!opened && !existing && (closing || !accepting || campaign.actions[0].at < entryAfter
       || !validUsdtLiveEntry(campaign) || campaign.liveEntry.capturedAt < entryAfter || now > campaign.actions[0].at + entryAgeMs)) {
+      const previousIssue = row.status.state === 'blocked' ? row.status.issue : undefined;
       row.status.state = 'ignored';
-      row.status.issue = '开仓信号已过时或已平仓，未追单';
+      row.status.issue = [previousIssue, '开仓信号已过时或已平仓，未追单'].filter(Boolean).join('。');
       return write(row);
     }
     const market = (!campaign.source.market && (!campaign.source.exchange || campaign.source.exchange === 'binance'))
@@ -510,10 +511,11 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       if (!maySendBuy()) throw Error('开仓条件已失效，暂缓修改实盘合约设置');
     };
     if (action.action === 'open') await protection?.beforeOpening(market.symbol);
-    await exchange.check(market, mode, current.held, current.entry, action.action === 'open',
-      side === 'BUY' ? liveLeverage ?? campaign.leverage : 0,
+    const executionLeverage = await exchange.check(market, mode, current.held, current.entry, action.action === 'open',
+      side === 'BUY' ? liveLeverage ?? row.status.executionLeverage ?? campaign.leverage : 0,
       row.managed ? campaign.frozenMonitor?.admission.round.instantPosition && row.managed.followBasis ? 'frozen-leverage' : 'existing-position' : undefined, liveId ? protectionIds?.(market.symbol, liveId) : undefined, unsettledBuyId,
-      ...(action.action === 'open' ? [confirmOpening] as const : []));
+      ...(action.action === 'open' ? [confirmOpening, Number(quantity) * price] as const : []));
+    if (action.action === 'open' && executionLeverage) row.status.executionLeverage = executionLeverage;
     if (action.action !== 'open') {
       const actual = await readOriginalPosition(row, market);
       if (row !== rows.get(campaign.id) || reconcileExit(row, actual, market)) return;

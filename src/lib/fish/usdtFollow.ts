@@ -25,6 +25,7 @@ export interface UsdtFollowCampaign {
   actions: UsdtFollowAction[];
 }
 export interface UsdtFollowStatus {
+  executionLeverage?: number;
   id: string;
   followMonitorTemplateId?: string;
   canSwitchFollowMonitor?: boolean;
