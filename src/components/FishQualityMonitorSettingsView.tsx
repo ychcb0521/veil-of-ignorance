@@ -103,7 +103,7 @@ export function QualityMonitorSettingsButton({ plan, campaign }: { plan: Quality
       {exported && <span role="status" className="text-primary">已导出 {exported}</span>}
       {exportError && <span role="alert" className="text-destructive">{exportError}</span>}
     </div>}
-    {templates?.save && <div className="mb-3 space-y-2 rounded border border-border/60 p-2 text-[11px]">
+    {templates && (templates.save || !templates.ready) && <div className="mb-3 space-y-2 rounded border border-border/60 p-2 text-[11px]">
       {!savingForm ? <button type="button" className="inline-flex items-center gap-1 rounded px-2 py-1 hover:bg-muted" onClick={() => { templates.activate(); setName(plan.label); setError(''); setMessage(''); setSavingForm(true); }}><BookmarkPlus className="h-3.5 w-3.5"/>保存为模板</button> : <form className="space-y-2" onSubmit={event => { event.preventDefault(); void save(); }}>
         <p>保存这场战役当时的整套组合策略，之后可从模板新建方案。</p>
         <label className="block">模板名称<input autoFocus disabled={busy} value={name} onChange={event => setName(event.target.value)} className="mt-1 w-full rounded border bg-background px-2 py-1"/></label>

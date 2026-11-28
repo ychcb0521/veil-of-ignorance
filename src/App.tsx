@@ -1,4 +1,4 @@
-import { lazy } from 'react';
+import { lazy, useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useSimStateHydration } from "@/hooks/useSimStateHydration";
@@ -8,7 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { TradingProvider } from "@/contexts/TradingContext";
-import { FishQualityProvider } from "@/contexts/FishQualityContext";
+import { ArchiveCampaignTemplates, FishQualityProvider } from "@/contexts/FishQualityContext";
 import { RouteLoadBoundary } from './components/RouteLoadBoundary';
 const Index = lazy(() => import('./pages/Index.tsx'));
 const MiningLibrary = lazy(() => import('./components/FishMiningLibrary').then(module => ({default:module.FishMiningLibrary})));
@@ -22,6 +22,7 @@ const JournalRulesPage = lazy(() => import('./pages/JournalRulesPage.tsx'));
 const JournalDeepDigPage = lazy(() => import('./pages/JournalDeepDigPage.tsx'));
 const JournalCampaignsPage = lazy(() => import('./pages/JournalCampaignsPage.tsx'));
 const JournalCampaignDetailPage = lazy(() => import('./pages/JournalCampaignDetailPage.tsx'));
+const ArchivedCampaignPage = lazy(() => import('./pages/JournalCampaignDetailPage').then(module => ({default: module.ArchivedCampaignDetailPage})));
 const JournalCampaignClassifyPage = lazy(() => import('./pages/JournalCampaignClassifyPage.tsx'));
 const JournalEmotionDiaryPage = lazy(() => import('./pages/JournalEmotionDiaryPage.tsx'));
 const CognitiveAssetsPage = lazy(() => import('./pages/CognitiveAssetsPage.tsx'));
@@ -39,7 +40,13 @@ function AppRoutes() {
   const location = useLocation();
   const { user, profile, loading, bootIssue } = useAuth();
   const libraryOnly = location.pathname === '/mining-library';
-  const simStateReady = useSimStateHydration(libraryOnly ? undefined : user?.id);
+  const archiveRoute = /^\/journal\/campaigns\/fish-sell-monitor-[^/]+\/?$/.test(location.pathname);
+  // Keep an existing trading tab running across navigation. Only a directly opened
+  // archive tab can start in reader mode, until it navigates into the workspace.
+  const [readerTab, setReaderTab] = useState(archiveRoute);
+  useEffect(() => { if (!archiveRoute) setReaderTab(false); }, [archiveRoute]);
+  const archiveOnly = readerTab && archiveRoute;
+  const simStateReady = useSimStateHydration(libraryOnly || archiveOnly ? undefined : user?.id);
 
   if (loading) {
     // 登录态恢复不出来时不再只转圈：摆出原因、出路与现场读数。
@@ -88,6 +95,10 @@ function AppRoutes() {
 
   // The account library can open in a second tab without mounting a second trading engine.
   if (libraryOnly) return <RouteLoadBoundary><MiningLibrary key={user.id} account={user.id} openRequest={{key:1}} /></RouteLoadBoundary>;
+
+  if (archiveOnly) return <RouteLoadBoundary key={user.id}><ArchiveCampaignTemplates owner={user.id}><Routes>
+    <Route path="/journal/campaigns/:id" element={<ArchivedCampaignPage />} />
+  </Routes></ArchiveCampaignTemplates></RouteLoadBoundary>;
 
   // 云端引擎状态尚未水化完成 → 与 auth 同款加载屏。
   // 常驻浏览器几乎瞬时（本地已有数据，比较后放行）；新浏览器等一次全量拉取。

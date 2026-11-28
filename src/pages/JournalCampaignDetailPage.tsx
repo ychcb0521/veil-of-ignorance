@@ -958,7 +958,19 @@ function CampaignBatchBoardRenderer({
   );
 }
 
+type DetailTradingInputs = Pick<ReturnType<typeof useTradingContext>, 'getEffectiveTime' | 'balance' | 'positionsMap' | 'priceMap'>;
+const archiveInputs: DetailTradingInputs = {getEffectiveTime: Date.now, balance: 0, positionsMap: {}, priceMap: {}};
+
+export function ArchivedCampaignDetailPage() {
+  return <CampaignDetail trading={archiveInputs} />;
+}
+
 export default function JournalCampaignDetailPage({ batchExport }: { batchExport?: CampaignBatchExportWorkerProps } = {}) {
+  const trading = useTradingContext();
+  return <CampaignDetail trading={trading} batchExport={batchExport} />;
+}
+
+function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs; batchExport?: CampaignBatchExportWorkerProps}) {
   const { id: routeId } = useParams<{ id: string }>();
   const id = batchExport?.campaignId ?? routeId;
   const paperCampaign = isPaperCampaignId(id);
@@ -983,7 +995,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     }),
     [profile?.display_name, user?.email, user?.id],
   );
-  const { getEffectiveTime, balance, positionsMap, priceMap } = useTradingContext();
+  const { getEffectiveTime, balance, positionsMap, priceMap } = trading;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);

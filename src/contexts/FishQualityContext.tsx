@@ -8,6 +8,7 @@ import { runPageFishQuality } from '@/hooks/useFish';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { useFishNotify } from '@/hooks/useFishNotify';
 import { useFishCdaTracking } from '@/hooks/useFishCdaTracking';
+import { useQualityPlanCatalog } from '@/hooks/useQualityPlanCatalog';
 import { useInstantCampaigns } from '@/hooks/useInstantCampaigns';
 import {useInstantTradeMail} from '@/hooks/useInstantTradeMail';
 import { useUsdtFollow } from '@/hooks/useUsdtFollow';
@@ -128,7 +129,29 @@ export function usePageFishQuality(fish: readonly TradeSignal[], library: readon
 }
 
 /** 战役只在用户选择存模板时激活研究存储，平时保持轻量只读。 */
+type TemplateActions = {ready: boolean; activate: () => void; save: FishQualityState['savePlanSnapshot']};
+const ArchiveTemplateActions = createContext<TemplateActions | null>(null);
+
+export function ArchiveCampaignTemplates({owner, children}: {owner: string; children: ReactNode}) {
+  const [requested, setRequested] = useState(false);
+  const [actions, setActions] = useState<Pick<TemplateActions, 'ready' | 'save'>>({ready: false, save: undefined});
+  const [catalog] = useQualityPlanCatalog(owner);
+  const names = useMemo(() => ({owner, resolver: qualityTemplateNames({planTemplates: catalog})}), [owner, catalog]);
+  const activate = useCallback(() => setRequested(true), []);
+  return <ArchiveTemplateActions.Provider value={{...actions, activate}}>
+    {requested && <ArchiveTemplateWriter owner={owner} onChange={setActions} />}
+    <QualityTemplateNamesContext.Provider value={names}>{children}</QualityTemplateNamesContext.Provider>
+  </ArchiveTemplateActions.Provider>;
+}
+
+function ArchiveTemplateWriter({owner, onChange}: {owner: string; onChange: (value: Pick<TemplateActions, 'ready' | 'save'>) => void}) {
+  const {ready, savePlanSnapshot} = useFishQuality(owner, EMPTY, runPageFishQuality, EMPTY, EMPTY, true, EMPTY, true, false);
+  useEffect(() => { onChange({ready, save: savePlanSnapshot}); }, [ready, savePlanSnapshot, onChange]);
+  return null;
+}
+
 export function useCampaignQualityTemplates() {
+  const archive = useContext(ArchiveTemplateActions);
   const context = useContext(FishQualityContext);
-  return context ? { ready: context.state.ready, activate: context.activate, save: context.state.savePlanSnapshot } : null;
+  return context ? { ready: context.state.ready, activate: context.activate, save: context.state.savePlanSnapshot } : archive;
 }
