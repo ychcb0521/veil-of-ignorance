@@ -61,7 +61,7 @@ export function FishQualityModule({ title, icon: Icon, summary, children, status
 
 /** The buy workspace keeps static filtering and dynamic screening visibly separate. */
 export function FishQualityModuleGroup({children}:{children:ReactNode}) {
-  const [open,setOpen]=useState(FISH_PANEL_DEFAULTS.qualityModules), id=useId();
+  const [open,setOpen]=useState(false), id=useId();
   return <section aria-label="买前过滤模块" data-testid="quality-filter-controls" data-module-level="module" className="border-b border-border/40 py-1.5">
     <h4 className="flex h-7 items-center"><button type="button" aria-expanded={open} aria-controls={id} onClick={()=>setOpen(!open)} className={fishSubHeading}>
       <Filter aria-hidden className="h-3.5 w-3.5 text-muted-foreground"/><span>买前过滤</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open?'rotate-180':''}`}/>

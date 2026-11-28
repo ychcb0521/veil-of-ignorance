@@ -53,6 +53,7 @@ it('enables filtering and holding actions for a prepared imported workspace whil
  s.workspace={archiveReady:false,informationReady:true,importInformation:vi.fn(),importRows:vi.fn(),removeRows:vi.fn(),saveMonitoring:vi.fn(),saveFiltering:vi.fn(),sources:undefined};
  s.runStaticSettings=vi.fn(async()=>{});
  render(<FishQuality state={s}/>);
+  openBuyFilters();
  const filtering=screen.getByRole('button',{name:'开始过滤'}),holding=screen.getByRole('button',{name:'开始监测'});
  expect(filtering).toBeEnabled();expect(holding).toBeEnabled();
  fireEvent.click(filtering);expect(s.runStaticSettings).toHaveBeenCalledOnce();
@@ -88,6 +89,9 @@ function defaultDetectorState(): FishQualityState {
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
   return { ...s, study };
 }
+function openBuyFilters() {
+  fireEvent.click(screen.getByRole('button', {name:'买前过滤'}));
+}
 afterEach(cleanup);
 it('sends the saved counterfactual plan to the shared template catalog', async () => {
   const store = await import('@/lib/fish/parallelUniverseStore');
@@ -101,6 +105,7 @@ it('sends the saved counterfactual plan to the shared template catalog', async (
   });
   try {
     render(<FishQuality state={s}/>);
+  openBuyFilters();
     const edit = screen.getByRole('button', {name:'反事实法'});
     await waitFor(() => expect(edit).toBeEnabled());
     fireEvent.click(edit);
@@ -266,6 +271,7 @@ it('keeps static and dynamic modules separate and opens the new three-stage sett
  render(<FishPanel quality={s} signals={[]} progress={null} inputs={{time:'',threshold:''}} onInputsChange={()=>{}}
    selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={()=>{}} onCancel={()=>{}}
    onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>);
+  openBuyFilters();
  const fixed=within(screen.getByTestId('quality-static-controls')),dynamic=within(screen.getByTestId('quality-dynamic-controls')),holding=within(screen.getByTestId('quality-run-controls'));
  expect(fixed.getByRole('button',{name:'开始过滤'})).toBeInTheDocument();
  expect(dynamic.getByRole('button',{name:'开始筛选'}).className).toBe(holding.getByRole('button',{name:'开始监测'}).className);
@@ -568,6 +574,7 @@ it('hands the evaluator the on-screen rows first and updates that order after sc
 it('saves an ATR percentage from the static filter settings', () => {
   const s = state();
   render(<FishQuality state={s}/>);
+  openBuyFilters();
   fireEvent.click(screen.getByRole('button', { name: '买入过滤条件' }));
   fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
   fireEvent.change(screen.getByLabelText('买入条件 1 指标'), { target: { value: 'atr-price-pct-v1:ATRP' } });
@@ -587,6 +594,7 @@ it('shows the ATR filter judgment beside its percent without consuming the three
   const metrics=makeQualitySignalMetrics([key,'atr-price-pct-v1:avg_ATRP','atr-price-pct-v1:avg_ATRP_2'],[ATR_PRICE_PCT_DEF]);
   s.study=separateQualityFilters({...s.study,buyFilters:[filter],signalMetrics:metrics,filterReadings:[]});
   const view=render(<FishQuality state={s}/>);
+  openBuyFilters();
   expect(screen.getAllByTestId('quality-signal-reading-column')).toHaveLength(3);
   expect(screen.getByRole('columnheader',{name:/是否满足.*< 3%/})).toBeVisible();
   const firstRow=()=>within(screen.getAllByTestId('quality-fish-row')[0]);
@@ -614,6 +622,7 @@ it('saves standalone conditions and shows their judgments without masking sellin
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
   const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
   const s = state(); render(<FishQuality state={s}/>);
+  openBuyFilters();
   fireEvent.click(screen.getByRole('button', { name: '买入过滤条件' }));
   expect(screen.getByText('未设置过滤条件')).toBeVisible();
   expect(screen.queryByTestId('quality-holding-veto-editor')).toBeNull();
@@ -627,6 +636,7 @@ it('saves standalone conditions and shows their judgments without masking sellin
   const f = makeQualityBuyFilter('state:state', '>', .65), row = qualityComparisonRows(s.study)[0];
   s.study = separateQualityFilters({ ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }] });
   render(<FishQuality state={s}/>);
+  openBuyFilters();
   fireEvent.click(screen.getByRole('button', { name: '静态过滤说明' }));
   expect(screen.getByText(/信号时点读数按原信号时间生成/)).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '静态过滤说明' }));
@@ -828,6 +838,7 @@ it('edits standalone filters without masking sell outcomes, with sortable holdin
   s.study.filterReadings = [{ key: qualityFilterReadingKey(by('BBBUSDT'), f), value: .1 }, { key: qualityFilterReadingKey(by('CCCUSDT'), f), value: .9 }];
   s.study.results = ['BBBUSDT', 'CCCUSDT'].flatMap((sym, i) => [sPlan, cPlan].map(p => ({ key: qualityResultKey(by(sym), p, 0), sampleId: by(sym).id, groupId: p.id, evaluatedAt: T, status: 'closed' as const, entryTime: T, entryPrice: 100, endTime: T + 1, endPrice: 101, returnPct: 1, pnl: 1, heldHours: i ? 30 : .5 })));
   render(<FishQuality state={s}/>);
+  openBuyFilters();
   const row = (sym: string) => screen.getAllByTestId('quality-fish-row').find(r => r.textContent!.includes(sym))!;
   // BBB 在状态 S 方案下没买入（不满足 > 0.7），在 CDA 方案（不过滤）下照常有结果
   const held = (sym: string) => within(row(sym)).getAllByTestId('quality-held-time').map(c => c.textContent);
@@ -908,6 +919,7 @@ it('keeps holding vetoes under 持仓监测, per sell plan', async () => {
   const { makeQualityHoldingVeto } = await import('@/lib/fish/qualityFilters');
   const s = state(); s.study.sellPlans![1].holdingVetoes = [makeQualityHoldingVeto('dynamic-drawdown', '>=', 20)];
   render(<FishQuality state={s}/>);
+  openBuyFilters();
   const monitor = screen.getByRole('region', { name: '持仓监测模块' }), filter = screen.getByTestId('quality-filter-controls');
   fireEvent.click(within(monitor).getByRole('button', { name: '持仓监测说明' })); expect(screen.getByText('1 项监测条件')).toBeVisible();
   fireEvent.click(within(monitor).getByRole('button', { name: '持仓监测说明' })); expect(screen.queryByText('1 项监测条件')).toBeNull();
@@ -958,6 +970,7 @@ it('places independent filter results immediately after capture, runs without se
   s.study.selectedRowIds = qualityDisplayRows(s.study).map(r => r.id);
   s.study.filterReadings = qualityComparisonRows(s.study).filter(r => r.source.symbol !== 'PENDINGUSDT').map(r => ({ key: qualityFilterReadingKey(r, f), value: r.source.symbol === 'LOWUSDT' ? .5 : .9, at: T }));
   const view = render(<FishQuality state={s}/>);
+  openBuyFilters();
   const headerRows = screen.getByTestId('quality-fish-table').querySelectorAll('thead tr');
   const headers = within(headerRows[headerRows.length - 1] as HTMLElement).getAllByRole('columnheader'), filterColumn = screen.getByTestId('quality-filter-column');
   expect(headers[6]).toHaveTextContent('捕捞过程'); expect(headers[7]).toBe(filterColumn); expect(filterColumn).toHaveTextContent('过滤 · 状态 S 原始值'); expect(filterColumn).toHaveTextContent('> 0.7');
@@ -1011,6 +1024,7 @@ it('shows the continuous-mining panel right away in the merged 卖出与探测 v
 it('keeps filtering and monitoring in workflow order with controls on the left', () => {
   const s = state(); s.running = true; s.progress = { done: 2333, total: 2360, current: '' };
   render(<FishQuality state={s}/>);
+  openBuyFilters();
   const group = screen.getByRole('region', { name: '持仓监测模块' }), filter = screen.getByTestId('quality-filter-controls');
   expect(within(group).getByTestId('quality-mode')).toHaveTextContent('持仓监测');
   for (const name of ['暂停监测', '开始监测的其他方式', '持仓监测条件']) expect(within(group).getByRole('button', { name })).toBeInTheDocument();
@@ -1045,6 +1059,7 @@ it('starts and pauses filtering and monitoring independently while bulk mining i
   const s = state(); s.study.sellPlans![0].buyFilters = [makeQualityBuyFilter('state:state', '>', .7)];
   const mining = { state: { ...newMiningState(), enabled: true }, running: true, anchorMs: T, progress: { done: 12, total: 518 }, waiting: '', start: vi.fn(), pause: vi.fn(), setTarget: vi.fn() };
   const view = render(<FishQuality state={s} mining={mining as never}/>);
+  openBuyFilters();
   const filter = () => screen.getByRole('region', { name: '买前过滤模块' }), monitor = () => screen.getByRole('region', { name: '持仓监测模块' });
   fireEvent.click(within(filter()).getByRole('button', { name: '开始过滤' })); expect(s.startFilter).toHaveBeenCalledOnce(); expect(s.start).not.toHaveBeenCalled();
   s.filterRunning = true; s.filterProgress = { done: 1, total: 2, current: '', matched: 1 }; view.rerender(<FishQuality state={s} mining={mining as never}/>);
@@ -1142,13 +1157,14 @@ it('removes the redundant run-state column while keeping the standard source and
 it('explains unavailable filtering and provides a resume/retry action that reuses cached readings independently',async()=>{
  const {makeQualityBuyFilter}=await import('@/lib/fish/qualityFilters');
  const s=state();s.study=separateQualityFilters(s.study);const h=render(<FishQuality state={s}/>);
+  openBuyFilters();
  expect(screen.getByRole('button',{name:'开始过滤'})).toBeDisabled();
  // 旁边已有「条件设置」，不再另写「未设置过滤条件 · 点此设置」；原因放在按钮悬停里
  expect(screen.queryByText(/点此设置/)).toBeNull();expect(screen.getByRole('button',{name:'开始过滤'})).toHaveAttribute('title','先设置并启用买入过滤条件，或添加读数算法');
  fireEvent.click(screen.getByRole('button',{name:'买入过滤条件'}));expect(screen.getByTestId('quality-buy-filter-editor')).toBeVisible();
  cleanup();s.study.buyFilters=[makeQualityBuyFilter('state:state','>',.7)];s.filterProgress={done:1857,total:2054,current:''};
- s.resumeFiltering=vi.fn();render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'继续过滤'}));expect(s.resumeFiltering).toHaveBeenCalledOnce();expect(s.startFilter).not.toHaveBeenCalled();expect(s.start).not.toHaveBeenCalled();expect(screen.getByRole('button',{name:'继续过滤'})).toHaveAttribute('title',expect.stringContaining('有效读数直接复用'));
- cleanup();render(<FishQuality state={{...s,resumeFiltering:undefined,filterError:'本轮还有 2 项缺数据'}}/>);expect(screen.getByRole('button',{name:'重试缺数据'})).toBeEnabled();expect(screen.getByRole('alert')).toHaveTextContent('2 项');
+ s.resumeFiltering=vi.fn();render(<FishQuality state={s}/>);openBuyFilters();fireEvent.click(screen.getByRole('button',{name:'继续过滤'}));expect(s.resumeFiltering).toHaveBeenCalledOnce();expect(s.startFilter).not.toHaveBeenCalled();expect(s.start).not.toHaveBeenCalled();expect(screen.getByRole('button',{name:'继续过滤'})).toHaveAttribute('title',expect.stringContaining('有效读数直接复用'));
+ cleanup();render(<FishQuality state={{...s,resumeFiltering:undefined,filterError:'本轮还有 2 项缺数据'}}/>);openBuyFilters();expect(screen.getByRole('button',{name:'重试缺数据'})).toBeEnabled();expect(screen.getByRole('alert')).toHaveTextContent('2 项');
 });
 
 it('saves the chosen L0 source beneath the mirror settings on the active holding plan',async()=>{
@@ -1409,6 +1425,7 @@ it('groups detector, filter and entry columns under 买前过滤, renames 持仓
   s.study.results = [{ key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: plan.id, status: 'closed', evaluatedAt: T, returnPct: 5 }];
   s.clearFilterResults = vi.fn(); s.clearMonitorResults = vi.fn();
   render(<FishQuality state={s}/>);
+  openBuyFilters();
   const categories = screen.getByTestId('quality-algorithm-categories'), plans = s.study.sellPlans!.length;
   expect(categories).toHaveTextContent('静态过滤'); expect(categories).toHaveTextContent('持仓监测');
   expect(categories).not.toHaveTextContent('过滤算法'); expect(categories).not.toHaveTextContent('卖出算法');
@@ -1426,6 +1443,7 @@ it('groups detector, filter and entry columns under 买前过滤, renames 持仓
   fireEvent.click(screen.getByRole('button', { name: '隐藏组合表中的监测结果' }));
   expect(screen.queryAllByTestId('quality-sell-column')).toHaveLength(0); expect(screen.queryByTestId('quality-monitor-group')).toBeNull();
   cleanup(); render(<FishQuality state={s}/>);
+  openBuyFilters();
   expect(screen.getByRole('button', { name: '显示组合表中的静态过滤结果' })).toHaveAttribute('aria-pressed', 'true');
   fireEvent.click(screen.getByRole('button', { name: '显示组合表中的静态过滤结果' })); fireEvent.click(screen.getByRole('button', { name: '显示组合表中的监测结果' }));
   expect(screen.getAllByTestId('quality-filter-cell').length).toBeGreaterThan(0); expect(screen.getAllByTestId('quality-sell-column')).toHaveLength(plans);
@@ -1651,11 +1669,19 @@ it('locks only checked rows in the current scope and keeps new signals outside u
 
 it('opens the existing regret library from workspace sources even when buy filters are collapsed', async () => {
   const s = state();
+ s.preEntry={library:{version:1,rounds:[],records:[]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn(),configure:vi.fn(),useSavedSettings:vi.fn(),importLibrary:vi.fn(),clearTableResults:vi.fn()};
   s.workspace = {informationReady:true,importInformation:vi.fn(),importRows:vi.fn(),removeRows:vi.fn(),saveMonitoring:vi.fn(),saveFiltering:vi.fn(),sources:undefined};
   s.runParallelUniverse = vi.fn(async () => {});
   render(<FishQuality state={s}/>);
   const filters = screen.getByRole('button', {name:'买前过滤'});
-  if (filters.getAttribute('aria-expanded') === 'true') fireEvent.click(filters);
+  expect(filters).toHaveAttribute('aria-expanded', 'false');
+  const sections = ['静态过滤', '动态监测', '平行宇宙'];
+  const group = within(screen.getByTestId('quality-filter-controls'));
+  for (const name of sections) expect(group.queryByRole('button', {name})).toBeNull();
+  fireEvent.click(filters);
+  for (const name of sections) expect(group.getByRole('button', {name})).toBeVisible();
+  fireEvent.click(filters);
+  expect(filters).toHaveAttribute('aria-expanded', 'false');
   const sources = within(screen.getByTestId('quality-workspace-sources'));
   const openRegret = sources.getByRole('button', {name:'后悔库'});
   fireEvent.click(openRegret);
@@ -1705,6 +1731,7 @@ it('shows the configured DBL-5 percentage in the working table even when the old
   const s = state();
   s.study.independentFilters = true;
   const view = render(<FishQuality state={s}/>);
+  openBuyFilters();
   fireEvent.click(screen.getByRole('button', {name:'买入过滤条件'}));
   fireEvent.click(screen.getByRole('button', {name:'添加条件'}));
   fireEvent.change(screen.getByLabelText('买入条件 1 指标'), {target:{value:'static-dbl5-distance-v2:nearest'}});
