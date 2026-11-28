@@ -28,6 +28,25 @@ const accountFormula = (formula: string, x: string) => `${formula}\navg_${x} = a
 
 beforeEach(() => { localStorage.clear(); mock.request.mockClear(); mock.version = 0; });
 registerCustomIndicators();
+it.each(['BSS_MZ','BSS_VD','BSS_A'])('%s uses the selected lookback for both chart averages', id => {
+  const bars = klines();
+  const renderLine = (level: number, hours: number) => {
+    const name = researchKcName(id, level);
+    const params = indicatorCalcParams(name, {type:id, period:3, avgHours:hours});
+    return mock.registered.get(name).calc(bars, {calcParams:params}).map((row:{value?:number}) => row.value);
+  };
+  const raw = renderLine(0, 24);
+  for (const hours of [12, 24, 48]) {
+    expect(renderLine(0, hours)).toEqual(raw);
+    const last = raw.slice(-hours*12) as number[];
+    const mean = (values:number[]) => values.reduce((total,x)=>total+x,0) / values.length;
+    const quarter = last.length / 4;
+    const weighted = [0,1,2,3].reduce((total,i)=>total+(i+1)*mean(last.slice(i*quarter,(i+1)*quarter)),0)/10;
+    expect(renderLine(1,hours).at(-1)).toBeCloseTo(mean(last), 9);
+    expect(renderLine(2,hours).at(-1)).toBeCloseTo(weighted, 9);
+  }
+});
+
 describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
   it.each(RESEARCH_INDICATORS)('$id 三条序列逐根等于账号的 Deep dig 公式，原值不被末尾加权结果替代，显示倍数只乘一次', template => {
     const k = klines(); const def = BUILTIN_FEATURES.find(d => d.id === template.featureId)!;const item=researchIndicatorForFeature(def);

@@ -109,6 +109,9 @@ export interface ResearchIndicator {
   neutral: number; min: number; max: number; seller: boolean; avgNeutral?: number; avgRange?: readonly [number, number];
   priceOverlay?:boolean; rawOnly?:boolean; marketEvidence?:boolean; templateId?: string; neutralLabel?: string; components?: readonly string[]; parameterUnit?: string;
 }
+const bssComponentCharts = new Set(BSS_COMPONENT_FEATURES.map(def => def.chartCore.toUpperCase()));
+export const supportsAverageWindow = (item: Pick<ResearchIndicator, 'id' | 'templateId' | 'marketEvidence'>) =>
+  !!item.marketEvidence || bssComponentCharts.has(item.templateId ?? item.id);
 export const researchAverageHours = (item: Pick<ResearchIndicator, 'featureId' | 'templateId'>) =>
   item.featureId === CDA_HOURLY_ID || item.templateId === CDA_HOURLY_CHART_ID ? CDA_HOURLY_AVERAGE_HOURS : 24;
 export const supportsDbl5GuardVersion = (item?: ResearchIndicator) =>

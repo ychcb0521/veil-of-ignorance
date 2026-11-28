@@ -16,6 +16,22 @@ const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'BSS_MZ', '
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)?.nameZh??accountResearchIndicators().find(item=>item.id===id)!.short;
 
 describe('自制区的十个特征值', () => {
+  it('keeps the three BSS averaging windows independent of each other and the raw periods', () => {
+    const changed = vi.fn();
+    const ids = ['BSS_MZ', 'BSS_VD', 'BSS_A'];
+    const configs = ids.map((type, i) => ({type, period: [1, 3, 2][i], enabled: true}));
+    render(<IndicatorMenu open indicators={configs} onClose={()=>{}} onIndicatorsChange={changed}/>);
+    for (const [index, id] of ids.entries()) {
+      const field = screen.getByLabelText(name(id)+' 均线时长 N（小时）');
+      expect((field as HTMLInputElement).value).toBe('24');
+      fireEvent.change(field, {target:{value:'12'}});
+      fireEvent.blur(field);
+      expect(changed.mock.lastCall![0]).toEqual(configs.map((config, i) => i === index ? {...config, avgHours:12} : config));
+      for (const line of INDICATOR_COMPANIONS[id]) {
+        expect(indicatorCalcParams(line.kcName, {...configs[index], avgHours:12}).slice(0,2)).toEqual([configs[index].period,12]);
+      }
+    }
+  });
   it('lets the user add the 1116 acceleration line as an independent 5m overlay', () => {
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[]} onClose={()=>{}} onIndicatorsChange={changed}/>);

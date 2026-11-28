@@ -1,5 +1,5 @@
 import { CDA_HOURLY_CHART_ID } from '@/lib/cdaPeriods';
-import { researchAverageHours } from '@/lib/researchIndicators';
+import { researchAverageHours, supportsAverageWindow } from '@/lib/researchIndicators';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {dbl5ChartGuardParam,registerDbl5Indicator} from '@/lib/dbl5mChart';
 import { IMPULSE_5M_ID, IMPULSE_5M_INDICATOR, registerImpulse5mChart } from '@/lib/impulse5mChart';
@@ -362,14 +362,14 @@ export function registerAccountFeatureIndicators(definitions: readonly DeepDigFe
       const label = level === 0 ? item.short : 'avg_' + item.core + (level === 2 ? '_2' : '');
       const color=(v:number|undefined)=>item.templateId!=='STATE'?vColor(v):v==null?'#F0B90B':level===0&&v>=.5&&v<=.6?'#FFD600':v>item.neutral?'#0ECB81':v===item.neutral?'#F0B90B':'#F6465D';
       registerIndicator({
-        name: researchKcName(item.id, level), shortName: label, calcParams: item.marketEvidence&&level>0?[researchDefaultPeriod(item),AVG_DEFAULT_HOURS,0,0]:[researchDefaultPeriod(item),0,0], precision: 8,
+        name: researchKcName(item.id, level), shortName: label, calcParams: supportsAverageWindow(item)&&level>0?[researchDefaultPeriod(item),AVG_DEFAULT_HOURS,0,0]:[researchDefaultPeriod(item),0,0], precision: 8,
         ...(item.min < item.max ? { minValue: item.min, maxValue: item.max } : {}),
         draw: zeroLine(ORANGE_DASH_LINE, item.neutral,item.neutralLabel),
         createTooltipDataSource: ({ defaultStyles,indicator,crosshair }) => {
           const def=chartFeatureDef(item.featureId);
           const statusRow=indicator.result.at(-1) as Record<string,number>|undefined;
           const status=statusRow?.__pending?' · 指标计算中…':statusRow?.__missing?' · 暂无有效读数':'';
-          if(!def?.focusVersion)return {name:item.marketEvidence&&level>0?label:def?.short??label,calcParamsText:status,icons:defaultStyles.tooltip.icons,values:undefined as never};
+          if(!def?.focusVersion)return {name:supportsAverageWindow(item)&&level>0?label:def?.short??label,calcParamsText:status,icons:defaultStyles.tooltip.icons,values:undefined as never};
           let focus='加权参数待修正';try{const vars=evaluateOnBars([],compileFeatureFormula(def.formula),def).vars;focus=`近${vars.get((def.focusPrefix??'focus2')+'_h')}h ×${vars.get((def.focusPrefix??'focus2')+'_weight')}`;}catch{/* Invalid account formulas remain visible. */}
           const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;
           const keys=['value',...(level===0?item.components??[]:[])],format=(v:number|undefined)=>v==null||!Number.isFinite(v)?'—':Number(v.toPrecision(7)).toString();
@@ -380,7 +380,7 @@ export function registerAccountFeatureIndicators(definitions: readonly DeepDigFe
           color: color((data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value), size: 1.5,
         }) }],
         calc: (data, indicator) => {
-          const values = researchChartSeries(data, item, indicator.calcParams[0],level>0&&item.marketEvidence?{averageHours:indicator.calcParams[1]??24}:{});
+          const values = researchChartSeries(data, item, indicator.calcParams[0],level>0&&supportsAverageWindow(item)?{averageHours:indicator.calcParams[1]??24}:{});
           const rows=indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
           const missing=!(level===0?values.core:level===1?values.avg:values.avg2).some(v=>v!=null&&Number.isFinite(v));
           return rows.map((row,i)=>({...row,__pending:values.pending?1:0,__missing:missing?1:0,...(values.components?Object.fromEntries(Object.entries(values.components).map(([name,series])=>[name,series[i]??undefined])):{})}));
@@ -422,7 +422,7 @@ export function indicatorCalcParams(kcName: string, ind: { type?: string; period
   if (kcName === 'DSP_OVERLAY_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
   if (kcName === 'DSP_V_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
   if (kcName === 'DSP_V_AVG2_CUSTOM') return [ind.period, z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
-  if(research?.marketEvidence&&kcName!==researchKcName(research.id))return [ind.period,validHours(ind.avgHours,AVG_DEFAULT_HOURS),btcReferenceVersion()+researchHistoryVersion(),researchDefinitionVersion(research)];
+  if(research&&supportsAverageWindow(research)&&kcName!==researchKcName(research.id))return [ind.period,validHours(ind.avgHours,AVG_DEFAULT_HOURS),btcReferenceVersion()+researchHistoryVersion(),researchDefinitionVersion(research)];
   if (research) return [ind.period, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(research),
     ...(ind.guardVersion&&supportsDbl5GuardVersion(research)?[dbl5ChartGuardParam(ind.guardVersion)]:[])];
   const legacyId = kcName === 'CBI_CUSTOM' ? 'cbi' : kcName === 'CBA2_CUSTOM' ? 'cba-2' : undefined;
@@ -1507,7 +1507,7 @@ export function registerCustomIndicators() {
       const line = level > 0 && 'avgNeutral' in item ? item.avgNeutral : item.neutral;
       registerIndicator({
         name: researchKcName(item.id, level), shortName: label,
-        calcParams: 'marketEvidence' in item&&item.marketEvidence&&level>0?[item.period,AVG_DEFAULT_HOURS,0,0]:[item.period,0,0], precision: level === 0 ? (item.id === 'CDA' || item.id === CDA_HOURLY_CHART_ID ? 2 : 3) : 8,
+        calcParams: supportsAverageWindow(item)&&level>0?[item.period,AVG_DEFAULT_HOURS,0,0]:[item.period,0,0], precision: level === 0 ? (item.id === 'CDA' || item.id === CDA_HOURLY_CHART_ID ? 2 : 3) : 8,
         // Fixed-range averages retain their reference bounds; other averages use visible values.
         ...(level === 0 ? ((item.id.startsWith('SBS5M')||item.id.startsWith('DBL5'))&&item.min===item.max?{}:{ minValue: item.min, maxValue: item.max }) : 'avgRange' in item ? { minValue: item.avgRange[0], maxValue: item.avgRange[1] } : {}),
         draw: args => {
@@ -1515,7 +1515,7 @@ export function registerCustomIndicators() {
           return zeroLine(ORANGE_DASH_LINE, line, 'neutralLabel' in item ? item.neutralLabel : undefined)(args);
         },
         createTooltipDataSource: ({ indicator, defaultStyles, crosshair }) => {
-          if(level>0&&'marketEvidence' in item&&item.marketEvidence){const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;return {name:label,calcParamsText:`(${indicator.calcParams[1]??24}h) · 展示均值`,icons:defaultStyles.tooltip.icons,values:[{title:label+': ',value:row?.value==null?'—':Number(row.value.toPrecision(7)).toString()}]};}
+          if(level>0&&supportsAverageWindow(item)){const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;return {name:label,calcParamsText:`(${indicator.calcParams[1]??24}h) · 展示均值`,icons:defaultStyles.tooltip.icons,values:[{title:label+': ',value:row?.value==null?'—':Number(row.value.toPrecision(7)).toString()}]};}
           if('marketEvidence' in item&&item.marketEvidence){
             return {name:label,calcParamsText:`(${indicator.calcParams[0]}h)`,icons:defaultStyles.tooltip.icons,values:undefined as never};
           }
@@ -1548,7 +1548,7 @@ export function registerCustomIndicators() {
           return { color, size: 1.5 };
         } }],
         calc: (dataList, indicator) => {
-          const values = researchChartSeries(dataList, item, indicator.calcParams[0],level>0&&'marketEvidence' in item&&item.marketEvidence?{averageHours:indicator.calcParams[1]??24}:{});
+          const values = researchChartSeries(dataList, item, indicator.calcParams[0],level>0&&supportsAverageWindow(item)?{averageHours:indicator.calcParams[1]??24}:{});
           const rows = indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
           return values.components ? rows.map((row, i) => ({ ...row,
             ...Object.fromEntries(Object.entries(values.components).map(([name,series]) => [name, series[i] ?? undefined])),
