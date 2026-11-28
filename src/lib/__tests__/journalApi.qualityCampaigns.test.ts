@@ -7,7 +7,7 @@ import { qualityCampaignId } from '@/lib/campaignSections';
 import { prepareQualityRepair, applyQualityRepair } from '@/lib/fish/qualityRepair';
 import { STATE_DEF } from '@/lib/deepDig/features';
 const state = vi.hoisted(() => ({ owner: 'owner-a', study: null as FishQualityStudy | null, load: vi.fn(), from: vi.fn(() => { throw new Error('Paper campaigns must never use a personal table'); }) }));
-vi.mock('@/integrations/supabase/client', () => ({ supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: state.owner } } } }) }, from: state.from } }));
+vi.mock('@/integrations/supabase/client', () => ({ supabase: { auth: { getSession: async () => ({ data: { session: state.owner ? { user: { id: state.owner } } : null } }) }, from: state.from } }));
 vi.mock('@/lib/fish/qualityStore', () => ({ loadQualityStudy: state.load }));
 beforeEach(() => {
   state.owner = 'owner-a'; state.from.mockClear();
@@ -21,6 +21,15 @@ it('opens an evaluated campaign through the existing full/detail API without rea
   const id = qualityCampaignId(state.study!.results[0].key);
   const full = await getCampaignFullData(id); expect(full.tradeRecords[0].pnl).toBe(10); expect(full.campaign.user_id).toBe('owner-a');
   expect((await getCampaignWithLegs(id)).legs).toHaveLength(1); expect(await listCounterfactuals(id)).toEqual([]); expect(state.from).not.toHaveBeenCalled();
+});
+it('reads the signed-in viewer’s local archive when a second session lookup would be empty', async () => {
+  const id = qualityCampaignId(state.study!.results[0].key);
+  state.owner = '';
+  await expect(getCampaignFullData(id)).rejects.toThrow('用户未登录');
+  const data = await getCampaignFullData(id, { authenticatedViewerId: 'owner-a' });
+  expect(data.campaign.user_id).toBe('owner-a');
+  expect(data.tradeRecords[0].pnl).toBe(10);
+  await expect(getCampaignFullData(id, { authenticatedViewerId: 'owner-b' })).rejects.toThrow('本账号未找到');
 });
 it('does not expose a previous account’s experiment through a retained URL or preloaded source', async () => {
   const id = qualityCampaignId(state.study!.results[0].key), previous = await getCampaignFullData(id);

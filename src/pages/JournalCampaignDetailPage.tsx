@@ -1170,7 +1170,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         initialLocalReadRevisionRef.current = getPersistedStateHydrationRevision();
         const [full, branchesResult] = await Promise.all([
           batchExport ? loadBatchCampaignData(id, batchExport.snapshot)
-            : paperCampaign ? getCampaignFullData(id, { signal: controller.signal }) : getCampaignFullData(id),
+            : paperCampaign ? getCampaignFullData(id, { signal: controller.signal, authenticatedViewerId: viewerUserId }) : getCampaignFullData(id),
           batchExport
             ? Promise.resolve({ branches: [] as CampaignCounterfactual[], error: null as string | null })
             : listCounterfactuals(id).then(
@@ -1252,7 +1252,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const watchInstant = !!instantOpen || !!instantSummary?.settlementPending || (!!liveUsdt && !liveUsdt.closedAt);
 
   useEffect(() => {
-    if (!id || id !== instantCampaignId || !campaignOwnerId || batchExport || (!watchInstant && !liveUsdt?.followId)) return;
+    if (!id || id !== instantCampaignId || !viewerUserId || campaignOwnerId !== viewerUserId || batchExport || (!watchInstant && !liveUsdt?.followId)) return;
     const lifetime = new AbortController();
     let running = false;
     let queued = false;
@@ -1264,7 +1264,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       if (running) { queued = true; return; }
       running = true;
       try {
-        const full = await getCampaignFullData(id, { signal: lifetime.signal });
+        const full = await getCampaignFullData(id, { signal: lifetime.signal, authenticatedViewerId: viewerUserId });
         if (lifetime.signal.aborted) return;
         const version = reconcile(full.campaign);
         if (version === fingerprint) return;
@@ -1282,7 +1282,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     const unsubscribe = subscribeInstantCampaigns(campaignOwnerId, refresh);
     const interval = watchInstant ? window.setInterval(refresh, 30_000) : undefined;
     return () => { lifetime.abort(); unsubscribe(); window.clearInterval(interval); };
-  }, [id, instantCampaignId, campaignOwnerId, batchExport, watchInstant, liveUsdt?.followId]);
+  }, [id, instantCampaignId, campaignOwnerId, viewerUserId, batchExport, watchInstant, liveUsdt?.followId]);
 
   useEffect(() => {
     if (!id || !campaignOwnerId || !viewerUserId || batchExport || paperCampaign) return;
@@ -2451,7 +2451,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     : null;
 
   const refreshCampaign = async () => {
-    const full = await getCampaignFullData(campaign.id);
+    const full = await getCampaignFullData(campaign.id, paperCampaign && viewerUserId ? { authenticatedViewerId: viewerUserId } : undefined);
     setCampaign(full.campaign);
     setLegs(full.legs);
     setTradeRecords(full.tradeRecords);

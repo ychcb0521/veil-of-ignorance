@@ -3125,6 +3125,8 @@ function symbolTimelineActivityIndex(
  * 两件事对单场详情是对的，对列表是纯浪费。
  */
 export interface CampaignFullDataOptions {
+  /** Current AuthContext account for a local paper read. Never taken from the URL or archive. */
+  authenticatedViewerId?: string;
   signal?: AbortSignal;
   /** 已批量读取并水合的战役和腿；避免列表页再逐场请求同一份远端数据。 */
   source?: CampaignWithLegs;
@@ -3169,7 +3171,11 @@ export async function getCampaignFullData(
   /** 本地增量核对的真实时刻界，见函数体内的说明；null = 无界。 */
   replayEndRealAt?: number | null;
 }> {
-  if (isPaperCampaignId(campaignId)) return readQualityCampaign(campaignId, options.signal);
+  if (isPaperCampaignId(campaignId)) {
+    return options.authenticatedViewerId
+      ? loadQualityCampaignData(options.authenticatedViewerId, campaignId, options.signal)
+      : readQualityCampaign(campaignId, options.signal);
+  }
   if (options.source && options.source.campaign.id !== campaignId) {
     throw new Error('加载战役失败：预加载数据的战役 ID 不匹配');
   }
