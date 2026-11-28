@@ -1,4 +1,5 @@
 // @vitest-environment node
+import {defaultQualityAddition} from '../qualityAddition';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -671,4 +672,36 @@ it('本机端口拒绝非配对页面，并要求同账号和配对码', async (
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
+});
+
+it.each([[true,true],[false,true],[true,false]])('records rejected round only for opted-in margin rejection (%s,%s)', async (enabled, margin) => {
+  const m = 60_000, at = Math.floor(Date.now() / m) * m;
+  const anchor = { symbol, positionSide: 'LONG' as const, openedAt: at - 50_123, openingOrderId: '200', openingTradeId: '201' };
+  let clock = at;
+  const opener: UsdtCampaignFill = { id: '201', orderId: '200', side: 'BUY', at: anchor.openedAt,
+    quantity: '10.000', positionQuantity: '10.000', price: '4.000', action: 'open', commission: .01, commissionAsset: 'USDT', realized: 0 };
+  const actual: UsdtLiveCampaign = { symbol, positionSide: 'LONG', direction: 'long', asset: 'USDT',
+    openedAt: anchor.openedAt, quantity: '10.000', fills: [opener] };
+  const read = vi.fn(async () => structuredClone(actual));
+  const venue = exchange(), name = file();
+  const monitor = { version: INSTANT_TEMPLATE_MONITOR, templateId: 'frozen-plan', name: '原方案',
+    plan: freezeQualityPlan({...makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 5, []),
+      addition:{...defaultQualityAddition(),enabled:true,...(enabled?{marginRejectExit:'margin-reject-exit-v1' as const}:{})}}) };
+  const runner = createUsdtFollower(makeStore(name), venue, owner, 'hedge', at, read, () => clock);
+  const managed = (await runner.adopt(anchor, monitor))!;
+  const id = binanceManualId(anchor);
+  const sample = binanceManualSample(managed);
+  const seed = binanceManualSeed(managed, sample);
+  const add = { at: at + m, price: 4.25, quantity: 5, notional: 21.25, direction: '>' as const,
+    reading: 2, threshold: 1, label: '加仓规则', metric: 'CDA', scanFrom: at, barOpenTime: at };
+  clock = at + 2*m;
+  const addition = binanceManualAdvance(managed, seed, { ...seed, endTime: clock, additionFill: add, additionFills: [add] })!;
+  runner.updateManaged(id, managed.revision, addition.checkpoint, addition.decision);
+  venue.order.mockResolvedValueOnce({terminal:true, fills:[], insufficientMargin:margin || undefined, issue:'rejected'});
+  await runner.tick();
+  const recovered = createUsdtFollower(makeStore(name),venue,owner,'hedge',at,read,()=>clock).managed()[0].position;
+  expect(recovered.pending).toBeUndefined();
+  expect(recovered.checkpoint!.remainingQuantity).toBe(10);
+  expect(recovered.checkpoint!.additionFills ?? []).toEqual([]);
+  expect(recovered.checkpoint!.marginRejectedAdditions ?? []).toEqual(enabled && margin ? [add] : []);
 });

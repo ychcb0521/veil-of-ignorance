@@ -131,7 +131,7 @@ export function serveUsdtFollower({
   const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),
     guardPlusAdditions: 1, executionSafety: USDT_EXECUTION_SAFETY, controlRevision: store.controlRevision(),
     ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}),
-    ...(readManaged ? { manualMonitor: 1, monitorSwitch: 1 } : {}), ...(controls ? { positionControls: 1 } : {}),
+    ...(readManaged ? { manualMonitor: 1, monitorSwitch: 1, marginRejectExit: 1 } : {}), ...(controls ? { positionControls: 1 } : {}),
     ...(readManaged && controls ? { followMonitorSwitch: USDT_FOLLOW_MONITOR_BASIS } : {}),
     ...(desk ? { orderDesk: 1 } : {}), ...(handoff ? { handoff: handoff.describe() } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {
@@ -191,7 +191,7 @@ export function serveUsdtFollower({
       }
       if (readManaged && managedClock) {
         if (content.command === 'manual-monitor-status') {
-          return json(res, 200, { observedAt: managedClock(), positions: follower.managed(content.followBasisVersion === USDT_FOLLOW_MONITOR_BASIS) });
+          return json(res, 200, { observedAt: managedClock(), positions: follower.managed(content.followBasisVersion === USDT_FOLLOW_MONITOR_BASIS).filter(({position})=>!position.monitor.plan.addition?.marginRejectExit || content.marginRejectExit === 1) });
         }
         if (content.command === 'manual-monitor-adopt') {
           if (content.confirmed !== true || content.controlRevision !== store.controlRevision())

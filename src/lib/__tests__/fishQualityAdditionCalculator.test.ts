@@ -413,3 +413,24 @@ it('reads hourly CDA in the primary and backup addition branches using their own
  expect((await simulate(5,15)).additionFills).toMatchObject([{at:T+60*M,featureId:variant.id}]);
  expect((await simulate(15,5)).additionFills).toMatchObject([{at:T+60*M,featureId:variant.id,lane:'attack'}]);
 });
+
+it('arms sixth and seventh margin-rejected sell rules on five actual additions and waits for the seventh stop', async () => {
+  const g = group();
+  Object.assign(g.addition!, {maxRounds:7, repeat:true, marginRejectExit:'margin-reject-exit-v1', positionVersion:HOLDING_LEDGER_ADDITION_VERSION});
+  const market = loader(i => bar(T+i*M,100+i*10,1,i===8?100:99+i*10,i===0?106:101+i*10));
+  const proposed = await run(g,market,8);
+  const all = proposed.additionFills!;
+  expect(all).toHaveLength(7);
+  const actual = all.slice(0,5);
+  const prior = {...proposed, endTime:all[5].at+M, additionFill:actual[0], additionFills:actual, marginRejectedAdditions:[all[5]]};
+  const resumed = await run(g,market,8,prior);
+  expect(resumed.status).toBe('open');
+  expect(resumed.additionFills).toHaveLength(6);
+  const seventh = resumed.additionFills!.at(-1)!;
+  expect(seventh.at).toBe(all[6].at);
+  const rejected = {...resumed, additionFills:actual, marginRejectedAdditions:[all[5],seventh]};
+  const exit = await run(g,market,9,rejected);
+  expect(exit.status).toBe('closed');
+  expect(exit.endPrice).toBeCloseTo(seventh.sizing!.support);
+  expect(exit.additionFills).toEqual(actual);
+});

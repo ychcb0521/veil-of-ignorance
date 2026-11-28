@@ -66,7 +66,7 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
   latest.current = campaigns;
   const wake = useRef<() => void>();
   const commandPending = useRef<{ kind: 'pause' | 'resume'; revision?: number }>();
-  const control = useRef<{ executionSafety?: number; controlRevision?: number }>({});
+  const control = useRef<{ marginRejectExit?:number; executionSafety?: number; controlRevision?: number }>({});
   const pairingChannel = useRef<BroadcastChannel>();
   const pairingWrite = useRef(0);
   useEffect(() => {
@@ -174,7 +174,7 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
           if (lifetime.signal.aborted) return;
           connectedOnce = payload.executionSafety === USDT_EXECUTION_SAFETY;
           if (pendingCommand?.kind === 'pause' && !connectedOnce) legacyPaused = true;
-          control.current = { executionSafety: payload.executionSafety, controlRevision: payload.controlRevision };
+          control.current = { marginRejectExit:payload.marginRejectExit, executionSafety: payload.executionSafety, controlRevision: payload.controlRevision };
           startedAt = payload.startedAt;
           const capabilityChanged=supportsGuardPlus!==(payload.guardPlusAdditions===1);
           supportsGuardPlus=payload.guardPlusAdditions===1;
@@ -235,6 +235,9 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
   }, []);
   const readMirror = useCallback(async <T,>(content:Record<string,unknown>, signal:AbortSignal, timeout:number, safe = false):Promise<T> => {
     if (!owner || !token) throw Error('请先连接本机 U 本位执行端');
+    const monitor = content.monitor as InstantMonitorSettings | undefined;
+    if (monitor?.plan.addition?.marginRejectExit && control.current.marginRejectExit !== 1)
+      throw Error('该模板已启用本金不足时的卖出设置，请先更新本机实盘执行器');
     const response = await fetch(safe ? executionEndpoint : endpoint, {
       method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer '+token },
       credentials:'omit', redirect:'error', signal:AbortSignal.any([signal,AbortSignal.timeout(timeout)]),
@@ -261,7 +264,7 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     return batch;
   }, [readMirror]);
   const readManualMonitor = useCallback((signal: AbortSignal) =>
-    readMirror<BinanceManualState>({ command: 'manual-monitor-status', followBasisVersion: USDT_FOLLOW_MONITOR_BASIS }, signal, 10_000), [readMirror]);
+    readMirror<BinanceManualState>({ command: 'manual-monitor-status', marginRejectExit:1, followBasisVersion: USDT_FOLLOW_MONITOR_BASIS }, signal, 10_000), [readMirror]);
   const adoptManualMonitor = useCallback((anchor: BinanceManualAnchor, monitor: InstantMonitorSettings, controlRevision: number, signal: AbortSignal) =>
     readMirror({ command: 'manual-monitor-adopt', anchor, monitor, confirmed: true,
       controlRevision }, signal, 60_000, true), [readMirror]);

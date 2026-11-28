@@ -40,7 +40,7 @@ export function binanceManualAdvance(position: BinanceManualPosition, prior: Qua
   if (opening) additions.push(opening);
   for (const evidence of additions) {
     const impulse = evidence.structureEvidence?.guardPlus?.early_impulse_event;
-    const transitionCount = (position.followBasis?.carriedAdditions ?? 0) + qualityAdditionFills(prior).length + 1;
+    const transitionCount = (position.followBasis?.carriedAdditions ?? 0) + (prior.marginRejectedAdditions?.length ?? 0) + qualityAdditionFills(prior).length + 1;
     const transition=opening && evidence===opening ? observed.openingImpulseDecision : undefined;
     const sellStages=observed.sellStageSwitches?.filter(s=>s.afterAdditions<=transitionCount);
     const vetoStages=observed.vetoStageSwitches?.filter(s=>s.afterAdditions<=transitionCount);

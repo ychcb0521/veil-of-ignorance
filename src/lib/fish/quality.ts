@@ -146,6 +146,7 @@ export interface QualityResult {
   /** First and only mirror sale, as a fraction of original coin quantity. */
   mirrorFill?: QualityMirrorFill; remainingFraction?: number; realizedPnl?: number;
   mirrorRealizedPnl?: number; remainingPnl?: number; initialNotional?: number;
+  marginRejectedAdditions?: QualityAdditionFill[]; // Qualified signals with an explicit exchange margin rejection, never acquisitions.
   additionFill?: QualityAdditionFill; additionFills?:QualityAdditionFill[]; additionNote?: string;
   openingImpulseDecision?: {version:'binance-impulse-open-v1';fill:QualityAdditionFill;
     sellStage?:QualitySellStageActivation;vetoStage?:QualityVetoStageActivation};
@@ -777,7 +778,7 @@ async function evaluateQualitySampleCore(sample:QualitySample,group:QualityGroup
    // Add only the next actual boundary, including plans without a round limit.
    // Future positions cannot change earlier exits; no new cap is introduced.
    const carried=state?.followBasis?.carriedAdditions??0;
-   const count=carried+qualityAdditionFills(state??{}).length;
+   const count=carried+(state?.marginRejectedAdditions?.length??0)+qualityAdditionFills(state??{}).length;
    if(group.advantage){const next=count+1;if(next<=qualityAdditionRoundLimit(group.addition!)&&!boundaries.includes(next)){boundaries.push(next);boundaries.sort((a,b)=>a-b);}}
    const selected=stages.filter(s=>s.afterAdditions<=count).at(-1),selectedVeto=vetoStages.filter(s=>s.afterAdditions<=count).at(-1),nextCount=boundaries.find(n=>n>count),phase={...qualityStagePlan(group,selected),holdingVetoes:stagedHoldingVetoes(group,count)};
    const prior=state?{...state,key:qualityResultKey(sample,phase,observeHours)}:undefined;
@@ -797,7 +798,7 @@ async function evaluateQualitySampleCore(sample:QualitySample,group:QualityGroup
     state={...result,key,...(veto?{vetoPath:beginVetoStagePath(group,result)}:{}),...(switches.length?{activeSellStage:switches.at(-1),sellStageSwitches:switches}:{}),...(vetoSwitches.length?{activeVetoStage:vetoSwitches.at(-1),vetoStageSwitches:vetoSwitches}:{})};continue;
    }
    const decision=result.openingImpulseDecision;
-   if(decision && nextCount===carried+qualityAdditionFills(result).length+1){
+   if(decision && nextCount===carried+(result.marginRejectedAdditions?.length??0)+qualityAdditionFills(result).length+1){
      const seller=stages.find(s=>s.afterAdditions===nextCount);
      const veto=vetoStages.find(s=>s.afterAdditions===nextCount);
      result.openingImpulseDecision={...decision,
@@ -859,7 +860,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       // A false soft reading needs only to reset its streak. Never delay a hard stop
       // to fetch auxiliary history, and never count the pre-entry candle as a new minute.
       const observation=met&&at>entry?await readAdvantage(at):{at:Math.floor(at/(5*QUALITY_MINUTE))*5*QUALITY_MINUTE,grade:'U' as const};
-      const required=requiredSoftConfirmations(group.advantage!,(prior?.followBasis?.carriedAdditions??0)+qualityAdditionFills(prior??{}).length,observation);
+      const required=requiredSoftConfirmations(group.advantage!,(prior?.followBasis?.carriedAdditions??0)+qualityAdditionFills(prior??{}).length+(prior?.marginRejectedAdditions?.length??0),observation);
       advantageState=advanceQualitySoftConfirmation(advantageState,at,seller,met,required,observation);
       advantageChecks.push(advantageState);
       return {confirmed:met&&advantageState.count>=required,evidence:advantageState};
@@ -990,7 +991,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         const {candidates,required,unavailable}=buildAdditionCandidates(config),roundRules=config.rounds?.map((r,i)=>({...buildAdditionCandidates(r),...(config.alternativeRounds?.[i]?{alternative:buildAdditionCandidates(config.alternativeRounds[i])}:{})}));
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({additionsBlockedAt,positionVersion:config.positionVersion,candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,impulsePosition:config.impulsePosition,attackFromRound:config.attackFromRound,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,indicatorIncrease:config.indicatorIncrease,entryBufferAtr:config.entryBufferAtr,entryDistanceAtr:config.entryDistanceAtr,gainBasis:config.gainBasis,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:initialNotional,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,previousVetoes:prior?.additionVetoes,roundExits:config.roundExits,geometricLock:config.geometricLock,kStopVersion:config.kStopVersion,breakevenFloor:config.breakevenFloor,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,initialPayoffRiskPct,pauseAfterAdditionCount,load,signal,
+          const calculated=await findCalculatorAdditions({additionsBlockedAt,positionVersion:config.positionVersion,candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,impulsePosition:config.impulsePosition,attackFromRound:config.attackFromRound,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,indicatorIncrease:config.indicatorIncrease,entryBufferAtr:config.entryBufferAtr,entryDistanceAtr:config.entryDistanceAtr,gainBasis:config.gainBasis,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:initialNotional,end:additionEnd,since,prices,previous:additionFills,marginRejected:prior?.marginRejectedAdditions,previousReductions:prior?.additionReductions,previousVetoes:prior?.additionVetoes,roundExits:config.roundExits,geometricLock:config.geometricLock,kStopVersion:config.kStopVersion,breakevenFloor:config.breakevenFloor,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,initialPayoffRiskPct,pauseAfterAdditionCount,load,signal,
             carriedAdditions,impulse1115Position:config.impulse1115Position,classifiedImpulsePositions:config.classifiedImpulsePositions,liveAt,advantage:group.advantage,readAdvantage,ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           openingAdditionPreview=calculated.openingPreview;
           additionFills=calculated.fills;additionFill=additionFills[0];if(!additionFills.length&&unavailable)additionNote=unavailable;additionReductions=calculated.reductions;
@@ -1048,7 +1049,8 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     const priceReturnPct = (finalPrice / entryPrice - 1) * 100;
     const breakdown = mirrorPnlBreakdown(initialNotional, entryPrice, finalPrice, mirrorFill);
     const trackLedger=group.addition?.enabled&&group.addition.positionVersion===HOLDING_LEDGER_ADDITION_VERSION;
-    const position=additionFills.length||trackLedger?additionPosition(initialNotional,entryPrice,finalPrice,closed,additionFills,mirrorFill,additionReductions,entry):undefined;
+    const hasRejectedRound=!!prior?.marginRejectedAdditions?.length;
+    const position=additionFills.length||trackLedger||hasRejectedRound?additionPosition(initialNotional,entryPrice,finalPrice,closed,additionFills,mirrorFill,additionReductions,entry):undefined;
     const returnPct = position?.returnPct ?? breakdown.returnPct;
     let peakPct = Math.max(prior?.peakPct ?? 0, priceReturnPct);
     for (let i = 0; i < klines.length; i += 5000) peakPct = Math.max(peakPct, computePeakPriceChangePct({ ...args, klines: klines.slice(i, i + 5000), side: 'long', entryPrice }) ?? 0);
@@ -1072,17 +1074,18 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let vetoPath:import('./qualityVeto').QualityHoldingPath|undefined;
     if(trackVetoPath){vetoPath=prior?.vetoPath??{entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};for(const b of held)vetoPath=advanceQualityHolding(vetoPath,b);vetoPath=advanceQualityHolding({...vetoPath,peak:Math.max(vetoPath.peak,fillPeak)},{openTime:finalTime,open:finalPrice,high:finalPrice,low:finalPrice,close:finalPrice,volume:0,takerBuyVolume:0});}
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
-    return { ...base,...(isSelectedL0(group.payoffRiskVersion)?{selectedL0Pct:initialPayoffRiskPct??null}:{}),...(initialPayoffRiskPct!==undefined && (group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION) ? {initialDbl5RiskPct:initialPayoffRiskPct}:{}),...(mirrorLossReviews?{mirrorLossReviews}:{}),...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(impulseTimingAuditFrom!=null?{impulseTimingAuditFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
+    return { ...base,...(isSelectedL0(group.payoffRiskVersion)?{selectedL0Pct:initialPayoffRiskPct??null}:{}),...(initialPayoffRiskPct!==undefined && (group.payoffRiskVersion===DBL5_PAYOFF_RISK_VERSION) ? {initialDbl5RiskPct:initialPayoffRiskPct}:{}),...(mirrorLossReviews?{mirrorLossReviews}:{}),...(savedAdditionBlock!=null&&savedAdditionBlock<=finalTime?{additionsBlockedAt:savedAdditionBlock}:{}),...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(impulseTimingAuditFrom!=null?{impulseTimingAuditFrom}:{}),...(additionReductions?.length&&(additionFills.length||hasRejectedRound)?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       ...(openingImpulseDecision?{openingImpulseDecision}:{}),
       ...(!closed&&!trigger&&openingAdditionPreview?.at===finalTime?{openingAdditionPreview}:{}),
       ...(additionGuardPlus&&additionGuardPlus.at<=finalTime?{additionGuardPlus}:{}),
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
-      ...(position&&(additionFill||trackLedger) ? {additionFill,...(group.addition?.quantityMode==='calculator'||prior?.instantMonitorSwitches?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
+      ...(position&&(additionFill||trackLedger||hasRejectedRound) ? {additionFill,...(group.addition?.quantityMode==='calculator'||prior?.instantMonitorSwitches?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
         initialNotional,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:group.addition?.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?position.remainingPnl+position.reductionPnl:position.remainingPnl,realizedPnl:position.realizedPnl,
         remainingFraction:closed?0:position.remainingQuantity/position.totalQuantity} : {}),
       ...(additionNote?{additionNote}:{}),...(savedAdvantage?{advantageState:savedAdvantage}:{}),
       ...(group.positionManagement || prior?.instantMonitorSwitches ? { initialNotional } : {}),
       ...(prior?.instantMonitorSwitches ? { instantMonitorSwitches: prior.instantMonitorSwitches } : {}),
+      ...(prior?.marginRejectedAdditions?.length?{marginRejectedAdditions:prior.marginRejectedAdditions}:{}),
       ...(prior?.followBasis ? { followBasis: prior.followBasis } : {}),
       returnPct, pnl: position?.totalPnl ?? breakdown.totalPnl, peakPct, adversePct: (low / entryPrice - 1) * 100,
       drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, vetoDynamic, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,

@@ -249,6 +249,8 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       checkpoint.endTime! % MANAGED_MINUTE !== 0 || checkpoint.endTime! < earliest || checkpoint.endTime! > now + MANAGED_MINUTE) {
       throw Error('手动托管检查点未与同一笔成交对齐');
     }
+    if (JSON.stringify(checkpoint.marginRejectedAdditions ?? []) !== JSON.stringify(managed.checkpoint?.marginRejectedAdditions ?? []))
+      throw Error('本金不足的加仓轮次须以执行器记录为准');
     if (managed.followBasis) {
       const prior = managed.checkpoint!;
       const realizedReductions = (value: QualityResult) => (value.additionReductions ?? []).filter(fill => fill.fraction > 0);
@@ -554,7 +556,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       row.status.orderId = report.exchangeId;
       row.status.issue = pendingBuy && report.terminal ? unsettledBuyIssue : report.issue ?? (report.terminal && report.fills.reduce((sum, fill) => sum + fill.quantity, 0)
         < quantityUnits(previous.quantity, market.step) ? '订单部分成交，余仓按币安回报跟踪' : undefined);
-      settleManagedUsdtDecision(row, key, market, held);
+      settleManagedUsdtDecision(row, key, market, held, report.insufficientMargin);
       if (row.managed?.pending?.kind === 'close' && report.terminal && !report.fills.length) {
         cooldown.set(row.campaign.id, Date.now() + 5000);
       }

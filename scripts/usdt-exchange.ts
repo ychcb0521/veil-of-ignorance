@@ -10,6 +10,7 @@ interface UsdtOrderReport {
   terminal: boolean;
   fills: UsdtFill[];
   issue?: string;
+  insufficientMargin?: true;
 }
 export interface UsdtMarket {
   symbol: string;
@@ -207,8 +208,8 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
             quantity: order.quantity, newClientOrderId: order.id, newOrderRespType: 'RESULT',
             ...(mode === 'one-way' && order.side === 'SELL' ? { reduceOnly: 'true' } : {}) });
         } catch (error) {
-          if (error instanceof UsdtApiError && [-1013, -1021, -1102, -1111, -2014, -2015, -2019, -2022, -4164].includes(error.code ?? 0)) {
-            return { terminal: true, fills: [], issue: error.message };
+          if (error instanceof UsdtApiError && [-1013, -1021, -1102, -1111, -2014, -2015, -2018, -2019, -2022, -4164].includes(error.code ?? 0)) {
+            return { terminal: true, fills: [], ...((error.code === -2018 || error.code === -2019) ? { insufficientMargin: true as const } : {}), issue: error.message };
           }
         }
       }

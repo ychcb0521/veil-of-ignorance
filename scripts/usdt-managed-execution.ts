@@ -71,7 +71,7 @@ export function verifyManagedUsdtFills(row: UsdtCampaignLedger, actual: UsdtLive
 
 /** A pending strategy transition advances only after the exchange returns actual executions. */
 export function settleManagedUsdtDecision(row: UsdtCampaignLedger, key: string, market: UsdtMarket,
-  remaining: { held: number; entry: number; realized: number }) {
+  remaining: { held: number; entry: number; realized: number }, insufficientMargin = false) {
   const managed = row.managed, pending = managed?.pending, order = row.orders[key];
   if (!managed || !pending || !order?.terminal ||
     (pending.action.id !== key && !key.startsWith(pending.action.id + ':'))) return;
@@ -92,6 +92,20 @@ export function settleManagedUsdtDecision(row: UsdtCampaignLedger, key: string, 
     remainingQuantity: Number(formatQuantity(remaining.held, market.step)), averageEntryPrice: remaining.entry,
     remainingCost: Number(formatQuantity(remaining.held, market.step)) * remaining.entry,
     realizedPnl: remaining.realized - (managed.followBasis?.realizedBefore ?? 0) };
+  if (!units && insufficientMargin && pending.kind === 'add' && managed.monitor.plan.addition?.marginRejectExit === 'margin-reject-exit-v1') {
+    const rejected = [...(prior.marginRejectedAdditions ?? []), pending.evidence];
+    const round = (managed.followBasis?.carriedAdditions ?? 0) + (prior.additionFills?.length ?? (prior.additionFill ? 1 : 0)) + rejected.length;
+    checkpoint.marginRejectedAdditions = rejected;
+    checkpoint.additionSkips = [...(prior.additionSkips ?? []), { at: pending.evidence.at, round, kind: 'margin-rejected',
+      label: '本金不足，已启用本轮卖出设置', reading: '币安拒单，实际加仓数量为 0' }];
+    checkpoint.sellStageSwitches = pending.sellStageSwitches ?? prior.sellStageSwitches;
+    checkpoint.vetoStageSwitches = pending.vetoStageSwitches ?? prior.vetoStageSwitches;
+    const stage = pending.vetoStageSwitches?.at(-1);
+    if (stage?.afterAdditions === round) {
+      const price = pending.evidence.price;
+      checkpoint.vetoPath = {entry: managed.entryPrice, peak: stage.peakBasis === 'holding' ? Math.max(price, prior.vetoPath?.peak ?? managed.entryPrice * (1 + (prior.peakPct ?? 0) / 100)) : price, minimum:price, dynamic:0};
+    }
+  }
   if (units > 0) {
     const quantity = Number(formatQuantity(units, market.step));
     const price = actual.reduce((sum, fill) => sum + fill.price * fill.quantity, 0) / units;
@@ -106,7 +120,7 @@ export function settleManagedUsdtDecision(row: UsdtCampaignLedger, key: string, 
         routeDecision: pending.routeDecision ?? prior.routeDecision,
         sellStageSwitches: pending.sellStageSwitches ?? prior.sellStageSwitches,
         vetoStageSwitches: pending.vetoStageSwitches ?? prior.vetoStageSwitches,
-        ...(newVetoStage?.afterAdditions === (managed.followBasis?.carriedAdditions ?? 0) + additions.length ? { vetoPath: { entry: managed.entryPrice,
+        ...(newVetoStage?.afterAdditions === (managed.followBasis?.carriedAdditions ?? 0) + (prior.marginRejectedAdditions?.length ?? 0) + additions.length ? { vetoPath: { entry: managed.entryPrice,
           peak: newVetoStage.peakBasis === 'holding' ? peak : price, minimum: price, dynamic: 0 } } : {}) };
     } else if (pending.kind === 'mirror') {
       checkpoint.mirrorFill = { ...pending.evidence, executedAt:Math.max(...actual.map(fill=>fill.at)), price, fraction: Math.min(1, quantity / managed.entryQuantity),

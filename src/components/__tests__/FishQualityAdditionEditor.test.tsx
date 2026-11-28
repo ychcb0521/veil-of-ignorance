@@ -526,3 +526,13 @@ it('moves later round settings into the deleted slot and saves the shortened seq
  expect(screen.getByLabelText('最多加仓次数')).toHaveValue(1);
  expect(screen.getByRole('button',{name:'删除第 1 次加仓'})).toBeDisabled();
 });
+it('preserves the original draft when margin rejection exits are switched back off',()=>{
+ render(<Editor initial={{...defaultQualityAddition(),enabled:true}}/>);
+ const option=screen.getByLabelText('本金不足时仍启用本次加仓的卖出设置');
+ const original=save();
+ expect(option).not.toBeChecked();
+ fireEvent.click(option);
+ expect(additionDraft(save()).marginRejectExit).toBe('margin-reject-exit-v1');
+ fireEvent.click(option);
+ expect(save()).toEqual(original);
+});

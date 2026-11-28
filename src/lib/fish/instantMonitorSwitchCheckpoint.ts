@@ -25,6 +25,7 @@ export function rebaseInstantMonitorCheckpoint(current: QualityResult, initialNo
   const effectiveAt = Math.max(current.endTime, Math.ceil(at / 60_000) * 60_000);
   return {
     ...current,
+    ...(current.marginRejectedAdditions ? {marginRejectedAdditions:undefined} : {}),
     key, groupId: to.plan.id, evaluatedAt: at, endTime: effectiveAt, initialNotional,
     instantMonitorSwitches: [...current.instantMonitorSwitches ?? [], { at, effectiveAt, from, to,
       ...(!current.instantMonitorSwitches?.length && current.selectedL0Pct !== undefined ? { openingSelectedL0Pct: current.selectedL0Pct } : {}) }],
