@@ -111,12 +111,12 @@ export interface FishDirectoryPicker {
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
 export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,workingItems,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more,browseArchive,directoryStatus,trashAccount,cleanupDirectory,selectBeforeLoad=false,directorySearch,roundAction,roundPreview}:{
   roundAction?:(id:string,revision?:unknown)=>ReactNode;
-  roundPreview?:(id:string,revision?:unknown)=>ReactNode;
+  roundPreview?:(id:string,revision:unknown,close:()=>void)=>ReactNode;
   workingItems?:()=>FishDirectoryItem[];
   trashAccount?:{owner?:string;scope:DirectoryScope};cleanupDirectory?:DirectoryCleanup;
   browseArchive?:{owner?:string;scope:BrowseScope;directoryOnly?:boolean;fullReady?:boolean;loadFull?:()=>void};
   selectBeforeLoad?:boolean;directorySearch?:ReactNode;
-  directoryStatus?:ReactNode;notice?:ReactNode;more?:ReactNode;browseRounds?:boolean;loadingStatus?:ReactNode;loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
+  directoryStatus?:ReactNode;notice?:ReactNode|((close:()=>void)=>ReactNode);more?:ReactNode;browseRounds?:boolean;loadingStatus?:ReactNode;loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
   picker?:FishDirectoryPicker;
   onRename?:(id:string,name:string)=>Promise<boolean>;
@@ -351,8 +351,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
     id:item.id, name:formatUTC8(item.at)+' '+(edits?.[item.id]?.name||item.label), load:item.settings,
   }] : [];
   const expandedItem=(item:FishDirectoryItem)=>selectedId===item.id||!!item.children?.some(child=>selectedId===child.id);
-  const localPreview=selected&&confirmBodyLoad&&bodyId!==selected.id&&!importSelection&&
-    !manage&&!purgeMode&&!trashView?roundPreview?.(selected.id,selected.revision):null;
+  const localPreview=selected&&confirmBodyLoad&&bodyId!==selected.id&&
+    !manage&&!purgeMode&&!trashView?roundPreview?.(selected.id,selected.revision,()=>changeOpen(false)):null;
   const renderItem = (item: FishDirectoryItem,nested=false):ReactNode => <div key={item.id} className={'group/archive rounded-lg border border-border/60 '+(edits?.[item.id]?.hidden?'opacity-60':'')} data-testid={prefix+'-archive-item'}>
           <div className="flex items-center">{!nested&&(onSelectDirectory||purgeMode)&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||confirmPurge||(purgeMode ? !item.purgeable : !!edits?.[item.id]?.hidden)} checked={checkedSet.has(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={expandedItem(item)} onClick={()=>{setPicked(undefined);setBodyId('');setSelectedId(expandedItem(item)?'':item.id);}}><ChevronDown className={'h-3 w-3 '+(expandedItem(item)?'rotate-180':'')}/>{kind!=='algorithm'&&(!item.content||item.at>0)&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span>{roundsView&&(browseArchive?.scope==='screen'||hasDirectContent)&&item.templateGroup&&<span>{item.templateGroup.title}</span>}<span className="text-muted-foreground">{item.summary}</span></button>
             {!trashView&&!purgeMode&&!picker&&<>{roundAction?.(item.id,item.revision)}<LocalResultAction id={item.id}/></>}
@@ -428,7 +428,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       {trashView&&trash.issue&&<p role="status" className="text-xs">{trash.issue} <button type="button" className="underline" onClick={trash.reload}>重试</button></p>}
       {localItems.length>0&&<section className="space-y-2"><p className="text-xs text-muted-foreground">本机已保存的工作区结果</p>{localItems.filter(item=>!query||normalizeTemplateQuery(item.label).includes(query)).map(item=>renderItem(item))}</section>}
       {trashView ? null : directoryOnly && open && browseArchive?.owner ? <FishArchiveBrowse marks={trash.marks} selectBeforeLoad={selectBeforeLoad} legacySelection={selectBeforeLoad&&!browseArchive.fullReady} onViewDetectors={!workspaceImport?.onImportInformation&&browseArchive.scope==='filter'&&browseArchive.loadFull?selectArchiveRecords:undefined} pickRecords={(!!workspaceImport||importSelection)&&!picker} onSelectRecords={(workspaceImport&&!picker||importSelection)&&(workspaceImport?.onImportInformation||browseArchive.loadFull)?selectArchiveRecords:undefined} onDelete={trashOwner&&!picker?setTrashSelection:undefined} key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/> : <>
-      {notice}
+      {typeof notice==='function'?notice(()=>changeOpen(false)):notice}
       {picked&&workspaceImport&&completedImport.current!==picked.operation&&<p role="status" className="text-xs">正在准备已勾选的 {picked.records.size} 条记录，完成后导入至组合表…</p>}
       {importSelection&&managementOwner&&selectedId&&!selected&&!loading&&!loadError&&<p role="alert" className="text-xs">
         找不到该目录的完整归档，无法选取记录。 <button type="button" className="underline" onClick={()=>{
