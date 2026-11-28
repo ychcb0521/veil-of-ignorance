@@ -1,3 +1,4 @@
+import { displayExchangeFees, totalExchangeFees } from '@/lib/fish/usdtCampaignLegs';
 import { qualityAdditionStopOrders, additionStopStatusText, additionStopEndVerb, additionStopReductionText } from '@/lib/fish/qualityAdditionStopOrder';
 import {campaignLegDeltaLabel,campaignLimitedDrawdownText,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
 import {STATIC_DRAWDOWN_SELL_LABEL} from '@/lib/fish/qualityStaticDrawdownSell';
@@ -1242,6 +1243,7 @@ export function CampaignLegsList({
                      * 手续费用中性前景色而不是灰调，密排小字下灰调会显脏。
                      * 费率、Maker/Taker、估算依据都在 tooltip 里。
                      */
+                    if (leg.exchange_fees) return <div className="text-right text-[10px] tabular-nums">{displayExchangeFees(leg.exchange_fees)}</div>;
                     const fees = execution.record ? tradeRecordFees(execution.record) : null;
                     if (!fees) return <div className="text-right text-[11px] text-foreground/30">—</div>;
                     /**
@@ -1544,8 +1546,8 @@ export function CampaignLegsList({
                   : '本场全部成交记录的开仓费 + 平仓费（按记录去重：同一条记录挂在几条腿上只算一次）'}
                 className="text-right text-[11px] font-normal tabular-nums leading-snug text-foreground/55"
               >
-                {feeTotals == null ? '—' : feeTotals.totalUsd.toFixed(2)}
-                {feeTotals?.estimated && <span className="ml-1 text-[8px] tracking-wide text-foreground/30">估</span>}
+                {totalExchangeFees(legs) ?? (feeTotals == null ? '—' : feeTotals.totalUsd.toFixed(2))}
+                {!campaign?.comparison?.liveUsdt && feeTotals?.estimated && <span className="ml-1 text-[8px] tracking-wide text-foreground/30">估</span>}
               </div>
               <div /><div />
             </div>

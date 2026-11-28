@@ -1,3 +1,4 @@
+import { displayExchangeFees, totalExchangeFees } from '@/lib/fish/usdtCampaignLegs';
 import { qualityAdditionStopOrders, additionStopStatusText, additionStopEndVerb, additionStopReductionText } from '@/lib/fish/qualityAdditionStopOrder';
 import {campaignLegDeltaLabel,campaignLimitedDrawdownText,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
 import {STATIC_DRAWDOWN_SELL_LABEL} from '@/lib/fish/qualityStaticDrawdownSell';
@@ -940,6 +941,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       })(),
       // 手续费：与页面同源，同样刻意做淡——合计在上、开/平拆分在下，明细在页面的 tooltip 里。
       (() => {
+        if (leg.exchange_fees) return [{text:displayExchangeFees(leg.exchange_fees)!, color:'#5F6B7A', size:11}];
         const fees = execution.record ? tradeRecordFees(execution.record) : null;
         if (!fees) return [{ text: '—', color: '#A3ABB8' }];
         // 主行是金额（钱包扣的就是它），次行是拆分；币本位的拆分写币数——
@@ -1086,7 +1088,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         { text: formatExecutionWearR(executionWear.r), color: wearColor(executionWear.r ?? executionWear.usd), size: 12 },
         { text: `(${formatExecutionWearUsd(executionWear.usd)} U)`, color: '#9AA4B2', size: 10 },
       ],
-    feeTotals == null
+    input.campaign.comparison?.liveUsdt ? [{text:totalExchangeFees(input.legs) ?? '—', color:'#5F6B7A', size:11}] : feeTotals == null
       ? [{ text: '—', color: '#A3ABB8' }]
       : [
         { text: `${feeTotals.totalUsd.toFixed(2)}${feeTotals.estimated ? ' 估' : ''}`, color: '#5F6B7A', size: 11 },

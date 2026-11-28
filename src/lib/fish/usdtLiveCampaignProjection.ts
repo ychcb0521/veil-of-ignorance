@@ -1,3 +1,4 @@
+import { projectUsdtCampaignLegs } from './usdtCampaignLegs';
 import { campaignStatusFromRealizedPnl } from '@/lib/campaignRealizedPnl';
 import type { TradeCampaign } from '@/types/journal';
 import type { QualityCampaignData } from './qualityCampaignProjection';
@@ -31,7 +32,7 @@ export function buildUsdtLiveCampaignData(owner: string, position: UsdtLiveCampa
     comparison: { section: 'instant', runKey: id, sellKey: 'binance-live', sellLabel: '币安实盘', detectors: [],
       valuedAt: last.at, liveUsdt: position, ...(liveEntryRiskPct !== undefined ? { liveEntryRiskPct } : {}) },
   };
-  return { campaign, legs: [], tradeRecords: [], pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [],
+  return { campaign, ...projectUsdtCampaignLegs(owner, id, position), pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [],
     legExitPriceCorrections: {}, timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0,
       missingAnchorNodes: [], verdicts: {}, disagreements: [] } };
 }

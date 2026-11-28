@@ -651,6 +651,7 @@ function buildChartArtifacts(
   const realCampaign = campaign.comparison?.liveUsdt;
   realCampaign?.fills.forEach((fill, index) => {
     const reducing = fill.action === 'reduce';
+    if (legs.length && (!reducing || realCampaign.closedAt && fill.orderId === realCampaign.fills.at(-1)?.orderId || realCampaign.actionByOrder?.[fill.orderId] === 'mirror')) return;
     const long = realCampaign.direction === 'long';
     markers.push({
       time: fill.at, price: Number(fill.price), shape: reducing ? 'square' : long ? 'triangle-up' : 'triangle-down',
@@ -822,7 +823,7 @@ async function loadAccountCampaignPerformance(
     // 账户级样本只是读：这里自己算校正后的口径，不需要（也不该）让每一场都走一遍回写。
     // 此前默认 heal 让打开一个详情页对全部 ~147 场各写一次库，还与本场的回写抢同一行。
     const details = snapshot ? await loadBatchCampaignData(item.id, snapshot) : await getCampaignFullData(item.id, { heal: false });
-    const exitPriceCorrections = await fetchLegExitPriceCorrections(
+    const exitPriceCorrections = details.campaign.comparison?.liveUsdt ? {} : await fetchLegExitPriceCorrections(
       details.campaign.symbol,
       details.legs,
       details.tradeRecords,
@@ -1213,7 +1214,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
           return;
         }
         // 只读导出不走自愈读取：在把数据交给页面之前，先显式等到本场平仓价校正拉完（见 loadBatchExitCorrections）。
-        const corrections = batchExport
+        const corrections = batchExport && !full.campaign.comparison?.liveUsdt
           ? await loadBatchExitCorrections(full.campaign.symbol, full.legs, full.tradeRecords)
           : full.legExitPriceCorrections ?? {};
         if (cancelled) return;
@@ -1758,7 +1759,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
   const campaignSymbol = campaign?.symbol;
   useEffect(() => {
     if (batchExport) return;
-    if (!campaignSymbol || legs.length === 0 || tradeRecords.length === 0) {
+    if (liveUsdt || !campaignSymbol || legs.length === 0 || tradeRecords.length === 0) {
       setLegExitPriceCorrections(prev => (sameLegExitPriceCorrections(prev, EMPTY_LEG_EXIT_PRICE_CORRECTIONS) ? prev : EMPTY_LEG_EXIT_PRICE_CORRECTIONS));
       return;
     }
@@ -1775,7 +1776,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
     return () => {
       cancelled = true;
     };
-  }, [campaignSymbol, legs, tradeRecords, batchExport]);
+  }, [campaignSymbol, legs, tradeRecords, batchExport, liveUsdt]);
 
   const accuracy = useMemo(
     () => (campaign
@@ -1814,7 +1815,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
   );
   /** 落库行套上结算结果：已结算 → 状态 / 金额 / R 由结算推出；未结算 → 原样保留落库状态。 */
   const displayCampaign = useMemo(
-    () => (campaign && settlement ? reconcileCampaignWithSettlement(campaign, legs, settlement) : campaign),
+    () => (campaign && settlement && !campaign.comparison?.liveUsdt ? reconcileCampaignWithSettlement(campaign, legs, settlement) : campaign),
     [campaign, legs, settlement],
   );
   const currentAccountEquity = useMemo(
@@ -2016,9 +2017,6 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
     if (!liveUsdt || !liveMetrics) return undefined;
     const { realized, fees, net, openingNotional, entryPrice } = liveMetrics;
     const amount = (value: number) => usdtAmountText(value) + ' ' + liveUsdt.asset;
-    const readings = new Set(['payoffRatio', 'initialExpectedMaxLoss', 'expectedMaxDrawdownPct', 'addCount', 'mainPriceChange',
-      'mainPriceEfficiency', 'geometricExpectancy', 'arithmeticExpectancy', 'mainSideNotional', 'positionAmplification',
-      'positionGeometricMultiple', 'addEfficiency', 'peakPriceChange', 'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct']);
     return [
       { key: 'realizedPnl', label: '已实现 P&L', value: amount(realized), help: '币安逐笔成交中的已实现盈亏合计。', column: 0 },
       { key: 'commissions', label: '手续费', value: [...fees].map(([asset, fee]) => usdtAmountText(fee) + ' ' + asset).join(' / '), help: '按币安实际扣费币种汇总。', column: 0 },
@@ -2028,7 +2026,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
       { key: 'remainingQuantity', label: '余仓数量', value: liveUsdt.quantity, help: '币安成交确认后的剩余持仓数量。', column: 1 },
       { key: 'liveEntryRiskBasis', label: '初始风险依据', value: liveMetrics.percent == null ? '所选 L0 缺少开仓读数' : liveMetrics.frozen ? '开仓冻结风控' : '首仓名义金额 × 3%',
         help: '按首个开仓委托全部成交计算初始风险。旧方案缺少开仓风控时取首仓名义金额的 3%。明确选择 L0 的方案采用开仓风险读数。整场盈亏比在全部平仓且手续费可核算后显示。', column: 1 },
-      ...campaignPnlOverviewItems.filter(item => readings.has(item.key)).map(item => item.key === 'payoffRatio'
+      ...campaignPnlOverviewItems.filter(item => !['realizedPnl','initialMainExposureNotional'].includes(item.key)).map(item => item.key === 'payoffRatio'
         ? { ...item, help: liveUsdt.closedAt == null ? '仓位尚未全部平仓，整场盈亏比待结算。'
           : net == null ? '手续费含其他币种，缺少成交时折算金额，整场净盈亏和盈亏比暂缺。'
           : '整场盈亏比 = 币安逐笔成交的已实现盈亏扣除手续费后 ÷ 首仓初始风险。' } : item),
@@ -2036,17 +2034,18 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
   }, [liveUsdt, liveMetrics, campaignPnlOverviewItems]);
   const overviewItems: Array<OverviewPanelItem & { color?: string }> = livePnlOverviewItems ?? campaignPnlOverviewItems;
   const campaignMetadataMetrics = useMemo<Array<OverviewPanelItem & { color?: string }>>(() => {
+    const liveFields = [];
     if (liveUsdt) {
       const frozen = liveUsdt.management?.monitor;
       const source = liveUsdt.followId ? '系统跟单' : liveUsdt.management ? '币安手动开仓 · 策略托管' : '币安开仓';
-      return [
+      liveFields.push(
         { key: 'liveSource', label: '交易来源', value: source, help: '按实际开仓及托管记录标注。' },
         ...(frozen ? [{ key: 'frozenMonitor', label: '冻结持仓模板', value: templateNames?.forMonitor(frozen.plan, frozen.templateId)?.name ?? frozen.name, help: '实盘持仓当前执行的冻结方案。' }] : []),
         ...(liveUsdt.management?.switches ?? []).map(({ at, effectiveAt, from, to, followBasis }) => ({ key: 'monitorSwitch' + at,
           label: '方案切换 ' + formatBeijingTime(effectiveAt), value: `${from.name} → ${to.name}`,
           help: followBasis ? `接续 ${followBasis.carriedAdditions} 次加仓 · 新首仓 ${followBasis.quantity} 枚 @ ${followBasis.entryPrice} USDT` : '北京时间，切换从该分钟起生效。' })),
         ...(liveUsdt.management?.exitReason ? [{ key: 'exitReason', label: '策略平仓原因', value: liveUsdt.management.exitReason, help: '本机执行器记下的实际平仓触发条件。' }] : []),
-      ];
+      );
     }
     const leverage = campaign ? resolveCampaignMainLeverage(campaign, legs, tradeRecords) : null;
     const share = asymmetricRiskContribution?.meanSquareShare;
@@ -2054,6 +2053,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
       ? ''
       : share > 0 && share * 100 < 0.05 ? '<0.1%' : `${(share * 100).toFixed(1)}%`;
     return [
+      ...liveFields,
       {
         key: 'mainLeverage', label: '杠杆倍数', value: formatCampaignLeverage(leverage), help: (
           <><p>本场战役主力头仓开仓时使用的杠杆倍数，不把后续加仓或对冲腿的杠杆混入。</p><p>历史战役依次从主力 Leg、关联成交记录、战役初始字段和主力开仓事件回填。</p></>
@@ -2240,8 +2240,8 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
   );
   // Legs 表 Δb 列的分母：战役初始最大预期亏损 L
   const legsInitialExpectedMaxLoss = useMemo(
-    () => (campaign ? computeInitialExpectedMaxLoss(campaign, legs, tradeRecords, reverseHedgeOrders) : null),
-    [campaign, legs, tradeRecords, reverseHedgeOrders],
+    () => liveMetrics ? liveMetrics.loss : (campaign ? computeInitialExpectedMaxLoss(campaign, legs, tradeRecords, reverseHedgeOrders) : null),
+    [liveMetrics, campaign, legs, tradeRecords, reverseHedgeOrders],
   );
   // 手动开的对冲空单：与被触发的委托空单同一个目的，同在这一层、同样黄色（见 buildManualHedgeShortPriceLines）。
   const hedgeShortExecutions = useMemo<HedgeShortLegExecution[]>(() => {
@@ -3546,7 +3546,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
               </span>
             </div>
           </div>
-          {liveUsdt ? <UsdtLiveCampaignFills campaign={liveUsdt} monitor={monitorDetail} /> : <CampaignLegsList
+          <CampaignLegsList
             campaign={campaign}
             initialExpectedMaxLoss={legsInitialExpectedMaxLoss}
             /* 「占比」列按战役主方向取一侧：主多看多单、主空看空单（导出 PNG 从同一个战役对象取，两处一致） */
@@ -3571,7 +3571,8 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
             }}
             onHideReverseHedgeOrder={(order) => hideReverseHedgeOrder(order.id)}
             onDetach={paperCampaign ? undefined : setDetachTarget}
-          />}
+          />
+          {liveUsdt && <details className="mt-3"><summary className="cursor-pointer text-xs">币安逐笔成交明细</summary><UsdtLiveCampaignFills campaign={liveUsdt} monitor={monitorDetail} /></details>}
         </section>
 
         <section ref={counterfactualSectionRef} className="bg-card border border-border rounded p-6 mb-6 space-y-4">

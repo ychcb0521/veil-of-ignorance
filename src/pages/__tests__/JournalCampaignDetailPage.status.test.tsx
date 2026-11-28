@@ -218,11 +218,13 @@ describe('即时交易沿用完整战役详情', () => {
     expect(overview).toHaveTextContent('盈亏比0.12');
     expect(overview).toHaveTextContent('最大预期亏损0.24 USDT');
     expect(overview).toHaveTextContent('加仓次数0');
+    expect(screen.getByRole('button', {name:'快照 TXT'})).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole('button', {name:'PNG'})).toBeEnabled());
     const fills = screen.getByRole('region', { name: '币安逐笔成交' });
     expect(fills).toHaveTextContent('40 BEAT');
     expect(fills).toHaveTextContent('60 BEAT');
     expect(fills).toHaveTextContent('平仓');
-    expect(await screen.findByTestId('campaign-chart')).toHaveAttribute('data-markers', '开仓,开仓,平仓');
+    expect(await screen.findByTestId('campaign-chart')).toHaveAttribute('data-markers', '主力开始,M 全平');
   });
 
   it('模拟战役也显示原版的操作日日记区', async () => {

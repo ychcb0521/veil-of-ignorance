@@ -29,7 +29,7 @@ export type LegRowStatus = 'closed' | 'liquidated' | 'pending' | 'open';
 /** 需要在角色标签上标出来的三种状态。 */
 export type LegRowOpenStatus = Exclude<LegRowStatus, 'closed'>;
 
-type StatusFields = Pick<TradeJournal, 'id' | 'leg_role' | 'trade_record_id' | 'post_simulated_close_time' | 'post_real_close_time' | 'post_outcome'>;
+type StatusFields = Pick<TradeJournal, 'exchange_fees' | 'id' | 'leg_role' | 'trade_record_id' | 'post_simulated_close_time' | 'post_real_close_time' | 'post_outcome'>;
 
 /**
  * 判「成交了没有」用到的凭据。页面与导出图传同一份：
@@ -66,6 +66,7 @@ function legFillEvidenceStatus(leg: StatusFields, evidence: LegFillEvidence | un
 export function legRowStatus(leg: StatusFields, record: TradeRecord | null, evidence?: LegFillEvidence): LegRowStatus {
   // 爆仓先判：它也是「有记录 = 已平仓」，但平仓的是交易所，不是这条腿的决策。
   if (isLiquidationRecord(record)) return 'liquidated';
+  if (leg.exchange_fees) return leg.post_real_close_time ? 'closed' : 'open';
   if (record) return 'closed';
   if (leg.post_simulated_close_time || leg.post_real_close_time || leg.post_outcome) return 'closed';
   if (isPendingOrderRole(leg.leg_role)) return legFillEvidenceStatus(leg, evidence);

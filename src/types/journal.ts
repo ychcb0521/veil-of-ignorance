@@ -909,6 +909,8 @@ export interface PainLogEntry {
 }
 
 export interface TradeJournal {
+  /** Exchange commissions attributed to this acquisition, in their original currencies. */
+  exchange_fees?: Record<string, number>;
   id: string;
   user_id: string;
   trade_record_id: string | null;

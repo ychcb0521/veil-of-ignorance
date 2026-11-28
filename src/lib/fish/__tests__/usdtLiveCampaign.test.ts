@@ -1,3 +1,4 @@
+import { buildCampaignLegsExportRows } from '@/lib/campaignLegsPngExport';
 import { expect, it, vi } from 'vitest';
 import { createUsdtCampaignReader, reconstructUsdtCampaigns, type UsdtActualTrade } from '../../../../scripts/usdt-campaign-reader';
 import { withUsdtOrderActions, findUsdtCampaignFollow, usdtCampaignAmounts, usdtLiveCampaignId } from '../usdtLiveCampaign';
@@ -65,6 +66,16 @@ it('uses the actual first order, net fills and directed exit price across detail
   const data = buildUsdtLiveCampaignData('owner', live);
   const row = buildCampaignCardData(data);
   const b = (41 - 0.7) / 6.3;
+  expect(data.legs.map(leg => leg.leg_role)).toEqual(['main_open','main_add_1']);
+  expect(data.legs[0].pre_entry_price).toBe(105);
+  expect(data.tradeRecords.reduce((sum, record) => sum + record.pnl, 0)).toBeCloseTo(40.3);
+  const mirrored = buildUsdtLiveCampaignData('owner', {...live, actionByOrder:{[sell.orderId]:'mirror'}});
+  const rows = buildCampaignLegsExportRows({ campaign:data.campaign, legs:data.legs, tradeRecords:data.tradeRecords, reverseHedgeOrders:[] });
+  expect(JSON.stringify(rows)).toContain('0.7 USDT');
+  expect(JSON.stringify(rows)).toContain('加仓1');
+  expect(mirrored.legs.map(leg => leg.leg_role)).toEqual(['main_open','mirror_tp','main_add_1']);
+  expect(mirrored.legs.reduce((sum, leg) => sum + leg.post_realized_pnl!, 0)).toBeCloseTo(40.3);
+
   expect(usdtLiveRiskMetrics(data.campaign)).toMatchObject({ openingNotional: 210, entryPrice: 105, exitPrice: 122, frozen: false });
   expect(row.initialExpectedMaxLoss).toBeCloseTo(6.3);
   expect(rowPayoffRatio(row)).toBeCloseTo(b, 12);
