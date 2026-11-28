@@ -1719,6 +1719,8 @@ const Index = () => {
     for (const { symbol, merged } of twapMerges) applyMergeSideEffects(symbol, merged);
   }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime, settleFillDebit, applyMergeSideEffects, stampClock, getPositionLimitMode, timeMode, coinTimelines, canExecuteReplayOrder]);
 
+  const replayDefaultBlocked = useRef(false);
+
   // ===== ISOLATED-MODE HANDLERS =====
   const handlePause = useCallback(() => {
     if (timeMode === "isolated") {
@@ -1741,6 +1743,7 @@ const Index = () => {
   }, [timeMode, activeSymbol, sim, timeDirection]);
 
   const handleResume = useCallback(() => {
+    replayDefaultBlocked.current = true;
     if (timeMode === "isolated") {
       const now = Date.now();
       setCoinTimelines((prev) => {
@@ -1803,7 +1806,6 @@ const Index = () => {
   }, [handlePause]);
 
   // ===== Symbol switch: reload chart data =====
-  const replayDefaultBlocked = useRef(false);
   const changeSymbol = useCallback(
     async (newSymbol: string, selectSymbol: (symbol: string) => void) => {
       selectSymbol(newSymbol);
@@ -1856,6 +1858,7 @@ const Index = () => {
   }, [changeSymbol, setActiveSymbol]);
 
   const handleOpenPositionChart = useCallback((symbol: string, source?: PositionChartPreview['source'], livePositionKey?: string, instantPositionId?: string) => {
+    replayDefaultBlocked.current = true;
     const target = timeMode === 'isolated' ? coinTimelines[symbol] : activeCoinState;
     const targetTime = target && target.status !== 'stopped' && target.time > 0 ? target.time : 0;
     const replayTime = livePositionKey ? 0 : targetTime || (activeCoinState.status !== 'stopped' ? effectiveSimTime : 0);
@@ -1867,11 +1870,9 @@ const Index = () => {
     setPositionPreview({ symbol, source, livePositionKey, at: replayTime || Date.now(), live: !replayTime });
   }, [timeMode, coinTimelines, activeCoinState, effectiveSimTime, setReplayDeskExpanded]);
   const selectDefaultReplaySymbol = useCallback((symbol: string) => {
-    if (replayDefaultBlocked.current || activeCoinState.status !== 'stopped') return;
-    const target = timeMode === 'isolated' ? coinTimelines[symbol] : undefined;
-    if (target && target.status !== 'stopped') return;
+    if (replayDefaultBlocked.current) return;
     if (symbol !== activeSymbol) void changeSymbol(symbol, setDefaultActiveSymbol);
-  }, [activeCoinState.status, activeSymbol, changeSymbol, coinTimelines, setDefaultActiveSymbol, timeMode]);
+  }, [activeSymbol, changeSymbol, setDefaultActiveSymbol]);
 
   const handleIntervalChange = useCallback(
     async (newInterval: string) => {
@@ -2316,6 +2317,7 @@ const Index = () => {
   if (isMobile) {
     return (
       <MobileLayout
+        onSelectDefaultReplaySymbol={selectDefaultReplaySymbol}
         symbol={activeSymbol}
         interval={interval}
         onSymbolChange={handleSymbolChange}

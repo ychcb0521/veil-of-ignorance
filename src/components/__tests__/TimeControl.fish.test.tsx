@@ -90,6 +90,16 @@ it('keeps a manually entered replay time when a screened fish arrives later', ()
   expect(start).toHaveBeenCalledWith(Date.parse('2026-10-19T09:10:11+08:00'));
 });
 
+it('selects a holding restored after the previous symbol’s paused timeline', () => {
+  const selectDefault = vi.fn();
+  const page = (positions: InstantPositionFill[]) => <InstantPositionsContext.Provider value={{ positions }}>
+    <TimeControl {...control().props} status="paused" activeSymbol="EVAAUSDT" onSelectDefaultReplaySymbol={selectDefault}/>
+  </InstantPositionsContext.Provider>;
+  const view = render(page([]));
+  view.rerender(page([screenedPosition('BULLAUSDT', SCREENED_AT)]));
+  expect(selectDefault).toHaveBeenLastCalledWith('BULLAUSDT');
+});
+
 it('keeps the open position ahead of a later archive and falls back to the archive when flat', () => {
   mocks.recentArchive.mockReturnValue({ symbol: 'CLOSEDUSDT', at: SCREENED_AT + 60_000 });
   const selectDefault = vi.fn();

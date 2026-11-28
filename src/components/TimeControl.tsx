@@ -1,3 +1,4 @@
+import { useHoldingDefaultSymbol } from '@/hooks/useHoldingDefaultSymbol';
 import { useFishAccountSettings } from '@/hooks/useFishAccountSettings';
 import {setMatchingSourceQuality} from '@/lib/fish/qualitySourceRatings';
 import { readFishAccountSettings } from '@/lib/fish/accountSettings';
@@ -15,8 +16,6 @@ import {
 } from 'lucide-react';
 import { beginCloseReviewQuiet, toast } from '@/lib/notificationCenter';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { laterInstantReplayEntry, latestOpenHolding, latestSimulationClose } from '@/lib/fish/latestScreenedReplaySymbol';
-import { useLatestInstantReplay } from '@/hooks/useLatestInstantReplay';
 import {
   type TradeSignal, type SignalSortKey,
   parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
@@ -31,7 +30,7 @@ import { hydrateSimState } from '@/lib/simStateSync';
 import { isTuringCupSymbol, turingCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
 import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish } from '@/hooks/useFish';
-import { useFishCaptureAutomation, usePageFishQuality, useScreenedInstantPositions } from '@/contexts/FishQualityContext';
+import { useFishCaptureAutomation, usePageFishQuality } from '@/contexts/FishQualityContext';
 import { armQualityReturn } from '@/lib/fish/qualityReturn';
 import type { FishExchange } from '@/lib/fish/exchanges';
 import { FishPanel, FISH_DEFAULT_ALGORITHMS } from '@/components/FishPanel';
@@ -152,7 +151,7 @@ export function TimeControl({
     setNoEntryOpen(true);
   };
   const [dateInput, setDateInput] = useState<string | null>(null);
-  const replayDateEdited = useRef(false);
+  const replayDateEdited = useHoldingDefaultSymbol(onSelectDefaultReplaySymbol);
 
   // ===== 信号库（Time Machine 旁的折叠接口）=====
   const fileRef = useRef<HTMLInputElement>(null);
@@ -262,21 +261,6 @@ export function TimeControl({
       retry: turingArchive.retry,
     },
   };
-  const instant = useScreenedInstantPositions();
-  const openScreenedPositions = instant?.positions;
-  const openBinanceCampaigns = instant?.usdtLive?.openCampaigns;
-  const livePositions = instant?.usdtLive?.snapshot?.positions;
-  const liveHistories = instant?.usdtLive?.histories;
-  const recentArchive = useLatestInstantReplay(user?.id, status === 'stopped' && !replayDateEdited.current);
-  const currentHolding = useMemo(() => latestOpenHolding(ctx.positionsMap, openScreenedPositions, openBinanceCampaigns, livePositions, liveHistories),
-    [ctx.positionsMap, openScreenedPositions, openBinanceCampaigns, livePositions, liveHistories]);
-  const lastSimulation = useMemo(() => latestSimulationClose(ctx.tradeHistory), [ctx.tradeHistory]);
-  const replaySymbol = currentHolding?.symbol ?? laterInstantReplayEntry(lastSimulation, recentArchive)?.symbol;
-  useEffect(() => {
-    if (status !== 'stopped') replayDateEdited.current = true;
-    if (replayDateEdited.current || !replaySymbol) return;
-    onSelectDefaultReplaySymbol?.(replaySymbol);
-  }, [status, replaySymbol, onSelectDefaultReplaySymbol]);
   const { deletedSources, resolvedLegacySources } = fishQuality.study;
   const turingSignals = useMemo(() => {
     const deleted = sourceDeletionMatcher(deletedSources, resolvedLegacySources);

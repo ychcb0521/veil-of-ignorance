@@ -1,3 +1,4 @@
+import { useHoldingDefaultSymbol } from '@/hooks/useHoldingDefaultSymbol';
 import { useState, useCallback } from 'react';
 import { MobileSearchView } from './MobileSearchView';
 import { MobileChartView } from './MobileChartView';
@@ -13,6 +14,7 @@ export type MobileView = 'Search' | 'Chart' | 'Trading';
 interface Props {
   symbol: string;
   interval: string;
+  onSelectDefaultReplaySymbol?: (s: string) => void;
   onSymbolChange: (s: string) => void;
   onIntervalChange: (i: string) => void;
   // Sim
@@ -45,6 +47,7 @@ interface Props {
 }
 
 export function MobileLayout(props: Props) {
+  useHoldingDefaultSymbol(props.onSelectDefaultReplaySymbol);
   const [activeView, setActiveView] = usePersistedState<MobileView>('mobile_view', 'Search');
 
   const handleSelectSymbol = useCallback((sym: string) => {
