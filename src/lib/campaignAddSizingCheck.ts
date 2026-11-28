@@ -653,6 +653,13 @@ export function resolveCampaignAddQuantitySteps(input: CampaignAddSizingInput): 
       if (ledger.coins == null || closed == null) beforeCoins = null;
       else if (beforeCoins != null) beforeCoins += Math.max(0, ledger.coins - closed);
     }
+    // The monitor records the inventory immediately before each fill. A same-bar
+    // liquidation may carry the very same timestamp, but happened after the add.
+    const fill = isPaperCampaignId(add.campaign_id ?? undefined) ? add.quality_addition_fill : undefined;
+    if (fill && fill.at === t && fill.price === execution.entryPrice && fill.notional === add.pre_position_size
+      && positive(fill.quantity) && positive(fill.sizing?.coinsBefore)) {
+      beforeCoins = fill.sizing.coinsBefore;
+    }
     return {
       legId: add.id, openTime: t ?? Number.NaN, initialCoins: openingCoins(add.direction), beforeCoins,
       addCoins: positive(execution.entryPrice) && positive(add.pre_position_size) ? add.pre_position_size / execution.entryPrice : null,

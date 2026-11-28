@@ -46,6 +46,29 @@ function scenario(reduction = 0.5) {
 }
 
 describe('campaign geometric metrics', () => {
+  it('retains filled inventory after an unfilled add, even when its order id is journaled', () => {
+    const { campaign, legs, tradeRecords } = scenario();
+    const baseline = computeCampaignGeometricMetrics(campaign, legs, tradeRecords);
+    const rejected = { ...legs[3], id: 'rejected', leg_role: 'main_add_3' as const, trade_record_id: 'rejected-order',
+      pre_simulated_time: iso(6), pre_position_size: 999999, post_simulated_close_time: null };
+    const result = computeCampaignGeometricMetrics(campaign, [...legs, rejected], tradeRecords, [], {},
+      { unfilledOrderIds: new Set(['rejected-order', legs[3].trade_record_id!]) });
+    expect(result.positionGeometricMultiple).toBeGreaterThan(0);
+    expect(result).toEqual(baseline);
+  });
+  it('uses the frozen pre-fill balance when a monitor addition fills at the liquidation timestamp', () => {
+    const { campaign, legs, tradeRecords } = scenario();
+    const baseline = computeCampaignGeometricMetrics(campaign, legs, tradeRecords);
+    const add = legs[3];
+    add.campaign_id = 'fish-sell-example';
+    add.pre_simulated_time = iso(8);
+    tradeRecords[3].openTime = at(8);
+    add.quality_addition_fill = { at: at(8), price: 160, notional: add.pre_position_size,
+      quantity: tradeRecords[3].quantity, sizing: { coinsBefore: 12.5 } } as TradeJournal['quality_addition_fill'];
+    const result = computeCampaignGeometricMetrics(campaign, legs, tradeRecords);
+    expect(result.positionGeometricMultiple).toBeGreaterThan(0);
+    expect(result.positionGeometricMultiple).toBe(baseline.positionGeometricMultiple);
+  });
   it('magic b is actual position multiple times decimal effective rise, without beta or risk denominator', () => {
     expect(computeEffectivePriceChangeMultiple(45, 9)).toBe(5);
     expect(computeEffectivePriceChangeMultiple(-10, 5)).toBe(-2);

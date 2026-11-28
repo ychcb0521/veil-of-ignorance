@@ -188,6 +188,12 @@ export function computeCampaignGeometricMetrics(
   }
   if (campaign.direction !== 'main_long') return empty;
   const lookup = buildTradeRecordLookup(tradeRecords);
+  // An order id can also refer to a rejected or cancelled addition. Only a
+  // matching execution can override explicit evidence that it never filled.
+  if (localOrders.unfilledOrderIds?.size) {
+    legs = legs.filter(leg => !leg.leg_role?.startsWith('main_add_') || !leg.trade_record_id
+      || !localOrders.unfilledOrderIds!.has(leg.trade_record_id) || lookup.has(leg.trade_record_id));
+  }
   const executions = new Map(legs.map(leg => [leg.id, resolveLegExecution(leg, leg.trade_record_id ? lookup.get(leg.trade_record_id) ?? null : null, corrections)]));
   const initialCandidates = legs.filter(leg => leg.direction === 'long' && (leg.leg_role === 'main_open' || leg.leg_role === 'mirror_tp'));
   const firstOpen = Math.min(...initialCandidates.flatMap(leg => executions.get(leg.id)?.openTime == null ? [] : [executions.get(leg.id)!.openTime!]));
