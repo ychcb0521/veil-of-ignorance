@@ -58,6 +58,12 @@ it('saves and reloads capture templates and runs the original formula after the 
     selection:profile.selection,time:'',lookbackHours:profile.lookbackHours});
   expect(automatic.settings?.algorithms[0].feature.formula).toBe(formula);
   expect(localStorage.getItem(storageKey)).toBe(serialized);
+  fireEvent.click(screen.getByRole('button', {name:'捕捞模板'}));
+  fireEvent.change(screen.getByLabelText('选择模板文件'), {target:{files:[{text:async () => json}]}});
+  await waitFor(() => expect(JSON.parse(localStorage.getItem(storageKey)!)).toHaveLength(2));
+  const [original, imported] = JSON.parse(localStorage.getItem(storageKey)!);
+  expect(imported.id).not.toBe(original.id);
+  expect(imported.settings).toEqual(original.settings);
   } finally { push.mockRestore(); }
 }, 30000);
 it('默认四条规则全部勾选，开始捕捞使用截图的阈值、序列和交集',async()=>{

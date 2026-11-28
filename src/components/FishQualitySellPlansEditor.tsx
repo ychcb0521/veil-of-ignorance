@@ -1,3 +1,5 @@
+import { FishTemplateImport } from './FishTemplateImport';
+import { deserializeAccountBlob, serializeAccountBlob } from '@/lib/accountBlobCodec';
 import { downloadTextFile, safeExportFileName } from '@/lib/downloadTextFile';
 import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
 import type { QualityTemplateName } from '@/lib/fish/qualityTemplateNames';
@@ -91,6 +93,23 @@ export function TemplatePicker({ actions, disabled, onUse, purpose='sell', allow
   return <Popover modal open={open} onOpenChange={next => { setOpen(next); setConfirm(''); setVersionsOf(''); }}><PopoverTrigger asChild>
     <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={browseOnly?'查看已保存模板':purpose!=='sell'?'保存整套条件，从模板新建后仍可调整':templates.length ? `已有 ${templates.length} 个账号模板，可从模板新建方案` : '在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>{purpose==='sell'&&!browseOnly?'模板库 · 从模板新建':'模板库'}{templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{templates.length}</span>}</button>
   </PopoverTrigger><PopoverContent align="end" className="w-[26rem] max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto overscroll-contain p-1 text-[11px]" aria-label="方案模板" data-testid="plan-template-list">
+    {actions.restore && <FishTemplateImport key={actions.owner + ':' + purpose} disabled={disabled || browseOnly} save={async text => {
+      const template = deserializeAccountBlob(text) as QualityPlanTemplate;
+      const plan = template?.plan;
+      if (!plan || template.deleted || typeof template.name !== 'string' || !template.name.trim()
+        || typeof plan.id !== 'string' || typeof plan.label !== 'string' || typeof plan.metric !== 'string'
+        || typeof plan.snapshot?.featureId !== 'string') throw Error('请选择从方案模板库导出的完整模板 JSON。');
+      const kind = qualityTemplateKind(template);
+      if (kind !== (purpose === 'sell' ? 'monitor' : purpose === 'entry' ? 'screen' : 'filter'))
+        throw Error('请在对应的' + (kind === 'filter' ? '静态过滤' : kind === 'screen' ? '动态筛选' : '持仓监测') + '模板库导入。');
+      if (!allowTuring && plan.initialization === TURING_SCREENING_INITIALIZATION_VERSION)
+        throw Error('当前筛选库不支持图灵初始化模板。');
+      if (template.entryHours !== undefined && (!Number.isFinite(template.entryHours) || template.entryHours < 0 || template.entryHours > 8784))
+        throw Error('筛选模板中的观察时长无效。');
+      getTemplateDetails(plan);
+      await actions.restore!(template);
+      return template.name;
+    }}/>}
     {!templates.length ? <p className="px-3 py-3 text-muted-foreground">{browseOnly?'当前还未读到账号模板，可以查看系统存档。':'还没有模板。保存当前设置后，可点「存为模板」。'}</p>
       : <ul>{templates.map(t => {
         const { summary, versionChanged } = getTemplateDetails(t.plan);
@@ -99,7 +118,7 @@ export function TemplatePicker({ actions, disabled, onUse, purpose='sell', allow
           {versionsOf === t.id && <div className="mt-1.5 rounded border border-border/60 bg-background p-1.5">{displayName(t)!==t.name&&<p className="mb-1 text-muted-foreground">原名：{t.name}</p>}<PlanVersionList plan={t.plan}/></div>}</div>
         <button type="button" className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`导出模板 ${displayName(t)}`} title="下载完整模板 JSON（含冻结版本）" onClick={() => {
           const filename = safeExportFileName(displayName(t)) || '持仓监测模板';
-          downloadTextFile(filename + '.json', JSON.stringify(t, null, 2), 'application/json', false);
+          downloadTextFile(filename + '.json', serializeAccountBlob(t), 'application/json', false);
         }}><Download aria-hidden className="h-3 w-3"/>导出</button>
         {!browseOnly&&<><button type="button" disabled={versionChanged||disabled} title={versionChanged ? '模板冻结的算法版本与当前代码不同，不能新建（展开「版本已变」看哪一项）' : undefined} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用模板 ${displayName(t)} 新建方案`} onClick={() => { onUse?.(t); setOpen(false); }}>新建</button>
         {confirm === t.id

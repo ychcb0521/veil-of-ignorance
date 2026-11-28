@@ -1,3 +1,4 @@
+import { FishTemplateImport } from './FishTemplateImport';
 import { useEffect, useState } from 'react';
 import { Bookmark, BookmarkPlus, Download, Trash2 } from 'lucide-react';
 import { downloadTextFile, safeExportFileName } from '@/lib/downloadTextFile';
@@ -6,7 +7,7 @@ import { persistFishAccountPreference } from '@/hooks/useFishAccountSettings';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
 import { FISH_CAPTURE_TEMPLATES_KEY } from '@/lib/fish/accountSettings';
-import { readFishCaptureTemplates, type FishCaptureTemplateSettings } from '@/lib/fish/captureTemplates';
+import { validateFishCaptureTemplate, readFishCaptureTemplates, type FishCaptureTemplateSettings } from '@/lib/fish/captureTemplates';
 
 const action = 'inline-flex min-h-7 items-center gap-1.5 rounded-md border border-border/60 px-2 py-1 hover:bg-muted disabled:opacity-40';
 
@@ -64,6 +65,18 @@ export function FishCaptureTemplates({ owner, locked, snapshot, apply }: Props) 
           <DialogTitle>捕捞模板</DialogTitle>
           <DialogDescription>保存当前捕捞条件，载入后用于下一轮。</DialogDescription>
         </DialogHeader>
+        <FishTemplateImport key={owner} disabled={busy || !!draft} save={async text => {
+          const row = JSON.parse(text);
+          if (row?.version !== 1 || row.deleted || !row.settings || typeof row.name !== 'string' || !row.name.trim())
+            throw Error('请选择从捕捞模板库导出的完整模板 JSON。');
+          validateFishCaptureTemplate(row.settings);
+          if (getUserId() !== owner) throw Error('账号已切换，请重新打开捕捞模板库。');
+          const current = readFishCaptureTemplates(owner);
+          await persistFishAccountPreference(owner, FISH_CAPTURE_TEMPLATES_KEY, [...current, {
+            id: crypto.randomUUID(), version: 1, name: row.name, updatedAt: Date.now(), settings: row.settings,
+          }]);
+          return row.name;
+        }}/>
         {draft ? <form className="flex flex-wrap items-end gap-2" onSubmit={event => {
           event.preventDefault();
           void perform(async () => {
