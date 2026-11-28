@@ -77,8 +77,9 @@ async function saveUsdtCampaign(owner: string, incoming: Saved, notify = true) {
         && JSON.stringify(candidate.management.monitor.plan) === JSON.stringify(existing.management.monitor.plan)) {
         management = { ...candidate.management, checkpoint: existing.management.checkpoint };
       }
-      next = { ...incoming, campaign: { ...candidate, ...(actionByOrder ? { actionByOrder } : {}), ...(followId ? { followId } : {}), ...(management ? { management } : {}) } };
-      if (incoming.synced && (followId !== candidate.followId || management !== candidate.management || JSON.stringify(actionByOrder) !== JSON.stringify(candidate.actionByOrder))) next.synced = undefined;
+      const executionLeverage = candidate.executionLeverage ?? existing.executionLeverage;
+      next = { ...incoming, campaign: { ...candidate, ...(executionLeverage ? {executionLeverage} : {}), ...(actionByOrder ? { actionByOrder } : {}), ...(followId ? { followId } : {}), ...(management ? { management } : {}) } };
+      if (incoming.synced && (executionLeverage !== candidate.executionLeverage || followId !== candidate.followId || management !== candidate.management || JSON.stringify(actionByOrder) !== JSON.stringify(candidate.actionByOrder))) next.synced = undefined;
     }
     changed = true;
     return next;

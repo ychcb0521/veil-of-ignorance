@@ -4,8 +4,8 @@ import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { InstantOpenCampaignQuote } from '@/components/journal/InstantOpenCampaignQuote';
 import { UsdtLiveCampaignFills, usdtCampaignFillLabel, usdtFillTime } from '@/components/journal/UsdtLiveCampaignFills';
 import { useCampaignTemplateNames } from '@/contexts/QualityTemplateNamesContext';
-import { usdtLiveRiskMetrics } from '@/lib/fish/usdtLiveCampaignMetrics';
-import { usdtAmountText } from '@/lib/fish/usdtPositionMirror';
+import { positionHistoryPnlText, usdtLiveRiskMetrics } from '@/lib/fish/usdtLiveCampaignMetrics';
+import { usdtAmountText, usdtPositionQuantityUnit } from '@/lib/fish/usdtPositionMirror';
 import { subscribeInstantCampaigns } from '@/lib/fish/instantCampaignStore';
 import { InstantCampaignMetadataButtons } from '@/components/journal/InstantCampaignMetadata';
 import { QualityMonitorSettingsButton } from '@/components/FishQualityMonitorSettingsView';
@@ -360,8 +360,8 @@ function buildCampaignMetadataItems(
           : <><p>这场战役真实操作发生的时刻（北京时间），与列表卡片、排序用的是同一个数。</p><p>它是客观的操作时间，不是时光机里 K 线走到的模拟时间；读不出时写「—」。</p></>
       ),
     },
-    { key: 'openedAt', label: '开始', value: fmtMdHm(campaign.opened_at), help: <p>{liveUsdt ? '币安首笔开仓成交的时间。' : '战役开始的 K 线（模拟）时间。'}</p> },
-    { key: 'closedAt', label: '结束', value: fmtMdHm(campaign.closed_at), help: <p>{liveUsdt ? '币安最后一笔平仓成交的时间。' : '战役结束的 K 线（模拟）时间。'}还没结束时写「进行中」。</p> },
+    { key: 'openedAt', label: '开始', value: liveUsdt ? usdtFillTime(liveUsdt.openedAt) : fmtMdHm(campaign.opened_at), help: <p>{liveUsdt ? '币安首笔开仓成交的时间。' : '战役开始的 K 线（模拟）时间。'}</p> },
+    { key: 'closedAt', label: '结束', value: liveUsdt?.closedAt ? usdtFillTime(liveUsdt.closedAt) : fmtMdHm(campaign.closed_at), help: <p>{liveUsdt ? '币安最后一笔平仓成交的时间。' : '战役结束的 K 线（模拟）时间。'}还没结束时写「进行中」。</p> },
     {
       key: 'duration', label: '持续时间', value: fmtDuration(campaign.opened_at, campaign.closed_at),
       help: <p>从开始到结束的时间跨度。还没结束的战役，终点按现在的真实时刻算。</p>,
@@ -2017,12 +2017,22 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
     if (!liveUsdt || !liveMetrics) return undefined;
     const { realized, fees, net, openingNotional, entryPrice } = liveMetrics;
     const amount = (value: number) => usdtAmountText(value) + ' ' + liveUsdt.asset;
+    const linked = monitorDetail?.campaign;
+    const planLeverage = linked?.id === liveUsdt.followId ? linked?.initial_leverage : null;
+    const estimatedRoi = liveUsdt.closedAt && !liveMetrics.addCount && openingNotional > 0 && planLeverage > 0 && net != null
+      ? net * planLeverage / openingNotional * 100 : null;
     return [
-      { key: 'realizedPnl', label: '已实现 P&L', value: amount(realized), help: '币安逐笔成交中的已实现盈亏合计。', column: 0 },
+      { key: 'realizedPnl', label: '已实现盈亏（扣费后）', value: net == null ? '—' : positionHistoryPnlText(net) + ' ' + liveUsdt.asset, help: '逐笔成交盈亏扣除开平仓手续费，向下取至两位小数，下方另列精确值。单独结算的资金费未计入；异币手续费缺少折算价时暂缺。', column: 0 },
+      { key: 'grossPnl', label: '成交盈亏（扣费前）', value: amount(realized), help: '逐笔已实现成交盈亏合计。', column: 0 },
+      { key: 'positionRoi', label: '投资回报率（成交核算）', value: liveMetrics.roi != null ? liveMetrics.roi.toFixed(2) + '%' : estimatedRoi == null ? '—' : estimatedRoi.toFixed(2) + '%（按方案 ' + planLeverage + '× 估算）', help: '单笔建仓且已全部平仓时，用扣费后盈亏除以按实盘开仓杠杆还原的初始保证金。旧记录缺少实盘杠杆回执时，只能按关联方案杠杆估算，并单独标注。', column: 0 },
       { key: 'commissions', label: '手续费', value: [...fees].map(([asset, fee]) => usdtAmountText(fee) + ' ' + asset).join(' / '), help: '按币安实际扣费币种汇总。', column: 0 },
       { key: 'netPnl', label: '扣手续费后', value: net == null ? '—' : amount(net), help: '从已实现盈亏扣除同币种手续费。', column: 0 },
       { key: 'initialMainExposureNotional', label: '首仓名义金额', value: amount(openingNotional), help: '首个开仓委托的实际成交金额合计。', column: 1 },
       { key: 'averageEntry', label: '首仓开仓均价', value: entryPrice != null ? usdtAmountText(entryPrice) : '—', help: '首个开仓委托按成交数量加权的成交价。', column: 1 },
+      { key: 'positionAverageOpen', label: '开仓均价', value: liveMetrics.averageOpen == null ? '—' : usdtAmountText(liveMetrics.averageOpen), help: '所有开仓与加仓成交按数量加权。', column: 1 },
+      { key: 'positionAverageClose', label: '平仓均价', value: liveMetrics.averageClose == null ? '—' : usdtAmountText(liveMetrics.averageClose), help: '所有减仓与平仓成交按数量加权。', column: 1 },
+      { key: 'closedQuantity', label: '已平仓量', value: liveMetrics.closedQuantity == null ? '—' : usdtAmountText(liveMetrics.closedQuantity) + ' ' + usdtPositionQuantityUnit(liveUsdt.symbol), help: '全部减仓与平仓成交量合计。', column: 1 },
+      { key: 'peakQuantity', label: '最高持仓量', value: liveMetrics.peakQuantity == null ? '—' : usdtAmountText(liveMetrics.peakQuantity) + ' ' + usdtPositionQuantityUnit(liveUsdt.symbol), help: '按实际成交顺序还原的单侧最大持仓量。', column: 1 },
       { key: 'remainingQuantity', label: '余仓数量', value: liveUsdt.quantity, help: '币安成交确认后的剩余持仓数量。', column: 1 },
       { key: 'liveEntryRiskBasis', label: '初始风险依据', value: liveMetrics.percent == null ? '所选 L0 缺少开仓读数' : liveMetrics.frozen ? '开仓冻结风控' : '首仓名义金额 × 3%',
         help: '按首个开仓委托全部成交计算初始风险。旧方案缺少开仓风控时取首仓名义金额的 3%。明确选择 L0 的方案采用开仓风险读数。整场盈亏比在全部平仓且手续费可核算后显示。', column: 1 },
@@ -2031,7 +2041,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
           : net == null ? '手续费含其他币种，缺少成交时折算金额，整场净盈亏和盈亏比暂缺。'
           : '整场盈亏比 = 币安逐笔成交的已实现盈亏扣除手续费后 ÷ 首仓初始风险。' } : item),
     ];
-  }, [liveUsdt, liveMetrics, campaignPnlOverviewItems]);
+  }, [liveUsdt, liveMetrics, monitorDetail, campaignPnlOverviewItems]);
   const overviewItems: Array<OverviewPanelItem & { color?: string }> = livePnlOverviewItems ?? campaignPnlOverviewItems;
   const campaignMetadataMetrics = useMemo<Array<OverviewPanelItem & { color?: string }>>(() => {
     const liveFields = [];
@@ -3076,7 +3086,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
             <span className="mr-2 font-medium">卖出原因</span>{liveExitSignal?.reason ?? liveUsdt.management?.exitReason}
             {liveExitSignal && <span className="ml-2 text-muted-foreground">信号时间 {formatBeijingTime(liveExitSignal.at)}</span>}
           </div>}
-        {evidenceCampaign && <QualitySellEvidence evidence={sellEvidence} repair={evidenceCampaign.comparison?.repair}><ArchivedImpulseWindows key={evidenceCampaign.id} campaign={evidenceCampaign}/></QualitySellEvidence>}
+        {evidenceCampaign && <QualitySellEvidence live={!!liveUsdt} evidence={sellEvidence} repair={evidenceCampaign.comparison?.repair}><ArchivedImpulseWindows key={evidenceCampaign.id} campaign={evidenceCampaign}/></QualitySellEvidence>}
         {/* 回收站里的战役：克制的一条提示配「恢复」，其余内容照常可读（数据本来就不过滤已删除的行） */}
         {campaign.deleted_at && (
           <div

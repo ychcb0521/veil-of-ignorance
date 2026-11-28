@@ -4,6 +4,12 @@ import { isSelectedL0, L0_DRAWDOWN } from './qualityVeto';
 import { initialLimitedDrawdownPct, initialPayoffRiskThreshold, timedDrawdownPayoffPct } from './qualityStaticDrawdownSell';
 import { usdtCampaignAmounts, type UsdtLiveCampaign } from './usdtLiveCampaign';
 
+// Match the two-decimal loss amounts in Binance position history while keeping full precision for calculations.
+export function positionHistoryPnlText(net: number): string {
+  const cents = Number((net * 100).toFixed(8));
+  return (Math.floor(cents) / 100).toFixed(2);
+}
+
 // The exchange can split one order across fills and allocate only part of a reversal to this campaign.
 function measureFills(live: UsdtLiveCampaign) {
   const openingId = live.fills[0]?.orderId;
@@ -13,11 +19,14 @@ function measureFills(live: UsdtLiveCampaign) {
   let openingSize = 0, openingNotional = 0, totalEntryNotional = 0, held = 0;
   let exitSize = 0, exitNotional = 0, firstCut = 0;
   let firstCutId: string | undefined;
+  let acquired = 0, reduced = 0, proceeds = 0, peakQuantity = 0;
   let valid = true;
   for (const fill of live.fills) {
     const qty = Number(fill.positionQuantity), price = Number(fill.price);
     if (!(qty > 0 && price > 0 && Number.isFinite(price * qty))) { valid = false; continue; }
     if (fill.action === 'reduce') {
+      reduced += qty;
+      proceeds += qty * price;
       if (fill.orderId === closingId) {
         exitSize += qty;
         exitNotional += qty * price;
@@ -36,15 +45,23 @@ function measureFills(live: UsdtLiveCampaign) {
         addFactors.set(fill.orderId, (addFactors.get(fill.orderId) ?? 1) * (1 + qty / held));
       }
       held += qty;
+      acquired += qty;
+      peakQuantity = Math.max(peakQuantity, held);
     }
   }
-  return { openingNotional: valid ? openingNotional : 0, openingSize: valid ? openingSize : 0,
+  const amounts = usdtCampaignAmounts(live);
+  // For a single entry order the entire initial margin can be reconstructed from confirmed fills.
+  const roi = live.closedAt && valid && !additions.size && openingNotional > 0 && live.executionLeverage && amounts.net != null
+    ? amounts.net * live.executionLeverage / openingNotional * 100 : null;
+  return { averageOpen:valid && acquired ? totalEntryNotional / acquired : null,
+    averageClose:valid && reduced ? proceeds / reduced : null, closedQuantity:valid ? reduced : null,
+    peakQuantity:valid ? peakQuantity : null, roi, openingNotional: valid ? openingNotional : 0, openingSize: valid ? openingSize : 0,
     entryPrice: valid && openingSize > 0 ? openingNotional / openingSize : null,
     exitPrice: valid && exitSize > 0 ? exitNotional / exitSize : null,
     totalEntryNotional: valid ? totalEntryNotional : null, addCount: additions.size,
     addRatios: valid ? Array.from(addFactors.values(), factor => factor - 1) : null,
     earlyReduction: valid && openingSize > 0 ? firstCut / openingSize : null,
-    ...usdtCampaignAmounts(live) };
+    ...amounts };
 }
 
 const fillsCache = new WeakMap<UsdtLiveCampaign, ReturnType<typeof measureFills>>();

@@ -19,7 +19,7 @@ export function buildUsdtLiveCampaignData(owner: string, position: UsdtLiveCampa
     direction: position.direction === 'long' ? 'main_long' : 'main_short',
     status: closed ? campaignStatusFromRealizedPnl({ settled: true, total: net ?? realized }, closed) : 'active',
     strategy_template: 'main_only', title: position.symbol + ' · ' + source,
-    opened_at: opened, closed_at: closed, initial_main_size_usdt: position.asset === 'USDT' ? initialNotional : null, initial_leverage: null,
+    opened_at: opened, closed_at: closed, initial_main_size_usdt: position.asset === 'USDT' ? initialNotional : null, initial_leverage: position.executionLeverage ?? null,
     final_realized_pnl: position.asset === 'USDT' ? net : null, final_r_multiple: null, peak_unrealized_pnl: null, peak_drawdown: null,
     importance_weight: 0, notes: null, deviation_notes: {}, deleted_at: null, created_at: opened, updated_at: updated,
     actual_evolution: position.fills.map((fill, index) => ({

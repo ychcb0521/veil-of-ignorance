@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { createUsdtCampaignReader, reconstructUsdtCampaigns, type UsdtActualTrade } from '../../../../scripts/usdt-campaign-reader';
 import { withUsdtOrderActions, findUsdtCampaignFollow, usdtCampaignAmounts, usdtLiveCampaignId } from '../usdtLiveCampaign';
 import { buildUsdtLiveCampaignData, mergeUsdtLiveCampaignRows } from '../usdtLiveCampaignProjection';
-import { usdtLiveRiskMetrics } from '../usdtLiveCampaignMetrics';
+import { positionHistoryPnlText, usdtLiveRiskMetrics } from '../usdtLiveCampaignMetrics';
 import { paperCampaignPerformance } from '../qualityCampaignPerformance';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
 import { buildCampaignPricePathTask } from '@/hooks/useCampaignPricePaths';
@@ -172,4 +172,29 @@ it('agrees with the position reader when the exchange timestamps differ by one m
   const scan=createUsdtCampaignReader(read,()=>at+60_000);
   const {campaigns}=await scan(at-1000, [], 'BEATUSDT');
   expect(campaigns[0]).toMatchObject({openedAt:at,quantity:'100',direction:'long'});
+});
+
+
+it('reconciles the SEI position history amounts and reports ROI only with confirmed leverage', () => {
+  const quantity = '13318';
+  const [position] = reconstructUsdtCampaigns('SEIUSDT', [], [
+    {...buy, quantity, price:'0.03864', commission:0.25730376},
+    {...sell, quantity:'1855', price:'0.03848', realized:-0.2968, commission:0.0356902},
+    {...sell, id:'13', quantity:'11463', price:'0.03847', realized:-1.94871, commission:0.22049079},
+  ]);
+  const read = (leverage?: number) => usdtLiveRiskMetrics(buildUsdtLiveCampaignData('owner', {
+    ...position, executionLeverage:leverage,
+  }).campaign)!;
+  const metrics = read(20);
+  expect(metrics.net!.toFixed(2)).toBe('-2.76');
+  expect(metrics.roi!.toFixed(2)).toBe('-10.72');
+  expect(metrics.closedQuantity).toBe(13318);
+  expect(metrics.peakQuantity).toBe(13318);
+  expect(metrics.averageClose!.toFixed(7)).toBe('0.0384714');
+  expect(read().roi).toBeNull();
+});
+
+it('matches the displayed loss amounts for three reconciled position histories', () => {
+  expect([-2.75899475, -.27355289, -.65558095, -1.15].map(positionHistoryPnlText))
+    .toEqual(['-2.76', '-0.28', '-0.66', '-1.15']);
 });

@@ -16,6 +16,7 @@ export interface UsdtLiveCampaign {
   openedAt: number;
   closedAt?: number;
   quantity: string;
+  executionLeverage?: number;
   fills: UsdtCampaignFill[];
   followId?: string;
   actionByOrder?: Record<string, string>;
@@ -59,7 +60,7 @@ export function withUsdtOrderActions(campaign: UsdtLiveCampaign, statuses: reado
   }
   const matched = (status.executions ?? []).filter(order => order.fills.some(fill => orders.get(order.orderId)?.has(fill.id)));
   if (!matched.length) return campaign;
-  return { ...campaign, ...(linked && linked.id !== usdtLiveCampaignId(campaign) ? { followId: linked.id } : {}),
+  return { ...campaign, ...(linked && Number.isInteger(linked.executionLeverage) && linked.executionLeverage! > 0 ? {executionLeverage:linked.executionLeverage} : {}), ...(linked && linked.id !== usdtLiveCampaignId(campaign) ? { followId: linked.id } : {}),
     actionByOrder: { ...campaign.actionByOrder, ...Object.fromEntries(matched.map(order => [order.orderId, order.actionId])) } };
 }
 
