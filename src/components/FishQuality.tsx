@@ -1315,7 +1315,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
         </div>
       </div>
       {workspace && <div className="flex items-start gap-2" data-testid="quality-workspace-source-row">
-        <div className="min-w-0 flex-1"><FishQualityModule title="来源" icon={Database} testId="quality-workspace-sources">
+        <div className="min-w-0 flex-1"><FishQualityModule title="来源" defaultOpen={false} icon={Database} testId="quality-workspace-sources">
         <FishWorkspaceSource name="信号库" loadSnapshot={workspace.sources?.library} onImport={importWorkspace} prepareImport={prepareSourceImport}/>
         <FishWorkspaceSource name="图灵杯" loadSnapshot={workspace.sources?.turing} onImport={importWorkspace} prepareImport={prepareSourceImport} {...state.workspaceTuringSource}/>
         <FishWorkspaceSource name="鱼舱" loadSnapshot={workspace.sources?.fish} onImport={importWorkspace} prepareImport={prepareSourceImport}/>

@@ -1683,6 +1683,13 @@ it('opens the existing regret library from workspace sources even when buy filte
   fireEvent.click(filters);
   expect(filters).toHaveAttribute('aria-expanded', 'false');
   const sources = within(screen.getByTestId('quality-workspace-sources'));
+  const sourceToggle = sources.getByRole('button', {name:'来源'});
+  expect(sourceToggle).toHaveAttribute('aria-expanded', 'false');
+  expect(sources.getAllByRole('button')).toEqual([sourceToggle]);
+  fireEvent.click(sourceToggle);
+  for (const name of ['信号库','图灵杯','鱼舱','捕捞库','过滤库','筛选库','后悔库','监测库']) {
+    expect(sources.getByRole('button', {name})).toBeVisible();
+  }
   const openRegret = sources.getByRole('button', {name:'后悔库'});
   fireEvent.click(openRegret);
   const dialog = await screen.findByRole('dialog', {name:'后悔库'});
