@@ -29,6 +29,7 @@ export function preEntryWindowLoader(base:FishReconstructionLoader,end:number):F
     validateFishBars(prefix,cut,(cut-from)/plan.step,plan.step);
     return prefix;
   };
+  load.liveAdditionVeto=base.liveAdditionVeto;
   load.currentMinuteOpen=base.currentMinuteOpen;
   load.turingInitialization=base.turingInitialization;
   return load;

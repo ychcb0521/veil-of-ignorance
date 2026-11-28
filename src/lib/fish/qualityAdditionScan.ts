@@ -1,6 +1,6 @@
 import { type FishRange, withinCaptureLimit } from '@/lib/fish/thresholdRange';
 import { qualityHistoryFrom, qualityInitializationPending } from './qualityInitialization';
-import { createIndicatorEntryVetoReader } from './qualityIndicatorEntryVeto';
+import { createIndicatorEntryVetoReader, warmIndicatorEntryVetoes } from './qualityIndicatorEntryVeto';
 import {createVetoHistoryReader} from './qualityVetoHistory';
 import type {QualityAdditionEntryVeto} from './qualityAdditionVeto';
 /** Re-scan closed observations. All custom constraints must hold at one decision time. */
@@ -105,9 +105,22 @@ export async function findQualityAdditionTrigger(o:ScanOptions):Promise<Omit<Qua
 }
 export async function findQualityAddition(o:ScanOptions):Promise<QualityAdditionFill|undefined>{
  const read=o.entryVetoes?.some(v=>v.enabled&&v.kind==='indicator') ? createIndicatorEntryVetoReader(o.entryVetoes,o) : undefined;
- const trigger=await findQualityAdditionTrigger(read?{...o,allowCandidate:async at=>{const r=await read(at);return !r.hit&&!r.pending;}}:o);if(!trigger)return;
  const rules=o.entryVetoes?.filter(v=>v.enabled&&v.kind==='box-break');
- if(rules?.length){const result=await createVetoHistoryReader({...o,rules})(trigger.at);if(result.hit||result.pending)return;}
+ const live=o.load.liveAdditionVeto;
+ const boxKey=live && rules?.length ? JSON.stringify(['fixed-add-box',o.entry,rules,!!o.load.boxAdditionMarketLoad]) : '';
+ const readBox=(at:number)=>{
+  const calculate=()=>createVetoHistoryReader({...o,rules:rules!})(at);
+  return live && at>=live.boundary-60000 && at<=live.boundary ? live.read(boxKey,at,calculate) : calculate();
+ };
+ if(live && o.end>=live.boundary-60000){
+  for(const at of [live.boundary-60000,live.boundary]){
+   if(at<=o.after || at>o.end)continue;
+   warmIndicatorEntryVetoes(o.entryVetoes ?? [], o, at);
+   if(rules?.length)void readBox(at).catch(()=>{});
+  }
+ }
+ const trigger=await findQualityAdditionTrigger(read?{...o,allowCandidate:async at=>{const r=await read(at);return !r.hit&&!r.pending;}}:o);if(!trigger)return;
+ if(rules?.length){const result=await readBox(trigger.at);if(result.hit||result.pending)return;}
  const quantity=o.quantity??o.notional!/trigger.price,notional=o.quantity==null?o.notional!:quantity*trigger.price;
  if(!(quantity>0)||!Number.isFinite(quantity)||!(notional>0)||!Number.isFinite(notional))throw Error('加仓数量或成交金额超出可计算范围');
  return {...trigger,quantity,notional};

@@ -109,6 +109,7 @@ export function qualityBoxMarketRepair(load: FishReconstructionLoader, symbol: s
     });
   };
   const scoped: FishReconstructionLoader = (...args) => load(...args);
+  scoped.liveAdditionVeto = load.liveAdditionVeto;
   scoped.currentMinuteOpen = load.currentMinuteOpen;
   scoped.turingInitialization = load.turingInitialization;
   scoped.boxStopMarketLoad = repaired;

@@ -1,4 +1,5 @@
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger} from '@/lib/fish/qualityHoldingLedger';
+import {LiveAdditionVetoCache} from '@/lib/fish/liveAdditionVeto';
 import {findCalculatorAdditions} from '@/lib/fish/qualityAdditionCalculator';
 import {positionGeometricMultiple} from '@/lib/campaignGeometricMetrics';
 import {additionMetricBaseDefinition, additionMetricTimeFields, withAdditionMetricTime} from '@/lib/fish/qualityAdditionMetric';
@@ -454,4 +455,71 @@ it('arms sell rules only for a qualified ATRP rejection and resumes with zero ad
  expect(closed.totalInvested).toBe(100);
  expect(closed.atrRejectedAdditions).toEqual(open.atrRejectedAdditions);
  expect((await run(g,market,3)).endPrice).toBe(closed.endPrice);
+});
+
+it.each([0,1e6])('prefetch preserves the ledger, rejection evidence and sale for ATRP threshold %s', async threshold => {
+ const g=group(),metric=makeQualityBuyFilter('atr-price-pct-v1:ATRP','>',threshold,true,[ATR_PRICE_PCT_DEF]);
+ Object.assign(g.addition!,{maxRounds:1,atrRejectExit:'atr-price-reject-exit-v1',entryVetoes:[
+  {kind:'indicator',enabled:true,indicator:{...metric,version:INDICATOR_ENTRY_VETO_VERSION,direction:'>='}},
+  {kind:'upper-wick',enabled:true,atr:25,lookbackBars:3}
+ ]});
+ const base=loader(i=>i<2?rising(i):bar(T+i*M,110,0,105));
+ const cache=new LiveAdditionVetoCache();
+ let indicatorReads=0;
+ const load:FishReconstructionLoader=(row,from,to,plan,signal)=>{
+  if(plan.def.id===ATR_PRICE_PCT_DEF.id)indicatorReads++;
+  return base(row,from,to,plan,signal);
+ };
+ const refresh=(end:number)=>{load.liveAdditionVeto=cache.poll('TESTUSDT',T+end*M,new AbortController().signal);};
+ refresh(2);
+ const first=await run(g,load,2);
+ expect(first).toEqual(await run(g,base,2));
+ expect(indicatorReads).toBeGreaterThan(0);
+ const count=indicatorReads;
+ refresh(2);
+ expect(await run(g,load,2)).toEqual(first);
+ expect(indicatorReads).toBe(count);
+ refresh(3);
+ expect(await run(g,load,3,first)).toEqual(await run(g,base,3,first));
+});
+
+it('shares in-flight closed readings, retries pending and failed reads, and isolates the next close and changed rule',async()=>{
+ const cache=new LiveAdditionVetoCache(),signal=new AbortController(),poll=cache.poll('position',T,signal.signal);
+ let calls=0;
+ const count=async()=>{calls++;return {};};
+ await Promise.all([poll.read('rule',T,count),poll.read('rule',T,count)]);
+ await cache.poll('position',T,signal.signal).read('rule',T,count);
+ expect(calls).toBe(1);
+ await poll.read('rule',T+M,count);
+ await poll.read('other rule',T,count);
+ await cache.poll('other position',T,signal.signal).read('rule',T,count);
+ await poll.read('pending',T,async()=>({pending:'待收盘'}));
+ await poll.read('pending',T,count);
+ await expect(poll.read('error',T,async()=>{throw Error('行情缺失');})).rejects.toThrow();
+ await poll.read('error',T,count);
+ expect(calls).toBe(6);
+});
+
+it('refreshes the closed ATRP even without an addition candidate and recomputes across its candle boundary',async()=>{
+ const g=group(),metric=makeQualityBuyFilter('atr-price-pct-v1:ATRP','>',0,true,[ATR_PRICE_PCT_DEF]);
+ g.addition!.condition!.threshold=1e9;
+ g.addition!.entryVetoes=[{kind:'indicator',enabled:true,indicator:{...metric,version:INDICATOR_ENTRY_VETO_VERSION}}];
+ const base=loader(rising),cuts:number[]=[];
+ const load:FishReconstructionLoader=(row,from,to,plan,signal)=>{
+  if(plan.def.id===ATR_PRICE_PCT_DEF.id)cuts.push(to);
+  return base(row,from,to,plan,signal);
+ };
+ const cache=new LiveAdditionVetoCache();
+ const cold=await run(g,load,2);
+ expect(cuts).toEqual([]);
+ load.liveAdditionVeto=cache.poll('test',T+2*M,new AbortController().signal);
+ expect(await run(g,load,2)).toEqual(cold);
+ expect(cuts).toEqual([T]);
+ const minutes=Number(ATR_PRICE_PCT_DEF.interval.replace('m',''));
+ const boundary=T+minutes*M;
+ load.liveAdditionVeto=cache.poll('test',boundary,new AbortController().signal);
+ let prior=cold;
+ for(let m=3;m<=minutes;m++) prior=await run(g,load,m,prior);
+ expect(cuts).toContain(boundary);
+ expect(prior.additionFills??[]).toHaveLength(0);
 });

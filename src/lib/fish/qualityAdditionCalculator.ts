@@ -4,7 +4,7 @@ import {isClassifiedImpulsePositionVersion,createClassifiedImpulsePositionReader
 import {mirrorHardStopActive,mirrorHardStopRange} from './qualityMirrorHardStopStages';
 import { DBL5_PROFILES } from '@/lib/dbl5m';
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger,calculateHoldingLedgerAddition} from './qualityHoldingLedger';
-import { createIndicatorEntryVetoReader } from './qualityIndicatorEntryVeto';
+import { createIndicatorEntryVetoReader, warmIndicatorEntryVetoes } from './qualityIndicatorEntryVeto';
 import { createAdditionIncreaseReader } from './qualityAdditionIncrease';
 import { createImpulseAdditionReader } from './qualityImpulseAddition';
 import { createVetoHistoryReader } from './qualityVetoHistory';
@@ -333,6 +333,70 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   };
   const previousFillAt=(atrRejected.length?executions():fills).at(-1)?.at??o.entry;
   const atrBlocks=new Map<RoundScan|Options,Map<number,{label:string;reading:string}>>();
+  // Prime closed observations alongside the position scan. Only the selected hit below
+  // may change a lock, consume a round, activate exits or write a rejection reason.
+  const live = o.load.liveAdditionVeto;
+  const checksByRule = new Map<RoundScan|Options, ReturnType<typeof makeChecks>>();
+  function makeChecks(rule: RoundScan|Options) {
+    const rules = rule.entryVetoes ?? [];
+    const ordinary = rules.filter(v => v.enabled && v.kind !== 'indicator' && v.kind !== 'guard-distance' && v.kind !== 'box-break');
+    const legacyRules = ordinary.filter(v => v.historyHours == null);
+    const hasHistory = rules.some(v => v.enabled && v.kind !== 'box-break' && v.kind !== 'indicator' && (v.historyHours != null || v.kind === 'guard-distance'));
+    const boxRules = rules.filter(v => v.enabled && v.kind === 'box-break');
+    const historyRules = rules.filter(v => v.kind !== 'box-break' && v.kind !== 'indicator');
+    const scope = live ? JSON.stringify([o.entry, roundNo, rules, !!o.load.boxAdditionMarketLoad]) : '';
+    type Result = import('./qualityVetoHistory').HistoryVetoResult;
+    const closed = (kind:string, at:number, cut:number, cold:()=>Promise<Result>, isolated:()=>Promise<Result>) =>
+      live && at <= live.boundary && at >= live.boundary-MINUTE
+        ? live.read(kind+scope,cut,isolated) : cold();
+    const legacy = (at:number) => {
+      const cut = Math.floor(at/STEP)*STEP;
+      const needsMinutes = additionVetoesNeedMinutes(legacyRules);
+      const evaluate = async(reader:ReturnType<typeof atrReader>) => {
+        await reader(at);
+        const series = reader.series().filter(x=>x.bar.openTime+STEP<=cut);
+        return {hit:evaluateAdditionVetoes(legacyRules,series.map(x=>x.bar),series.map(x=>x.atr),o.entry,needsMinutes?await minutesUntil(at):undefined)};
+      };
+      return closed('legacy',at,needsMinutes?at:cut,()=>evaluate(readAtr),()=>evaluate(atrReader(o)));
+    };
+    const history = (at:number) => {
+      const minute=o.prices[(at-MINUTE-(o.prices[0]?.openTime??at))/MINUTE];
+      const make=()=>createVetoHistoryReader({...o,rules:historyRules});
+      return closed('history',at,at,()=>{
+        let reader=historyReaders.get(rules);
+        if(!reader){reader=make();historyReaders.set(rules,reader);}
+        return reader(at,minute);
+      },()=>make()(at,minute));
+    };
+    const box = (at:number) => {
+      const make=()=>createVetoHistoryReader({...o,rules:boxRules});
+      return closed('box',at,at,()=>{
+        const key=JSON.stringify(additionVetoIdentity(boxRules));
+        let reader=boxBreakReaders.get(key);
+        if(!reader){reader=make();boxBreakReaders.set(key,reader);}
+        return reader(at);
+      },()=>make()(at));
+    };
+    return {hasLegacy:legacyRules.length>0,hasHistory,hasBox:boxRules.length>0,legacy,history,box};
+  }
+  function roundChecks(rule:RoundScan|Options) {
+    let checks=checksByRule.get(rule);
+    if(!checks){checks=makeChecks(rule);checksByRule.set(rule,checks);}
+    return checks;
+  }
+  if(live && o.end>=live.boundary-MINUTE && after>=live.boundary-2*MINUTE){
+   for(const rule of [primaryRule,alternative]){
+    if(!rule || rule.unavailable || !rule.entryVetoes?.some(v=>v.enabled))continue;
+    const checks=roundChecks(rule);
+    for(const at of [live.boundary-MINUTE, live.boundary]){
+     if(at<=after || at>addEnd || at===addEnd && at!==o.end)continue;
+     warmIndicatorEntryVetoes(rule.entryVetoes, o, at);
+     if(checks.hasLegacy)void checks.legacy(at).catch(()=>{});
+     if(checks.hasHistory)void checks.history(at).catch(()=>{});
+     if(checks.hasBox)void checks.box(at).catch(()=>{});
+    }
+   }
+  }
   const scanRoundHit=async(rule:RoundScan|Options,end:number,gainBasis:typeof basis,reference:number,start=after,position:Position='native')=>{
    if(rule.unavailable||end<=start)return;
    const gain=rule.minGainPct==null?undefined:{referencePrice:reference,thresholdPct:rule.minGainPct,basis:gainBasis};
@@ -380,10 +444,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const findRoundHit=async(...args:Parameters<typeof scanRoundHit>)=>{
    const hit=await scanRoundHit(...args),rule=args[0],rules=rule.entryVetoes;
    if(!hit||!rules?.some(v=>v.enabled&&v.kind==='box-break'))return hit;
-   const nativeRules=rules.filter(v=>v.enabled&&v.kind==='box-break'),readerKey=JSON.stringify(additionVetoIdentity(nativeRules));
-   let read=boxBreakReaders.get(readerKey);
-   if(!read){read=createVetoHistoryReader({rules:nativeRules,entry:o.entry,row:o.row,load:o.load,signal:o.signal});boxBreakReaders.set(readerKey,read);}
-   const result=await read(hit.at);
+   const result=await roundChecks(rule).box(hit.at);
    if(!result.hit&&!result.pending)return hit;
    vetoed.push({at:hit.at,round:roundNo,...(result.hit??{kind:'box-break-pending',label:'箱体断裂待判定',reading:result.pending!})});
    return undefined;
@@ -479,16 +540,14 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    else{const last=since.at(-1)?.bar.close;vetoed.push({at:hit.at,round:roundNo,kind:'pullback',label:'冲高回落：未收复最高点前不再加仓',reading:`锁住时持仓最高 ${+pullbackLock.peak.toPrecision(8)}，尚未收复${last!=null?`（最新收盘 ${+last.toPrecision(8)}）`:''}`,lockPeak:pullbackLock.peak,lockAt:pullbackLock.at});after=hit.at;continue;}
   }
   if(round.entryVetoes?.some(v=>v.enabled)){
-   if(round.entryVetoes.some(v=>v.enabled&&v.kind!=='indicator'&&v.kind!=='guard-distance'&&v.kind!=='box-break')){
-    await readAtr(hit.at);const cut=Math.floor(hit.at/STEP)*STEP,s=readAtr.series().filter(x=>x.bar.openTime+STEP<=cut);
-    const legacyVetoes=round.entryVetoes.filter(v=>v.historyHours==null&&v.kind!=='indicator'&&v.kind!=='guard-distance'&&v.kind!=='box-break'),minutes=additionVetoesNeedMinutes(legacyVetoes)?await minutesUntil(hit.at):undefined;
-    const veto=evaluateAdditionVetoes(legacyVetoes,s.map(x=>x.bar),s.map(x=>x.atr),o.entry,minutes);
+   const checks = roundChecks(round);
+   if(checks.hasLegacy){
+    const cut=Math.floor(hit.at/STEP)*STEP;
+    const {hit:veto}=await checks.legacy(hit.at);
     if(veto){const {lockPeak,...hitText}=veto;if(lockPeak!=null)pullbackLock={peak:lockPeak,at:cut};vetoed.push({at:hit.at,round:roundNo,...hitText,...(lockPeak!=null?{lockPeak,lockAt:cut}:{})});after=hit.at;continue;}
    }
-   if(round.entryVetoes.some(v=>v.enabled&&(v.kind!=='box-break'&&(v.historyHours!=null||v.kind==='guard-distance')))){
-    let history=historyReaders.get(round.entryVetoes);if(!history){history=createVetoHistoryReader({rules:round.entryVetoes.filter(v=>v.kind!=='box-break'&&v.kind!=='indicator'),entry:o.entry,row:o.row,load:o.load,signal:o.signal});historyReaders.set(round.entryVetoes,history);}
-    const minute=o.prices[(hit.at-MINUTE-(o.prices[0]?.openTime??hit.at))/MINUTE];
-    const result=await history(hit.at,minute);
+   if(checks.hasHistory){
+    const result=await checks.history(hit.at);
     if(result.hit||result.pending){
      const distancePending=result.pendingKind==='guard-distance';
      const detail=result.hit??{kind:distancePending?'guard-distance-pending':'history-pending',

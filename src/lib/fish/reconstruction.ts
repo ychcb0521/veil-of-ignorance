@@ -42,6 +42,7 @@ export interface FishReconstructionOptions {
 }
 export type FishReconstructionLoader = ((row:TradeSignal,from:number,cut:number,plan:FishProgram,signal:AbortSignal)=>Promise<readonly ResearchBar[]>) & {
   /** Opening trade of the current minute, isolated from closed OHLC history. */
+  liveAdditionVeto?: ReturnType<import('./liveAdditionVeto').LiveAdditionVetoCache['poll']>;
   currentMinuteOpen?: (at: number) => Promise<number | undefined>;
   boxStopMarketLoad?: FishReconstructionLoader;
   boxAdditionMarketLoad?: FishReconstructionLoader;

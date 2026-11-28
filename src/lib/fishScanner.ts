@@ -1,3 +1,4 @@
+import { LiveAdditionVetoCache } from './fish/liveAdditionVeto';
 import { instantMinuteOpening } from './fish/instantMinuteStream';
 import { fishProgramForLookback, limitFishLookback } from '@/lib/fish/lookback';
 import { checkFishDownwardWick, describeFishWick, fishWickCount, type FishDownwardWick, type FishWickRejection } from '@/lib/fish/downwardWick';
@@ -210,6 +211,7 @@ type ScanOptions = FishScanSettings & {
   onRound?: (round: FishCombinationRound) => void; onResult?: (key:string,result:FishMemberResult)=>void; skipReasons?: Partial<Record<FishExchange,string>>; signal: AbortSignal; onProgress: (progress: FishProgress) => void; onSignal: (signal: TradeSignal) => void };
 /** One frozen cutoff, a separate adapter/cache/rate budget for each venue, one shared classifier. */
 export class FishScanner {
+  private readonly liveVetoCache = new LiveAdditionVetoCache();
   async repairQuality(options: Parameters<typeof collectQualityRepair>[0]): Promise<void> {
     const { now, load, marketEnd } = await this.qualityMarket(options.tasks.map(task => task.sample.source.symbol), options.signal);
     await collectQualityRepair({ ...options, marketEnd }, load, now);
@@ -276,6 +278,10 @@ export class FishScanner {
       const end = Math.min(target, await marketEnd?.(symbol) ?? now);
       const start = monitor.plan.initialization ? await marketStart?.(symbol) : undefined;
       const closedMinute = Math.floor(now / 60_000) * 60_000;
+      if (end === closedMinute) {
+        const positionKey = JSON.stringify([sample.source.exchange ?? 'binance', sample.source.market, symbol, sample.id, buyAt, monitor.plan.initialization, start]);
+        load.liveAdditionVeto = this.liveVetoCache.poll(positionKey, closedMinute, signal);
+      }
       if ((sample.source.exchange ?? 'binance') === 'binance' && !isTuringCupSymbol(symbol)
         && (!sample.binanceEntry || previous?.followBasis) && end === closedMinute && end % 300_000 === 0) {
         let opening: Promise<number | undefined> | undefined;
@@ -297,7 +303,7 @@ export class FishScanner {
         };
       }
       return evaluateInstantMonitor(instantMonitorSample(sample, buyAt), monitor, end, load, signal, previous, start,exchangeAt??Date.now(),position);
-    });
+    }, true);
   }
 
   async openInstantPosition(input: InstantPositionInput, signal: AbortSignal) {
@@ -345,7 +351,7 @@ export class FishScanner {
     });
   }
 
-  private async instant<T>(signal: AbortSignal, read: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  private async instant<T>(signal: AbortSignal, read: (signal: AbortSignal) => Promise<T>, abortOnFinish = false): Promise<T> {
     // Concurrent positions often share their caller's lifetime. Each task owns its priority.
     const task = new AbortController();
     const cancel = () => task.abort();
@@ -353,7 +359,7 @@ export class FishScanner {
     else signal.addEventListener('abort', cancel, { once: true });
     const release = this.pool.prioritize(task.signal);
     try { return await read(task.signal); }
-    finally { signal.removeEventListener('abort', cancel); release(); }
+    finally { if (abortOnFinish) task.abort(); signal.removeEventListener('abort', cancel); release(); }
   }
 
   private async qualityMarket(symbols: readonly string[], signal: AbortSignal, onWaiting?: (until?:number)=>void) {
