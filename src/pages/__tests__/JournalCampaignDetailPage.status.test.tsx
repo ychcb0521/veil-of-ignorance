@@ -214,7 +214,9 @@ describe('即时交易沿用完整战役详情', () => {
     expect(screen.getByText('扣手续费后', { exact: true })).toBeInTheDocument();
     expect(screen.getByText('0.028018 USDT', { exact: true })).toBeInTheDocument();
     const overview = screen.getByTestId('pnl-overview-three-columns');
-    expect(overview).toHaveTextContent('首仓名义金额 × 3%');
+    expect(overview).not.toHaveTextContent('首仓名义金额');
+    expect(overview).toHaveTextContent('已实现 P&L0.02 USDT');
+    expect(overview).toHaveTextContent('镜像平衡减仓');
     expect(overview).toHaveTextContent('盈亏比0.12');
     expect(overview).toHaveTextContent('最大预期亏损0.24 USDT');
     expect(overview).toHaveTextContent('加仓次数0');

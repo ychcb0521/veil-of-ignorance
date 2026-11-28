@@ -11,7 +11,7 @@ import { InstantCampaignMetadataButtons } from '@/components/journal/InstantCamp
 import { QualityMonitorSettingsButton } from '@/components/FishQualityMonitorSettingsView';
 import { QualityCampaignCardTitle } from '@/components/journal/QualityCampaignCardTitle';
 import { qualityProtectionOrders } from '@/lib/fish/qualityProtectionOrders';
-import { campaignHalfMirror } from '@/lib/fish/qualityPresentation';
+import { campaignHalfMirror, type HalfMirrorSummary } from '@/lib/fish/qualityPresentation';
 import { instantManualReason } from '@/lib/fish/instantManualExecution';
 import { qualityMirrorChartArtifacts, qualityFinalSale } from '@/lib/fish/qualityMirrorBoard';
 import { QualityCampaignChartFrame } from '@/components/journal/QualityCampaignChartFrame';
@@ -1940,6 +1940,24 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
     );
     return computeHoldingStaticMaxDrawdownPct({ side: actualPriceChange.side, entryPrice: actualPriceChange.entryPrice, klines, startMs, endMs, barMs: intervalToMs(computeInterval) });
   }, [actualMainPriceChange.byLegId, actualPriceChange.entryOpenTime, actualPriceChange.entryPrice, actualPriceChange.mainCloseTime, actualPriceChange.side, campaign, computeInterval, effectiveClosedAt, klines]);
+  const liveMirror = useMemo<HalfMirrorSummary | undefined>(() => {
+    if (!liveUsdt || !liveMetrics) return undefined;
+    const fills = liveUsdt.fills.filter(fill => fill.action === 'reduce' && liveUsdt.actionByOrder?.[fill.orderId] === 'mirror');
+    const quantity = fills.reduce((sum, fill) => sum + Number(fill.positionQuantity), 0);
+    if (quantity > 0 && liveMetrics.entryPrice && liveMetrics.openingSize > 0) {
+      const price = fills.reduce((sum, fill) => sum + Number(fill.price) * Number(fill.positionQuantity), 0) / quantity;
+      const gain = (price / liveMetrics.entryPrice - 1) * (liveUsdt.direction === 'long' ? 100 : -100);
+      const label = '已卖 ' + Number((100 * quantity / liveMetrics.openingSize).toFixed(2)) + '%';
+      return { state: 'filled', label, value: gain, text: (gain > 0 ? '+' : '') + gain.toFixed(2) + '% · ' + label,
+        detail: '按币安已确认的镜像减仓成交数量和加权均价计算。' };
+    }
+    const evidence = monitorDetail?.campaign.comparison;
+    const rule = evidence?.instant?.mirrorTakeProfit ?? evidence?.sellEvidence?.mirrorTakeProfit ?? liveMonitorPlan?.mirrorTakeProfit;
+    const known = !!(evidence?.instant || evidence?.sellEvidence || liveMonitorPlan);
+    const text = known && !rule?.enabled ? '未启用' : rule?.enabled ? '暂无已确认成交' : '—';
+    return { state: known && !rule?.enabled ? 'disabled' : 'pending', label: text, text, value: null,
+      detail: '依据本场监测设置及标记为镜像减仓的币安成交。' };
+  }, [liveUsdt, liveMetrics, liveMonitorPlan, monitorDetail]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const pnlSettlement = settlement;
@@ -1948,7 +1966,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
     // 14 项的顺序、文案与着色只在 buildCampaignPnlOverviewItems 里写一次；
     // 这里只负责把真实战役的各个 memo 收成一个纯数字对象。反事实面板走同一个构造器。
     const items = buildCampaignPnlOverviewItems({
-      realizedPnl: liveMetrics ? (liveMetrics.payoffPercent != null ? liveMetrics.net : null) : pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl,
+      realizedPnl: liveMetrics ? liveMetrics.net : pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl,
       settlement: pnlSettlement
         ? { basis: pnlSettlement.basis, stored: pnlSettlement.stored, drift: pnlDrift }
         : null,
@@ -1956,7 +1974,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
       initialMainExposureNotional: liveMetrics?.openingNotional ?? computeInitialMainExposureNotional(campaign, legs, tradeRecords),
       peakUnrealizedPnl: campaign.comparison?.instant ? campaign.peak_unrealized_pnl : accuracy.campaign_max_profit_real,
       peakPriceChangePct,
-      halfMirror:campaignHalfMirror(campaign),
+      halfMirror:liveMirror ?? campaignHalfMirror(campaign),
       dynamicMaxDrawdownPct,
       staticMaxDrawdownPct,
       initialExpectedMaxLoss: accuracy.initial_expected_max_loss,
@@ -1996,6 +2014,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
       : item));
   }, [
     accuracy,
+    liveMirror,
     liveMetrics,
     liveUsdt,
     asymmetricRiskContribution,
@@ -2013,7 +2032,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
     settlement,
     tradeRecords,
   ]);
-  const livePnlOverviewItems = useMemo<Array<OverviewPanelItem & { color?: string }> | undefined>(() => {
+  const liveReconciliationItems = useMemo<Array<OverviewPanelItem & { color?: string }> | undefined>(() => {
     if (!liveUsdt || !liveMetrics) return undefined;
     const { realized, fees, net, openingNotional, entryPrice } = liveMetrics;
     const amount = (value: number) => usdtAmountText(value) + ' ' + liveUsdt.asset;
@@ -2036,13 +2055,13 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
       { key: 'remainingQuantity', label: '余仓数量', value: liveUsdt.quantity, help: '币安成交确认后的剩余持仓数量。', column: 1 },
       { key: 'liveEntryRiskBasis', label: '初始风险依据', value: liveMetrics.percent == null ? '所选 L0 缺少开仓读数' : liveMetrics.frozen ? '开仓冻结风控' : '首仓名义金额 × 3%',
         help: '按首个开仓委托全部成交计算初始风险。旧方案缺少开仓风控时取首仓名义金额的 3%。明确选择 L0 的方案采用开仓风险读数。整场盈亏比在全部平仓且手续费可核算后显示。', column: 1 },
-      ...campaignPnlOverviewItems.filter(item => !['realizedPnl','initialMainExposureNotional'].includes(item.key)).map(item => item.key === 'payoffRatio'
-        ? { ...item, help: liveUsdt.closedAt == null ? '仓位尚未全部平仓，整场盈亏比待结算。'
-          : net == null ? '手续费含其他币种，缺少成交时折算金额，整场净盈亏和盈亏比暂缺。'
-          : '整场盈亏比 = 币安逐笔成交的已实现盈亏扣除手续费后 ÷ 首仓初始风险。' } : item),
     ];
-  }, [liveUsdt, liveMetrics, monitorDetail, campaignPnlOverviewItems]);
-  const overviewItems: Array<OverviewPanelItem & { color?: string }> = livePnlOverviewItems ?? campaignPnlOverviewItems;
+  }, [liveUsdt, liveMetrics, monitorDetail]);
+  const overviewItems = campaignPnlOverviewItems.map(item => {
+    if (!liveUsdt || !liveMetrics || item.key !== 'realizedPnl') return item;
+    return { ...item, value: liveMetrics.net == null ? '—' : positionHistoryPnlText(liveMetrics.net) + ' ' + liveUsdt.asset,
+      help: '币安实际成交盈亏扣除手续费，单独结算的资金费未计入。精确金额见币安成交对账。' };
+  });
   const campaignMetadataMetrics = useMemo<Array<OverviewPanelItem & { color?: string }>>(() => {
     const liveFields = [];
     if (liveUsdt) {
@@ -3135,6 +3154,15 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
           />
 
         </section>
+
+        {liveReconciliationItems && <details className="rounded border border-border bg-card px-4 py-3 text-xs">
+          <summary className="cursor-pointer font-medium">币安成交对账</summary>
+          <dl className="mt-3 grid gap-x-8 gap-y-2 sm:grid-cols-2">
+            {liveReconciliationItems.map(item => <div key={item.key} className="flex items-baseline justify-between gap-3" title={typeof item.help === 'string' ? item.help : undefined}>
+              <dt className="text-muted-foreground">{item.label}</dt><dd className="font-mono tabular-nums">{item.value}</dd>
+            </div>)}
+          </dl>
+        </details>}
 
         {canAccessOperationDiary && campaignOperationDate && (
           <section className="border border-border bg-card" data-testid="campaign-emotion-diary">
