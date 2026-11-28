@@ -223,7 +223,7 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       if (send) {
         try {
           report = await request('POST', '/fapi/v1/order', { symbol, side: order.side, positionSide: position,
-            ...(order.limitPrice ? { type: 'LIMIT', timeInForce: 'IOC', price: order.limitPrice } : { type: 'MARKET' }),
+            type: 'MARKET',
             quantity: order.quantity, newClientOrderId: order.id, newOrderRespType: 'RESULT',
             ...(mode === 'one-way' && order.side === 'SELL' ? { reduceOnly: 'true' } : {}) });
         } catch (error) {

@@ -384,7 +384,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     let unsettledBuyId: string | undefined;
     if (existing) {
       const [key, order] = existing;
-      const canCheckExit = closing && order.side === 'BUY' && order.limitPrice && current.held > 0;
+      const canCheckExit = closing && order.side === 'BUY' && current.held > 0;
       const report = await exchange.order(market, mode, order, false).catch(error => {
         if (!canCheckExit) throw error;
         return undefined;
@@ -533,8 +533,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     }
     const priorCloses = attempts.length;
     const key = action.action === 'close' && priorCloses ? action.id + ':' + priorCloses : action.id;
-    const order: UsdtOrder = { id: usdtOrderId(owner, campaign.id, key), side, quantity, terminal: false,
-      ...(side === 'BUY' ? { limitPrice: book } : {}) };
+    const order: UsdtOrder = { id: usdtOrderId(owner, campaign.id, key), side, quantity, terminal: false };
     row.orders[key] = order;
     row.status.state = 'waiting';
     row.status.issue = unsettledBuyId ? unsettledBuyIssue : undefined;

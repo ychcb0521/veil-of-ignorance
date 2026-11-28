@@ -166,7 +166,10 @@ it.each([
   runner.ingest([row],now+1);await runner.tick(now+1);
   const sent=venue.order.mock.calls.filter(call=>call[3]);
   expect(sent).toHaveLength(expected);
-  if(expected)expect(sent[0][2]).toMatchObject({side:'BUY',limitPrice:'4.003'});
+  if (expected) {
+    expect(sent[0][2].side).toBe('BUY');
+    expect(sent[0][2].limitPrice).toBeUndefined();
+  }
 });
 
 it('submits the first verified impulse open once, before the minute closes', async () => {
@@ -528,7 +531,7 @@ it('按方案的 U 本位名义额下首仓，使用逐笔成交跟随镜像、�
   const open = campaign(at);
   runner.ingest([open], at);
   await runner.tick(at);
-  expect(venue.order.mock.calls[0][2]).toMatchObject({ quantity: '24.981', side: 'BUY', limitPrice: '4.003' });
+  expect(venue.order.mock.calls[0][2]).toMatchObject({ quantity: '24.981', side: 'BUY' });
   expect(Number(venue.order.mock.calls[0][2].quantity) * 4.003).toBeLessThanOrEqual(100);
   for (const action of [
     { id: 'mirror', at: at + 1, action: 'mirror', fraction: .4 },
@@ -639,6 +642,15 @@ it('排除历史开仓、非币安来源和重复输入，暂停后仍处理已�
   runner.ingest([{ ...open, actions: [...open.actions, { id: 'close', at: at + 1, action: 'close' }] }], at + 1);
   await runner.tick(at + 1);
   expect(venue.order.mock.calls.map(([, , order]) => order.side)).toEqual(['BUY', 'SELL']);
+});
+
+it('即时买入发送市价单，盘口仅参与数量计算', async () => {
+  const request = vi.fn(async () => ({ orderId: '42', executedQty: '0', origQty: '3.010', symbol,
+    clientOrderId: 'fixture', side: 'BUY', positionSide: 'LONG', status: 'NEW' }));
+  await createUsdtExchange(request).order(market, 'hedge', { id: 'fixture', side: 'BUY', quantity: '3.010', terminal: false }, true);
+  expect(request).toHaveBeenCalledWith('POST', '/fapi/v1/order', {
+    symbol, side: 'BUY', positionSide: 'LONG', type: 'MARKET', quantity: '3.010', newClientOrderId: 'fixture', newOrderRespType: 'RESULT',
+  });
 });
 
 it('用实际成交回报校验数量和方向，单向卖出发 reduceOnly', async () => {
