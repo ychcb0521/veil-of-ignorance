@@ -56,18 +56,19 @@ it('keeps the original loader for a different immutable body',async()=>{
   expect(store.page).not.toHaveBeenCalled();
 });
 
-it('projects disk records and their frozen metrics into the workspace table for each selected range', async () => {
+it('combines records across the former page boundary into one selectable table', async () => {
   const library = monitorArchiveFixture().monitorLibrary!;
   store.settings.mockResolvedValue(library.settings);
+  store.rounds.mockResolvedValue([{...disk,pages:disk.pages.slice(0,9)}]);
   store.page.mockImplementation(async (_file, _round, page: number) =>
-    page === 0 ? library.records : page === 8 ? library.records.slice(0, 1) : []);
+    page === 0 ? library.records.filter(r=>r.source.symbol==='AAAUSDT') :
+    page === 8 ? library.records.filter(r=>r.source.symbol==='BBBUSDT') : []);
   render(<FishMonitorLibrary study={newQualityStudy(at)} ready={false} account="alice"
-    renderStudy={snapshot => <p>{snapshot.results.length} 项结果 · {snapshot.results[0]?.returnPct}%</p>}/>);
+    renderTemplate={table => <p>{table.importRows?.size} 条可选记录 · {table.study.results[0]?.returnPct}%</p>}/>);
   fireEvent.click(screen.getByRole('button', {name:'打开监测库'}));
   fireEvent.click(await screen.findByRole('button', {name:'打开监测归档 '+id}));
-  expect(await screen.findByText(library.records.length+' 项结果 · 10%')).toBeVisible();
-  fireEvent.change(screen.getByRole('combobox', {name:'监测记录范围'}), {target:{value:'1'}});
-  expect(await screen.findByText('1 项结果 · 10%')).toBeVisible();
+  expect(await screen.findByText('2 条可选记录 · 10%')).toBeVisible();
+  expect(screen.queryByRole('combobox', {name:'监测记录范围'})).toBeNull();
   expect(store.settings).toHaveBeenCalledOnce();
   expect(store.body).not.toHaveBeenCalled();
 });

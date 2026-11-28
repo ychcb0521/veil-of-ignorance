@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { newQualityStudy, type FishQualityStudy } from '@/lib/fish/quality';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { newQualityStudy } from '@/lib/fish/quality';
+import type { FishTemplateRenderer } from './FishLibraryTimeDirectory';
+import { createQualityTemplateTable, type QualityTemplateTable } from '@/lib/fish/qualityTemplateTable';
 import { monitorRoundStudy } from '@/lib/fish/qualityMonitorArchive';
+import type { QualityVetoStage } from '@/lib/fish/qualityVetoStages';
 import type { QualityMonitorSetting } from '@/lib/fish/qualityMonitorLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { diskRounds, monitorFolder, readDiskPage, readDiskSettings, type DiskRound, type MonitorFolder } from '@/lib/fish/localMonitorFiles';
@@ -56,58 +59,69 @@ function LocalRows({round,file}: Selection) {
   </>;
 }
 
-type StudyRenderer = (study: FishQualityStudy, close?: () => void) => ReactNode;
-const blocksPerTable = 8;
-
-function ArchiveTable({file, round, renderStudy, close}: Selection & {renderStudy: StudyRenderer; close: () => void}) {
-  const [page, setPage] = useState(0);
+function ArchiveTable({file, round, renderTemplate, close}: Selection & {renderTemplate: FishTemplateRenderer; close: () => void}) {
   const [settings, setSettings] = useState<QualityMonitorSetting[]>();
-  const [study, setStudy] = useState<FishQualityStudy>();
+  const [table, setTable] = useState<QualityTemplateTable>();
+  const [loaded, setLoaded] = useState(0);
+  const [complete, setComplete] = useState(false);
   const [error, setError] = useState('');
   const [showSettings, setShowSettings] = useState(false);
-  const pageCount = Math.max(1, Math.ceil(round.pages.length / blocksPerTable));
-  const first = page * blocksPerTable;
   useEffect(() => {
-    let active = true;
-    void readDiskSettings(file, round).then(value => {
-      if (!Array.isArray(value)) throw Error('归档缺少冻结设置。');
-      if (active) setSettings(value);
-    }).catch(e => { if (active) setError(problem(e)); });
-    return () => { active = false; };
-  }, [file, round]);
-  useEffect(() => {
-    if (!settings) return;
     let active = true;
     async function load() {
-      const blocks = round.pages.slice(first, first + blocksPerTable);
-      const records = (await Promise.all(blocks.map((_, i) => readDiskPage(file, round, first + i)))).flat();
+      const settings: QualityMonitorSetting[] = await readDiskSettings(file, round);
       if (!active) return;
+      if (!Array.isArray(settings)) throw Error('归档缺少冻结设置。');
+      setSettings(settings);
       const known = new Set(settings.map(item => item.id));
-      if (records.some(record => !known.has(record.settingId))) throw Error('记录缺少对应的冻结设置。');
-      const library = {version: 1 as const, importedLegacy: false, settings, rounds: [], records};
-      const snapshot = monitorRoundStudy({...newQualityStudy(round.at), monitorLibrary: library},
-        {id: round.id, startedAt: round.at, updatedAt: round.at, state: 'complete'}, records);
-      setStudy(snapshot);
+      const builder = createQualityTemplateTable(true);
+      const blocks = 4;
+      const conditions = new Map<string, QualityVetoStage['conditions']>();
+      let nextPreview = blocks;
+      for (let first = 0; first < round.pages.length; first += blocks) {
+        const records = (await Promise.all(round.pages.slice(first, first + blocks)
+          .map((_, i) => readDiskPage(file, round, first + i)))).flat();
+        if (!active) return;
+        if (records.some(record => !known.has(record.settingId))) throw Error('记录缺少对应的冻结设置。');
+        const library = {version: 1 as const, importedLegacy: false, settings, rounds: [], records};
+        const snapshot = monitorRoundStudy({...newQualityStudy(round.at), monitorLibrary: library},
+          {id: round.id, startedAt: round.at, updatedAt: round.at, state: 'complete'}, records);
+        // The disk snapshot is detached. Share exact copies of frozen conditions across its fills.
+        for (const result of snapshot.results) {
+          for (const stage of [result.activeVetoStage, ...(result.vetoStageSwitches ?? [])]) {
+            if (!stage) continue;
+            const key = JSON.stringify(stage.conditions);
+            const saved = conditions.get(key);
+            if (saved) stage.conditions = saved;
+            else if (conditions.size < 512) conditions.set(key, stage.conditions);
+          }
+        }
+        builder.append(snapshot, undefined, true);
+        if (first + blocks >= nextPreview && first + blocks < round.pages.length) {
+          const partial = builder.finish();
+          setTable({...partial, rows: partial.rows.slice(), study: {...partial.study,
+            samples: partial.study.samples.slice(), results: partial.study.results.slice()}});
+          nextPreview *= 4;
+        }
+        setLoaded(Math.min(round.count, (first + blocks) * round.pageSize));
+      }
+      if (active) { setTable(builder.finish()); setComplete(true); }
     }
     void load().catch(e => { if (active) setError(problem(e)); });
     return () => { active = false; };
-  }, [file, round, first, settings]);
+  }, [file, round]);
+  const board = useMemo(() => table && renderTemplate(table, close, true), [table, renderTemplate, close]);
   return <div className="min-w-0 space-y-2">
-    <div className="flex flex-wrap items-center gap-3 text-xs">
-      {pageCount > 1 && <label>本页筛选与导入 <select aria-label="监测记录范围" value={page}
-        onChange={e => { setStudy(undefined); setError(''); setPage(Number(e.target.value)); }}>
-        {Array.from({length: pageCount}, (_, i) => <option key={i} value={i}>
-          {i * blocksPerTable * round.pageSize + 1}–{Math.min(round.count, (i + 1) * blocksPerTable * round.pageSize)} / {round.count}
-        </option>)}
-      </select></label>}
-      <button type="button" className={link} onClick={() => setShowSettings(!showSettings)}>查看冻结设置</button>
-    </div>
+    <button type="button" className={link} onClick={() => setShowSettings(!showSettings)}>查看冻结设置</button>
     {showSettings && settings && <pre className="max-h-48 overflow-auto text-xs">{JSON.stringify(settings,null,2)}</pre>}
-    {error ? <p role="alert">{error}</p> : study ? <div key={page}>{renderStudy(study, close)}</div> : <p role="status">正在读取本机监测记录…</p>}
+    {error ? <p role="alert">{error}</p> : <>
+      {!complete && <p role="status">正在读取整轮记录，完成后可筛选和导入 · {loaded} / {round.count}</p>}
+      {board && <fieldset disabled={!complete} className="min-w-0">{board}</fieldset>}
+    </>}
   </div>;
 }
 
-function InlineRound({folder,round,renderStudy,close}:{folder:MonitorFolder;round:DiskRound;renderStudy?:StudyRenderer;close:()=>void}){
+function InlineRound({folder,round,renderTemplate,close}:{folder:MonitorFolder;round:DiskRound;renderTemplate?:FishTemplateRenderer;close:()=>void}){
   const [file,setFile]=useState<File>();
   const [issue,setIssue]=useState('');
   useEffect(()=>{
@@ -120,11 +134,11 @@ function InlineRound({folder,round,renderStudy,close}:{folder:MonitorFolder;roun
   if(issue)return <p role="alert">{issue}</p>;
   return <section aria-label="本机监测明细" className="space-y-1 text-xs">
     <p className="font-medium">本机归档快照 · {round.count} 条</p>
-    {file&&renderStudy?<ArchiveTable file={file} round={round} renderStudy={renderStudy} close={close}/>:file?<LocalRows round={round} file={file}/>:<p role="status">正在打开本机文件…</p>}
+    {file&&renderTemplate?<ArchiveTable file={file} round={round} renderTemplate={renderTemplate} close={close}/>:file?<LocalRows round={round} file={file}/>:<p role="status">正在打开本机文件…</p>}
   </section>;
 }
 
-export function FishLocalMonitorFiles({owner,active,renderStudy,children}:{owner?:string;active:boolean;renderStudy?:StudyRenderer;
+export function FishLocalMonitorFiles({owner,active,renderTemplate,children}:{owner?:string;active:boolean;renderTemplate?:FishTemplateRenderer;
   children:(toolbar:(close:()=>void)=>ReactNode,roundLink:(id:string,revision?:unknown)=>ReactNode,roundPreview:(id:string,revision:unknown,close:()=>void)=>ReactNode)=>ReactNode}) {
   const [folder,setFolder]=useState<MonitorFolder>();
   const [rounds,setRounds]=useState<DiskRound[]>([]);
@@ -183,7 +197,7 @@ export function FishLocalMonitorFiles({owner,active,renderStudy,children}:{owner
       {rounds.map(r=><button type="button" key={r.id} className={link+' block py-1'} onClick={()=>void show(r)}>{r.title} · {r.count} 条</button>)}</details>}
     {active&&selected&&<Dialog open onOpenChange={v=>{if(!v)setSelected(undefined);}}><DialogContent className="flex max-h-[85dvh] w-[96vw] max-w-[96vw] flex-col overflow-auto">
       <DialogHeader><DialogTitle>{selected.round.title}</DialogTitle><DialogDescription>{selected.round.count} 条本机监测记录</DialogDescription></DialogHeader>
-      {renderStudy ? <ArchiveTable key={selected.round.bodyId} {...selected} renderStudy={renderStudy} close={()=>{setSelected(undefined);close();}}/> : <LocalRows key={selected.round.id} {...selected}/>}</DialogContent></Dialog>}
+      {renderTemplate ? <ArchiveTable key={selected.round.bodyId} {...selected} renderTemplate={renderTemplate} close={()=>{setSelected(undefined);close();}}/> : <LocalRows key={selected.round.id} {...selected}/>}</DialogContent></Dialog>}
   </div>;
   return <>{children(toolbar,(id,revision)=>{
     const round=active&&!locked&&rounds.find(r=>r.id===id && (typeof revision!=='string'||!revision.startsWith('recent-v1-')||revision===r.bodyId));
@@ -196,7 +210,7 @@ export function FishLocalMonitorFiles({owner,active,renderStudy,children}:{owner
       {locked?'授权并读取本机明细':'绑定文件夹并读取本机明细'}</button>:null;
     // Old workspace entries have no immutable body ID. Label their disk view as a saved snapshot.
     const round=rounds.find(r=>r.id===id&&(!immutable||r.bodyId===revision));
-    return round?<InlineRound key={round.bodyId} round={round} folder={folder} renderStudy={renderStudy} close={close}/>:null;
+    return round?<InlineRound key={round.bodyId} round={round} folder={folder} renderTemplate={renderTemplate} close={close}/>:null;
   })}
 
   </>;

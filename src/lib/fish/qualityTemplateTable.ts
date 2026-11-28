@@ -54,7 +54,7 @@ export function createQualityTemplateTable(importSelection=false) {
     return next;
   };
 
-  const append=(input:FishQualityStudy, campaignPath?:(result:QualityResult)=>string|undefined)=>{
+  const append=(input:FishQualityStudy, campaignPath?:(result:QualityResult)=>string|undefined, immutableMonitorRecords=false)=>{
     const screeningOnly=!!input.screeningResults&&!input.results.length&&!input.sellPlans?.length;
     const displayRows=screeningOnly?input.samples.map(sample=>qualityComparisonRows({samples:[sample]})[0]):qualityComparisonRows(input);
     if(!displayRows.length) return;
@@ -87,7 +87,8 @@ export function createQualityTemplateTable(importSelection=false) {
       const sources=row.groups.flatMap(id=>{const group=detectorMap.get(id);return group?[[id,column(detectors,'detector',group)] as const]:[];});
       const basis=qualityRowMonitorTimeBasis(input,row);
       const sell=plans.map(([original,plan])=>{
-        const result=qualityRowResult(input,row,original,savedResults) ?? byResult.get(JSON.stringify([row.id,original.id])) ?? undefined;
+        const indexed=byResult.get(JSON.stringify([row.id,original.id]));
+        const result=immutableMonitorRecords && indexed ? indexed : qualityRowResult(input,row,original,savedResults) ?? indexed ?? undefined;
         const path=result&&(templateCampaignPath(result)??campaignPath?.(result));
         const status=activeBuyFilters(input,original).length?qualityFilterStatus(input,row,original,savedFilters):undefined;
         const exitKey=qualityPostExitKey(row.source,result,original);
@@ -99,10 +100,12 @@ export function createQualityTemplateTable(importSelection=false) {
       const matched=row.source.preEntryMonitor?.recordId;
       const exactMatch=matched?screeningById.get(matched):undefined;
       const screened=exactMatch?[exactMatch]:screeningRowResults(row,screeningIndex);
+      // In one verified disk body a campaign path identifies its exact record.
+      // Other archives can reuse paths after a rerun and must compare full result evidence.
       const key=signature([qualityEntryIdentity(row.source,row.enteredAt),row.basis,basis,row.source.quality,qualitySignalTime(row.source),row.minedAt,row.monitorEntry?.at,row.monitorEntry?.error,row.counterfactualAt,...(staticRow.staticTime?[staticRow.staticTime]:[]),
         row.origins,row.readings,sources.map(([,group])=>group.id),row.source.preEntryMonitor?.matchedAt,
         filtered.map(([f,r])=>[f.id,r&&withoutKey(r)]),signal.map(([m,r])=>[m.id,r&&withoutKey(r)]),
-        sell.map(({plan,result,path,status,exit})=>[plan.id,result&&resultEvidence(result),path??result?.key,status,exit&&withoutKey(exit)]),
+        sell.map(({plan,result,path,status,exit})=>[plan.id,result&&!(immutableMonitorRecords&&path)&&resultEvidence(result),path??result?.key,status,exit&&withoutKey(exit)]),
         screened.map(({record,round})=>{
           const {id:_id,roundId:_round,sample:_sample,updatedAt:_updated,tableClearedAt:_cleared,...evidence}=record;
           return [round.engine,round.hours,round.plans,round.filters,round.instantTrading,round.instantMonitor,evidence];
@@ -150,6 +153,7 @@ export function createQualityTemplateTable(importSelection=false) {
 /** Batch import copies original inputs only. View IDs, settings, and archived results stay in the library. */
 export function qualityTemplateImportSelection(table:QualityTemplateTable,ids:readonly string[], includeMonitoring=false) {
   const groups=new Map<string,QualityGroup>(), samples=new Map<string,{original:QualitySample;groups:Set<string>;monitoring:Map<string,ImportedMonitoring>}>();
+  const importedPlans = new Map<QualityGroup, Map<string | undefined,QualityGroup>>();
   for(const id of ids){
     const entry=table.importRows?.get(id);
     if(!entry)continue;
@@ -167,10 +171,17 @@ export function qualityTemplateImportSelection(table:QualityTemplateTable,ids:re
           const filterStatus = table.filterStatus.get(plan.id)?.get(rowId);
           if (!result && !filterStatus) continue;
           const path = result && templateCampaignPath(result);
-          const archivePlanId = 'imported-monitor-' + shortFishHash(signature([withoutId(plan), result?.groupId]));
-          const previous = picked.monitoring.get(archivePlanId);
+          let byGroup = importedPlans.get(plan);
+          if (!byGroup) importedPlans.set(plan, byGroup = new Map());
+          let archivePlan = byGroup.get(result?.groupId);
+          if (!archivePlan) {
+            const id = 'imported-monitor-' + shortFishHash(signature([withoutId(plan), result?.groupId]));
+            archivePlan = {...plan, id, label:plan.label+'（归档）'};
+            byGroup.set(result?.groupId, archivePlan);
+          }
+          const previous = picked.monitoring.get(archivePlan.id);
           if (!previous || (result?.evaluatedAt ?? 0) >= (previous.result?.evaluatedAt ?? 0)) {
-            picked.monitoring.set(archivePlanId, {plan:{...plan,id:archivePlanId,label:plan.label+'（归档）'}, result, path,
+            picked.monitoring.set(archivePlan.id, {plan:archivePlan, result, path,
               filterStatus, postExit:table.postExit.get(rowId)?.get(plan.id)});
           }
         }
