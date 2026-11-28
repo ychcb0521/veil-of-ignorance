@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { downloadLibraryJson } from './SignalLibraryBackup';
 import { Database, Loader2 } from 'lucide-react';
 import { importTuringReplayArchive, saveTuringReplayArchiveToAccount } from '@/lib/turingCupReplayArchive';
 import type { useTuringReplayArchive } from '@/hooks/useTuringReplayArchive';
@@ -32,7 +33,7 @@ export function TuringCupReplayPanel({ accountId, source }: Props) {
     <>
       <label title="导入图灵杯行情到账号" className="flex h-[22px] shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
         {busy || source.loading ? <Loader2 aria-hidden className="h-3 w-3 animate-spin" /> : <Database aria-hidden className="h-3 w-3" />}
-        {busy ? '正在保存行情' : source.loading ? '正在读取行情' : synced ? '行情已同步' : '行情文件'}
+        {busy ? '正在保存行情' : source.loading ? '正在读取行情' : synced ? '行情已同步' : '导入行情'}
         <input type="file" accept=".json,application/json" aria-label="导入图灵杯行情" className="sr-only"
           disabled={busy || source.loading} onChange={event => {
             const file = event.currentTarget.files?.[0];
@@ -40,6 +41,8 @@ export function TuringCupReplayPanel({ accountId, source }: Props) {
             if (file) void save(file);
           }} />
       </label>
+      <button type="button" disabled={busy || !source.archive} className="whitespace-nowrap text-[10px] text-muted-foreground hover:text-primary disabled:opacity-50"
+        onClick={() => source.archive && downloadLibraryJson('图灵杯行情', source.archive)}>导出行情</button>
       {source.error && !busy && <button type="button" className="text-[10px] text-destructive hover:underline" onClick={source.retry}>{source.error}</button>}
       {syncError && <span role="alert" className="text-[10px] text-destructive">{syncError}{source.archive && !busy &&
         <button type="button" className="ml-1 underline" onClick={() => void save()}>重试同步</button>}</span>}

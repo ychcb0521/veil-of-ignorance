@@ -49,6 +49,8 @@ import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import type { TimeMode } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { SignalLibraryBackup } from './SignalLibraryBackup';
+import type { EntryPeriodSignal } from '@/lib/entryPeriodSignals';
 import { TuringCupReplayPanel } from '@/components/TuringCupReplayPanel';
 import { useTuringReplayArchive } from '@/hooks/useTuringReplayArchive';
 import { turingReplaySamples } from '@/lib/turingReplaySamples';
@@ -949,6 +951,12 @@ export function TimeControl({
               {!entryPeriod && signals.length > 0 && (
                 <SignalTurnoverButton turing={turing} signals={signals} run={fish.turnover} busyReason={fish.progress?.status === 'running' || reconstructionRunning.current ? '捕捞或复原进行中，结束后再统计' : undefined} />
               )}
+              {(entryPeriod || turing) && <SignalLibraryBackup key={library + (user?.id ?? '')}
+                library={entryPeriod ? 'entry-period' : 'turing'} name={libraryName} signals={signals} disabled={entryNeedsSync || (turing && turingArchive.loading)}
+                onImport={rows => {
+                  if (entryPeriod) setEntrySignals(previous => mergeEntryPeriodSignals(previous, rows as EntryPeriodSignal[]));
+                  else setSavedTuringSignals(previous => mergeSignals(previous, rows.filter(row => !row.turingReplaySample || row.quality !== undefined || row.jumpIssue !== undefined)));
+                }} />}
               {turing && user && <TuringCupReplayPanel key={user.id} accountId={user.id} source={turingArchive} />}
               {!entryPeriod && signalAuditProgress && (
                 <span
