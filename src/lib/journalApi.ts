@@ -3127,6 +3127,7 @@ function symbolTimelineActivityIndex(
 export interface CampaignFullDataOptions {
   /** Current AuthContext account for a local paper read. Never taken from the URL or archive. */
   authenticatedViewerId?: string;
+  archiveBodyId?: string;
   signal?: AbortSignal;
   /** 已批量读取并水合的战役和腿；避免列表页再逐场请求同一份远端数据。 */
   source?: CampaignWithLegs;
@@ -3173,7 +3174,7 @@ export async function getCampaignFullData(
 }> {
   if (isPaperCampaignId(campaignId)) {
     return options.authenticatedViewerId
-      ? loadQualityCampaignData(options.authenticatedViewerId, campaignId, options.signal)
+      ? loadQualityCampaignData(options.authenticatedViewerId, campaignId, options.signal, options.archiveBodyId)
       : readQualityCampaign(campaignId, options.signal);
   }
   if (options.source && options.source.campaign.id !== campaignId) {

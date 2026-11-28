@@ -57,12 +57,34 @@ export async function readDiskSettings(file: File, round: DiskRound) {
   return value.settings;
 }
 
+// Carry just the clicked file handle across same-tab navigation. Never retain decoded pages.
+let pendingFile: {file: File; round: DiskRound; recordId: string; timer: ReturnType<typeof setTimeout>} | undefined;
+export function stageDiskCampaign(file: File, round: DiskRound, recordId: string) {
+  if (!recordId.startsWith(round.id + ':')) return;
+  clearTimeout(pendingFile?.timer);
+  pendingFile = {file, round, recordId, timer: setTimeout(() => { pendingFile = undefined; }, 15_000)};
+}
+
 /** Resolve links from disk-only rounds, including links opened in a fresh tab. */
-export async function readDiskCampaignRecord(owner: string, recordId: string, signal?: AbortSignal) {
+export async function readDiskCampaignRecord(owner: string, recordId: string, signal?: AbortSignal, bodyId?: string) {
+  if (pendingFile?.recordId === recordId && pendingFile.round.owner === owner && pendingFile.round.bodyId === bodyId) {
+    const {file, round, timer} = pendingFile;
+    clearTimeout(timer);
+    pendingFile = undefined;
+    return readRoundCampaignRecord(file, round, recordId, signal);
+  }
   const separator = recordId.indexOf(':');
   if (separator < 0 || !recordId.startsWith('monitor-') || typeof indexedDB === 'undefined') return;
   const folder = await monitorFolder(owner);
-  if (!folder || await folder.queryPermission({mode:'read'}) !== 'granted') return;
+  if (!folder || await folder.queryPermission({mode:'read'}) !== 'granted') {
+    if (bodyId) throw Error('读取这场战役需要连接本机监测目录。');
+    return;
+  }
+  return readFolderCampaignRecord(folder, owner, recordId, signal, bodyId);
+}
+
+export async function readFolderCampaignRecord(folder: MonitorFolder, owner: string, recordId: string, signal?: AbortSignal, bodyId?: string) {
+  const separator = recordId.indexOf(':');
   const roundId = recordId.slice(0, separator);
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(owner + '/' + roundId));
   const name = Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('') + '.index.json';
@@ -71,6 +93,7 @@ export async function readDiskCampaignRecord(owner: string, recordId: string, si
   catch (e) { if ((e as Error).name === 'NotFoundError') return; throw e; }
   const round: DiskRound = JSON.parse(await (await handle.getFile()).text());
   if (!validDiskRound(round, owner) || round.id !== roundId) throw Error('本机监测轮次索引不匹配。');
+  if (bodyId && round.bodyId !== bodyId) throw Error('本机文件与链接中的归档版本不一致。');
   return readRoundCampaignRecord(await (await folder.getFileHandle(round.data)).getFile(), round, recordId, signal);
 }
 
@@ -104,6 +127,10 @@ export async function monitorFolder(owner: string, folder?: Folder): Promise<Fol
     req.onupgradeneeded = () => req.result.createObjectStore('folders');
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
+    req.onblocked = () => {
+      req.onsuccess = () => req.result.close();
+      reject(Error('本机监测目录暂被其他页面占用，请重试。'));
+    };
   });
   try {
     return await new Promise<Folder | undefined>((resolve,reject)=>{

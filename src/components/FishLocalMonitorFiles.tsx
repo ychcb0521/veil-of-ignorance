@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { newQualityStudy } from '@/lib/fish/quality';
 import type { FishTemplateRenderer } from './FishLibraryTimeDirectory';
-import { createQualityTemplateTable, type QualityTemplateTable } from '@/lib/fish/qualityTemplateTable';
+import { createQualityTemplateTable, setTemplateCampaignPath, templateCampaignPath, type QualityTemplateTable } from '@/lib/fish/qualityTemplateTable';
 import { monitorRoundStudy } from '@/lib/fish/qualityMonitorArchive';
 import type { QualityVetoStage } from '@/lib/fish/qualityVetoStages';
 import type { QualityMonitorSetting } from '@/lib/fish/qualityMonitorLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { diskRounds, monitorFolder, readDiskPage, readDiskSettings, type DiskRound, type MonitorFolder } from '@/lib/fish/localMonitorFiles';
+import { monitorCampaignRecordId } from '@/lib/fish/qualityMonitorCampaign';
+import { stageDiskCampaign, diskRounds, monitorFolder, readDiskPage, readDiskSettings, type DiskRound, type MonitorFolder } from '@/lib/fish/localMonitorFiles';
 import type { QualityMonitorRecord } from '@/lib/fish/qualityMonitorLibrary';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 
@@ -88,6 +89,8 @@ function ArchiveTable({file, round, renderTemplate, close}: Selection & {renderT
           {id: round.id, startedAt: round.at, updatedAt: round.at, state: 'complete'}, records);
         // The disk snapshot is detached. Share exact copies of frozen conditions across its fills.
         for (const result of snapshot.results) {
+          const path = templateCampaignPath(result);
+          if (path) setTemplateCampaignPath(result, path + '&archive=' + round.bodyId);
           for (const stage of [result.activeVetoStage, ...(result.vetoStageSwitches ?? [])]) {
             if (!stage) continue;
             const key = JSON.stringify(stage.conditions);
@@ -111,7 +114,13 @@ function ArchiveTable({file, round, renderTemplate, close}: Selection & {renderT
     return () => { active = false; };
   }, [file, round]);
   const board = useMemo(() => table && renderTemplate(table, close, true), [table, renderTemplate, close]);
-  return <div className="min-w-0 space-y-2">
+  return <div className="min-w-0 space-y-2" onClickCapture={event => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const anchor = event.target instanceof Element && event.target.closest('a[href]');
+    if (!(anchor instanceof HTMLAnchorElement) || anchor.origin !== location.origin) return;
+    const recordId = monitorCampaignRecordId(anchor.pathname.split('/').pop() ?? '');
+    if (recordId && new URLSearchParams(anchor.search).get('archive') === round.bodyId) stageDiskCampaign(file, round, recordId);
+  }}>
     <button type="button" className={link} onClick={() => setShowSettings(!showSettings)}>查看冻结设置</button>
     {showSettings && settings && <pre className="max-h-48 overflow-auto text-xs">{JSON.stringify(settings,null,2)}</pre>}
     {error ? <p role="alert">{error}</p> : <>

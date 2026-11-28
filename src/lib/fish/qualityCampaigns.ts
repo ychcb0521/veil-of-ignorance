@@ -127,11 +127,15 @@ export async function listQualityCampaignData(owner: string, section: 'sell' | '
   const loaded = await loadCampaignStudy(owner);
   return { ...listQualityCampaignDataFromStudy(owner, loaded.study, section), warning: loaded.warning };
 }
-export async function loadQualityCampaignData(owner: string, id: string, signal?: AbortSignal): Promise<QualityCampaignData> {
+export async function loadQualityCampaignData(owner: string, id: string, signal?: AbortSignal, archiveBodyId?: string): Promise<QualityCampaignData> {
   throwIfReadAborted(signal);
   const instant = isInstantCampaignId(id), section = instant ? 'instant' : 'quality';
   const missing = '这场' + campaignSectionLabel(section) + '战役已永久移除';
-  const initialMarks = await loadQualityCampaignTrash(owner, section);
+  const monitorRecordId = monitorCampaignRecordId(id);
+  const [initialMarks, disk] = await Promise.all([
+    loadQualityCampaignTrash(owner, section),
+    monitorRecordId ? readDiskCampaignRecord(owner, monitorRecordId, signal, archiveBodyId) : undefined,
+  ]);
   throwIfReadAborted(signal);
   if (initialMarks[qualityCampaignTrashKey(id)]?.state === 'purged') {
     throw new Error(missing);
@@ -221,11 +225,9 @@ export async function loadQualityCampaignData(owner: string, id: string, signal?
     const metadata = original ? instantCampaignMetadata(original.record, original.round) : undefined;
     return applyTrash(buildInstantCampaignData(owner, { ...frozen, metadata }));
   }
-  const monitorRecordId = monitorCampaignRecordId(id);
   if (monitorRecordId) {
-    const disk = await readDiskCampaignRecord(owner, monitorRecordId, signal);
-    throwIfReadAborted(signal);
     if (disk) return applyTrash(buildMonitorCampaignData(owner, disk.record, disk.setting));
+    if (archiveBodyId) throw Error('已连接的本机目录中找不到这场战役的归档。');
   }
   // Resolve the working trade before synchronizing or downloading legacy history.
   if (typeof Worker === 'function' || typeof indexedDB !== 'undefined') {

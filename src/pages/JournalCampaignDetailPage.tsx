@@ -1,3 +1,5 @@
+import { monitorFolder, readFolderCampaignRecord, type MonitorFolder } from '@/lib/fish/localMonitorFiles';
+import { monitorCampaignRecordId } from '@/lib/fish/qualityMonitorCampaign';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { InstantOpenCampaignQuote } from '@/components/journal/InstantOpenCampaignQuote';
 import { UsdtLiveCampaignFills, usdtCampaignFillLabel, usdtFillTime } from '@/components/journal/UsdtLiveCampaignFills';
@@ -984,6 +986,9 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
   const location = useLocation();
   const detailParams = new URLSearchParams(location.search);
   if (!detailParams.has('section')) detailParams.set('section', isInstantCampaignId(id) ? 'instant' : paperCampaign ? 'quality' : 'personal');
+  const monitorRecord = id && monitorCampaignRecordId(id);
+  const archiveBodyId = monitorRecord ? detailParams.get('archive') ?? undefined : undefined;
+  detailParams.delete('archive');
   const detailSearch = '?' + detailParams.toString();
   const { user, profile } = useAuth();
   const viewerUserId = user?.id ?? null;
@@ -998,6 +1003,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
   const { getEffectiveTime, balance, positionsMap, priceMap } = trading;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [directoryIssue, setDirectoryIssue] = useState<string>();
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [campaign, setCampaign] = useState<TradeCampaign | null>(null);
   const templateNames = useCampaignTemplateNames(campaign ?? undefined);
@@ -1169,12 +1175,19 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
     }
     let cancelled = false;
     const controller = new AbortController();
+    const timeout = monitorRecord && !batchExport ? window.setTimeout(() => {
+      cancelled = true;
+      controller.abort();
+      setLoadError('本场监测记录读取超时。可以重试，或重新选择保存这场战役的本机监测目录。');
+      setLoading(false);
+    }, 30_000) : undefined;
     (async () => {
+      setDirectoryIssue(undefined);
       setLoading(true);
       setLoadError(null);
       try {
         // 列表页的后台自愈正好在跑这一场：等它落地再读（最多等 2 s），之后在本页的编辑不会被它晚到的写入盖回去
-        if (!batchExport) await waitForCampaignListHeal(id);
+        if (!batchExport && !paperCampaign) await waitForCampaignListHeal(id);
         if (cancelled) return;
         // 分支读取失败不是致命错误：战役本身照常打开，「已保存分支」一块显示原因与「重试」，
         // 而不是把人踢回战役列表（分支表偶发超时、权限抖动都不该让整场战役打不开）。
@@ -1182,7 +1195,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
         initialLocalReadRevisionRef.current = getPersistedStateHydrationRevision();
         const [full, branchesResult] = await Promise.all([
           batchExport ? loadBatchCampaignData(id, batchExport.snapshot)
-            : paperCampaign ? getCampaignFullData(id, { signal: controller.signal, authenticatedViewerId: viewerUserId }) : getCampaignFullData(id),
+            : paperCampaign ? getCampaignFullData(id, { signal: controller.signal, authenticatedViewerId: viewerUserId, ...(archiveBodyId ? {archiveBodyId} : {}) }) : getCampaignFullData(id),
           batchExport
             ? Promise.resolve({ branches: [] as CampaignCounterfactual[], error: null as string | null })
             : listCounterfactuals(id).then(
@@ -1244,11 +1257,12 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
           setLoadError(error instanceof Error ? error.message : String(error));
         }
       } finally {
+        clearTimeout(timeout);
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; controller.abort(); };
-  }, [id, viewerUserId, nav, detailSearch, adoptUnfilledOrderIds, batchExport, reportBatchError, paperCampaign, loadAttempt]);
+    return () => { cancelled = true; clearTimeout(timeout); controller.abort(); };
+  }, [monitorRecord, archiveBodyId, id, viewerUserId, nav, detailSearch, adoptUnfilledOrderIds, batchExport, reportBatchError, paperCampaign, loadAttempt]);
 
   const campaignOwnerId = campaign?.user_id ?? null;
   const instantSummary = campaign?.comparison?.instant;
@@ -2403,13 +2417,27 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
     setDeviationNotes(campaign.deviation_notes ?? {});
   }, [campaign, id]);
 
+  const pickFolder = (window as Window & {showDirectoryPicker?: (options: {mode: 'read'}) => Promise<MonitorFolder>}).showDirectoryPicker;
+  const reconnectDirectory = monitorRecord && viewerUserId && pickFolder && <Button variant="outline" onClick={async () => {
+    try {
+      const folder = await pickFolder.call(window, {mode: 'read'});
+      const found = await readFolderCampaignRecord(folder, viewerUserId, monitorRecord, undefined, archiveBodyId);
+      if (!found) throw Error('这个目录中没有当前账号的这条监测记录。');
+      await monitorFolder(viewerUserId, folder);
+      setLoadAttempt(n => n + 1);
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') setDirectoryIssue((error as Error).message);
+    }
+  }}>连接本机监测目录</Button>;
   if (loadError && !batchExport) return (
     <main className="min-h-screen bg-background p-6">
       <div role="alert" className="mx-auto max-w-xl space-y-4 rounded-xl border border-border bg-card p-6">
         <h1 className="font-medium">交易战役加载失败</h1>
         <p className="text-sm text-muted-foreground break-words">{loadError}</p>
+        {directoryIssue && <p role="alert">{directoryIssue}</p>}
         <p className="text-sm text-muted-foreground">原有记录仍保留，请重试读取。</p>
         <div className="flex gap-3">
+          {reconnectDirectory}
           <Button onClick={() => setLoadAttempt(value => value + 1)}>重试读取</Button>
           <Button variant="outline" onClick={() => nav(`/journal/campaigns${detailSearch}`)}>返回战役列表</Button>
         </div>
@@ -2420,6 +2448,7 @@ function CampaignDetail({ trading, batchExport }: {trading: DetailTradingInputs;
     if (batchExport) return null;
     return (
       <div className="min-h-screen bg-background p-6 space-y-4">
+        {monitorRecord && <div role="status">正在读取这场持仓监测战役… {reconnectDirectory}{directoryIssue && <p>{directoryIssue}</p>}</div>}
         <Skeleton className="h-16 w-full bg-card" />
         <Skeleton className="h-36 w-full bg-card" />
         <Skeleton className="h-[560px] w-full bg-card" />

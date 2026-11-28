@@ -2,7 +2,7 @@
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { diskRounds, readRoundCampaignRecord, readDiskPage, validDiskRound, type DiskRound, type MonitorFolder } from '../localMonitorFiles';
+import { diskRounds, stageDiskCampaign, readDiskCampaignRecord, readRoundCampaignRecord, readDiskPage, validDiskRound, type DiskRound, type MonitorFolder } from '../localMonitorFiles';
 
 const owner='one', id='monitor-123';
 const bytes=gzipSync(JSON.stringify([{id:id+':1',source:{symbol:'TEST'}}]));
@@ -39,6 +39,10 @@ it('resolves exact campaign records even when old membership order differs from 
   const file=new File(chunks.map(b=>new Uint8Array(b)),'round');
   const manifest={...round,count:33,pages:blocks.slice(0,2),settings:blocks[2]};
   const match=await readRoundCampaignRecord(file,manifest,ids[32]);
+  stageDiskCampaign(file,manifest,ids[32]);
+  expect(await readDiskCampaignRecord('other',ids[32],undefined,manifest.bodyId)).toBeUndefined();
+  expect((await readDiskCampaignRecord(owner,ids[32],undefined,manifest.bodyId))?.record.id).toBe(ids[32]);
+  expect(await readDiskCampaignRecord(owner,ids[32],undefined,manifest.bodyId)).toBeUndefined();
   expect(match.record.id).toBe(ids[32]);expect(match.setting.plan).toEqual({value:NaN});
   await expect(readRoundCampaignRecord(file,manifest,'other')).rejects.toThrow('不在');
 });
