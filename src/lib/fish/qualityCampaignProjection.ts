@@ -1,6 +1,7 @@
 import {routedQualityPlan} from './qualityPlanRouter';
 import {effectiveQualitySellPlan} from './qualitySellStages';
 import {withQualityMirrorLegs} from './qualityMirrorLegs';
+import { qualityAdditionFills } from './qualityAddition';
 import { withQualityAdditionCampaign } from './qualityAdditionCampaign';
 import {qualitySourceLabel} from './qualitySources';
 import { qualityPeakPct } from './qualityPresentation';
@@ -127,7 +128,7 @@ export function buildQualityCampaignData(
     ...(closed&&remaining>0?[closeRecord(recordId,end,r.endPrice!,remaining,pnl!-mirrorPnl,r.exitSnapshot?.cause?qualityStaticDrawdownReason(r)??label:label)]:[])];
   const data: QualityCampaignData = { campaign, legs: [leg], tradeRecords, pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [], legExitPriceCorrections: {},
     timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0, missingAnchorNodes: [], verdicts: {}, disagreements: [] } };
-  return withQualityMirrorLegs(r.additionFill ? withQualityAdditionCampaign(data, {...run,plan}) : data);
+  return withQualityMirrorLegs(qualityAdditionFills(r).length ? withQualityAdditionCampaign(data, {...run,plan}) : data);
 }
 /** 各卖出方案的买入过滤，一行写完：「状态 S 原始值：状态 S 原始值 > 0.7；CDA 原始值：不过滤」。都没开过滤时为空。 */
 export function qualityBuyFilterSummary(study: FishQualityStudy): string {
@@ -174,7 +175,7 @@ export function qualityMonitorCampaignDataFromStudy(owner:string, study:FishQual
   if(!record||!setting)throw new QualityCampaignNotFoundError('本账号未找到这条监测记录，请在保存该监测库的账号中打开');
   return buildMonitorCampaignData(owner,record,setting);
 }
-function buildMonitorCampaignData(owner:string,record:QualityMonitorRecord,setting:QualityMonitorSetting):QualityCampaignData {
+export function buildMonitorCampaignData(owner:string,record:QualityMonitorRecord,setting:QualityMonitorSetting):QualityCampaignData {
   const run=qualityMonitorCampaignRun(record,setting);
   if(!run)throw new Error('这条监测记录尚未形成有效交易，不能生成交易战役');
   const data=buildQualityCampaignData(owner,run,'sell',qualityMonitorCampaignId(record.id), {

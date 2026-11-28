@@ -1,4 +1,5 @@
-import type { QualityMonitorRecord } from './qualityMonitorLibrary';
+import { reviveAccountBlobValue } from '../accountBlobCodec';
+import type { QualityMonitorSetting, QualityMonitorRound, QualityMonitorRecord } from './qualityMonitorLibrary';
 
 export type Block = [number, number, string];
 type Folder = FileSystemDirectoryHandle & {
@@ -54,6 +55,46 @@ export async function readDiskPage(file: File, round: DiskRound, page: number): 
 export async function readDiskSettings(file: File, round: DiskRound) {
   const value = await readBlock(file, round.settings);
   return value.settings;
+}
+
+/** Resolve links from disk-only rounds, including links opened in a fresh tab. */
+export async function readDiskCampaignRecord(owner: string, recordId: string, signal?: AbortSignal) {
+  const separator = recordId.indexOf(':');
+  if (separator < 0 || !recordId.startsWith('monitor-') || typeof indexedDB === 'undefined') return;
+  const folder = await monitorFolder(owner);
+  if (!folder || await folder.queryPermission({mode:'read'}) !== 'granted') return;
+  const roundId = recordId.slice(0, separator);
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(owner + '/' + roundId));
+  const name = Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('') + '.index.json';
+  let handle: FileSystemFileHandle;
+  try { handle = await folder.getFileHandle(name); }
+  catch (e) { if ((e as Error).name === 'NotFoundError') return; throw e; }
+  const round: DiskRound = JSON.parse(await (await handle.getFile()).text());
+  if (!validDiskRound(round, owner) || round.id !== roundId) throw Error('本机监测轮次索引不匹配。');
+  return readRoundCampaignRecord(await (await folder.getFileHandle(round.data)).getFile(), round, recordId, signal);
+}
+
+export async function readRoundCampaignRecord(file: File, round: DiskRound, recordId: string, signal?: AbortSignal) {
+  if (signal?.aborted) throw new DOMException('读取已取消', 'AbortError');
+  const metadata = await readBlock(file, round.settings);
+  const membership: QualityMonitorRound | undefined = metadata.rounds?.find((r: QualityMonitorRound) => r.id === round.id);
+  const index = membership?.recordIds?.indexOf(recordId) ?? -1;
+  if (index < 0) throw Error('这条记录不在所选监测轮次中。');
+  const page = Math.floor(index / round.pageSize);
+  const find = async (n: number) => {
+    if (signal?.aborted) throw new DOMException('读取已取消', 'AbortError');
+    return (await readDiskPage(file, round, n)).find(r => r.id === recordId);
+  };
+  let record = await find(page);
+  // Older manifests verified membership as a set, without promising physical order.
+  for (let n = 0; !record && n < round.pages.length; n++) if (n !== page) record = await find(n);
+  if (signal?.aborted) throw new DOMException('读取已取消', 'AbortError');
+  const setting = metadata.settings?.find((s: QualityMonitorSetting) => s.id === record?.settingId);
+  if (!record || !setting) throw Error('这条监测记录或对应的冻结设置缺失。');
+  // Native replay exports use the account codec for values such as NaN in historical definitions.
+  return JSON.parse(JSON.stringify({record, setting}), reviveAccountBlobValue) as {
+    record: QualityMonitorRecord; setting: QualityMonitorSetting;
+  };
 }
 
 /** Only the selected folder handle is persisted, scoped to the signed-in account. */

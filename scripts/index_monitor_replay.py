@@ -3,6 +3,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -62,6 +63,31 @@ def records(path, metadata):
                 raise ValueError("Invalid record delimiter")
 
 
+def validate_campaign_record(record):
+    result = record.get("result") or {}
+    if result.get("entryRejected") or result.get("status") not in ("open", "closed"):
+        return
+    def finite(key):
+        value = result.get(key)
+        return type(value) in (int, float) and math.isfinite(value)
+    if (not all(result.get(key) for key in ("key", "groupId", "sampleId"))
+            or not all(finite(key) and result[key] > 0 for key in ("entryTime", "entryPrice", "evaluatedAt"))
+            or not record.get("source", {}).get("symbol")):
+        raise ValueError(f"Incomplete campaign entry: {record['id']}")
+    if result["status"] == "closed" and not (
+            finite("endTime") and result["endTime"] >= result["entryTime"]
+            and finite("endPrice") and result["endPrice"] > 0 and finite("pnl")):
+        raise ValueError(f"Incomplete campaign settlement: {record['id']}")
+    for fill in (result.get("additionFills") or []) + ([result["additionFill"]] if result.get("additionFill") else []):
+        if not all(type(fill.get(k)) in (int, float) and math.isfinite(fill[k]) and fill[k] > 0
+                   for k in ("at", "price", "quantity", "notional")):
+            raise ValueError(f"Incomplete campaign addition: {record['id']}")
+    mirror = result.get("mirrorFill")
+    if mirror and (not all(type(mirror.get(k)) in (int, float) and math.isfinite(mirror[k]) and mirror[k] > 0
+                           for k in ("at", "price", "fraction")) or mirror["fraction"] > 1):
+        raise ValueError(f"Incomplete campaign mirror fill: {record['id']}")
+
+
 def write_block(out, value):
     raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
     data = gzip.compress(raw, compresslevel=4, mtime=0)
@@ -78,6 +104,7 @@ def package(source, target, owner):
         raise ValueError("Native round and verified body disagree")
     frozen = {}
     ids = set()
+    setting_ids = set()
     blocks = []
     page = []
     with tempfile.NamedTemporaryFile(dir=target, delete=False) as out:
@@ -88,6 +115,8 @@ def package(source, target, owner):
                 rid = record["id"]
                 if rid in ids or not rid.startswith(entry["id"] + ":"):
                     raise ValueError("Duplicate or foreign record")
+                validate_campaign_record(record)
+                setting_ids.add(record["settingId"])
                 ids.add(rid)
                 page.append(record)
                 if len(page) == PAGE:
@@ -99,6 +128,10 @@ def package(source, target, owner):
             if (len(rounds) != 1 or rounds[0]["id"] != entry["id"]
                     or ids != set(rounds[0]["recordIds"]) or len(ids) != sum(proof["counts"].values())):
                 raise ValueError("Native membership or count mismatch")
+            available = {s["id"] for s in frozen["settings"] if s.get("plan", {}).get("snapshot")
+                         and isinstance(s.get("detectors"), list) and s.get("notional", 0) > 0 and s.get("leverage", 0) > 0}
+            if not setting_ids <= available:
+                raise ValueError("Missing frozen campaign settings")
             settings = write_block(out, frozen)
         digest = file_hash(temp)
         manifest = dict(version=1, owner=owner, id=entry["id"], at=entry["at"],

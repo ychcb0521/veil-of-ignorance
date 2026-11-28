@@ -1,6 +1,8 @@
 import { accountFeatureDefs } from '@/lib/featureSource';
 import { loadQualityStudy, prepareQualityCampaignRead } from './qualityStore';
-import { buildQualityCampaignData, listQualityCampaignDataFromStudy, qualityCampaignDetailFromStudy, type QualityCampaignData } from './qualityCampaignProjection';
+import { monitorCampaignRecordId } from './qualityMonitorCampaign';
+import { readDiskCampaignRecord } from './localMonitorFiles';
+import { buildMonitorCampaignData, buildQualityCampaignData, listQualityCampaignDataFromStudy, qualityCampaignDetailFromStudy, type QualityCampaignData } from './qualityCampaignProjection';
 import { readQualityCampaignProjection, withStoredQualityCampaignStudy, type QualityCampaignReadRequest, type QualityCampaignReadResult } from './qualityCampaignReader';
 import { mergeQualityWorkspaceExecution } from './qualityWorkspaceExecutionMerge';
 import { paperCampaignPerformance, qualityCampaignPerformanceFromStudy } from './qualityCampaignPerformance';
@@ -218,6 +220,12 @@ export async function loadQualityCampaignData(owner: string, id: string, signal?
       && qualitySignalTime(record.sample.source) === frozen.source.timeMs && record.matchedAt === frozen.buyAt);
     const metadata = original ? instantCampaignMetadata(original.record, original.round) : undefined;
     return applyTrash(buildInstantCampaignData(owner, { ...frozen, metadata }));
+  }
+  const monitorRecordId = monitorCampaignRecordId(id);
+  if (monitorRecordId) {
+    const disk = await readDiskCampaignRecord(owner, monitorRecordId, signal);
+    throwIfReadAborted(signal);
+    if (disk) return applyTrash(buildMonitorCampaignData(owner, disk.record, disk.setting));
   }
   // Resolve the working trade before synchronizing or downloading legacy history.
   if (typeof Worker === 'function' || typeof indexedDB !== 'undefined') {
