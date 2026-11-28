@@ -511,10 +511,11 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       if (!maySendBuy()) throw Error('开仓条件已失效，暂缓修改实盘合约设置');
     };
     if (action.action === 'open') await protection?.beforeOpening(market.symbol);
+    const openingArgs: [confirm?: () => void, notional?: number] = action.action === 'open' ? [confirmOpening, Number(quantity) * price] : [];
     const executionLeverage = await exchange.check(market, mode, current.held, current.entry, action.action === 'open',
       side === 'BUY' ? liveLeverage ?? row.status.executionLeverage ?? campaign.leverage : 0,
       row.managed ? campaign.frozenMonitor?.admission.round.instantPosition && row.managed.followBasis ? 'frozen-leverage' : 'existing-position' : undefined, liveId ? protectionIds?.(market.symbol, liveId) : undefined, unsettledBuyId,
-      ...(action.action === 'open' ? [confirmOpening, Number(quantity) * price] as const : []));
+      ...openingArgs);
     if (action.action === 'open' && executionLeverage) row.status.executionLeverage = executionLeverage;
     if (action.action !== 'open') {
       const actual = await readOriginalPosition(row, market);
