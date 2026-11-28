@@ -65,7 +65,7 @@ import {
   type AddSizingVerdict,
 } from '@/lib/campaignAddSizingCheck';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
-import { buildCampaignLegGeometricFactors, buildCampaignLegTheoreticalFactors, describeLegGeometricFactor, formatLegGeometricFactor, LEG_THEORETICAL_FACTOR_HINT, LEG_GEOMETRIC_FACTOR_HINT, LEG_GEOMETRIC_FACTOR_LABEL } from '@/lib/campaignLegGeometricFactor';
+import { formatPositionAfterAdd, buildCampaignLegGeometricFactors, buildCampaignLegTheoreticalFactors, describeLegGeometricFactor, formatLegGeometricFactor, LEG_THEORETICAL_FACTOR_HINT, LEG_GEOMETRIC_FACTOR_HINT, LEG_GEOMETRIC_FACTOR_LABEL } from '@/lib/campaignLegGeometricFactor';
 import { buildCampaignMirrorReductionFactors, MIRROR_REDUCTION_FACTOR_HINT } from '@/lib/campaignMirrorReductionFactor';
 
 interface Props {
@@ -206,13 +206,13 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
 // 几何复利 76px：表头只留 1+α 与淡说明图标，数字与原列右沿对齐；加仓校验 64px 仅显示多加百分比。
 // 涨跌幅 68、操作 56（两枚 24px 图标）；统一列间距 5px，不缩小数字字号或挤压 ΔR 胶囊。
 // 【用户要求】L_磨损逐腿列出：「磨损」68px 紧跟加仓校验（同属执行质量）。
-const LEGS_GRID = 'grid-cols-[132px_148px_96px_64px_80px_64px_68px_136px_60px_56px_76px_64px_68px_56px_minmax(184px,1fr)_56px]';
+const LEGS_GRID = 'grid-cols-[132px_148px_96px_64px_80px_64px_68px_136px_60px_56px_80px_76px_64px_68px_56px_minmax(184px,1fr)_56px]';
 
 /**
  * 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。
  * = Σ轨道 + 列间距 5px × (列数 − 1) + 左右 px-3。窄于下限时才横向滚动。
  */
-const LEGS_MIN_WIDTH = 'min-w-[1507px]';
+const LEGS_MIN_WIDTH = 'min-w-[1592px]';
 
 /**
  * 冻结列：「角色」横向滚动时钉在左缘，滑到右边的列也认得出是哪条腿。
@@ -895,6 +895,7 @@ export function CampaignLegsList({
               <span>1+α</span>
               <QuietInfo label="仓位的几何复利"><p>{LEG_GEOMETRIC_FACTOR_HINT}</p><p>{MIRROR_REDUCTION_FACTOR_HINT}</p><p>点击加仓行的倍数，查看实际币数代入的完整计算过程；镜像止盈行显示 1−αf，点击展开减仓过程。</p></QuietInfo>
             </div>
+            <div className="text-right whitespace-nowrap" title="本次成交后实际持币数 ÷ 首仓总币数（含初始镜像）">即时几何仓位</div>
             <div className="flex items-center justify-end gap-0.5 whitespace-nowrap" aria-label="仓位的几何复利（理论）">
               <span>1+α<span className="text-[9px]">（理论）</span></span>
               <QuietInfo label="仓位的几何复利（理论）"><p>{LEG_THEORETICAL_FACTOR_HINT}</p><p>{MIRROR_REDUCTION_FACTOR_HINT}</p></QuietInfo>
@@ -1141,6 +1142,7 @@ export function CampaignLegsList({
                         </button>
                       : '—')}
                   </div>
+                  <div data-testid={`leg-position-after-add-${leg.id}`} className="text-right font-medium tabular-nums text-foreground/80">{showGeometricFactor && leg.leg_role?.startsWith('main_add_') && formatPositionAfterAdd(legGeometricFactors.get(leg.id))}</div>
                   <div data-testid={`leg-geometric-factor-theoretical-${leg.id}`} className="text-right font-medium tabular-nums leading-snug text-foreground/70">
                     {showGeometricFactor && ((leg.leg_role === 'mirror_tp' ? legGeometricFactors.get(leg.id) : theoreticalFactors.get(leg.id))
                       ? <button type="button" aria-label={leg.leg_role === 'mirror_tp' ? '查看镜像止盈的理论减仓因子计算过程' : `查看加仓${leg.leg_role?.match(/^main_add_(\d+)$/)?.[1] ?? ''}的理论仓位几何复利计算过程`}
@@ -1446,6 +1448,7 @@ export function CampaignLegsList({
                           <div />
                           <div />
                           <div />
+                          <div />
                         </div>
                       );
                     })}
@@ -1521,6 +1524,7 @@ export function CampaignLegsList({
                   </>
                 )}
               </div>
+              <div />
               <div />
               <div />
               <div />

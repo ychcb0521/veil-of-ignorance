@@ -8,6 +8,7 @@ export interface LegGeometricFactor {
   beforeCoins: number;
   addCoins: number;
   multiple: number;
+  positionAfter?: number;
 }
 
 export interface LegTheoreticalGeometricFactor extends LegGeometricFactor {
@@ -50,8 +51,13 @@ export function buildCampaignLegGeometricFactors(input: CampaignAddSizingInput):
     const multiple = before != null && added != null ? 1 + added / before : NaN;
     return [step.legId, Number.isFinite(step.openTime) && before != null && added != null
       && before > 0 && added > 0 && [before, added, multiple].every(Number.isFinite)
-      ? { beforeCoins: before, addCoins: added, multiple } : null];
+      ? { beforeCoins: before, addCoins: added, multiple, positionAfter: step.initialCoins && step.initialCoins > 0 ? (before + added) / step.initialCoins : undefined } : null];
   }));
+}
+
+export function formatPositionAfterAdd(factor: LegGeometricFactor | null | undefined): string {
+  const value = factor?.positionAfter;
+  return value != null && Number.isFinite(value) ? value.toFixed(2) + '×' : '—';
 }
 
 export function formatLegGeometricFactor(factor: LegGeometricFactor | null | undefined): string {

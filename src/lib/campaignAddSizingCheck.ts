@@ -616,7 +616,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
 
 /** Actual add ratios use the same partial-close ledger as validation, but do not require a stop order. */
 export function resolveCampaignAddQuantitySteps(input: CampaignAddSizingInput): Array<{
-  legId: string; openTime: number; beforeCoins: number | null; addCoins: number | null;
+  legId: string; openTime: number; initialCoins: number | null; beforeCoins: number | null; addCoins: number | null;
 }> {
   const corrections = input.legExitPriceCorrections ?? {};
   const records = buildTradeRecordLookup(input.tradeRecords);
@@ -628,6 +628,14 @@ export function resolveCampaignAddQuantitySteps(input: CampaignAddSizingInput): 
     if (leg.leg_role === 'mirror_tp' && !leg.trade_record_id && !cuts.length && snapshot == null) return [];
     return [buildLedger(leg, executions.get(leg.id)!, cuts, snapshot, corrections)];
   });
+  const openingCoins = (direction: TradeJournal['direction']) => {
+    const opening = ledgers.filter(({leg}) => leg.direction === direction && (leg.leg_role === 'main_open' || leg.leg_role === 'mirror_tp'));
+    if (!opening.length || opening.some(row => row.open == null)) return null;
+    const first = Math.min(...opening.map(row => row.open!));
+    const batch = opening.filter(row => row.open === first);
+    if (!batch.some(row => row.leg.leg_role === 'main_open') || batch.some(row => row.coins == null)) return null;
+    return batch.reduce((sum,row) => sum + row.coins!, 0);
+  };
   return input.legs.filter(leg => (leg.leg_role ?? '').startsWith('main_add_') && (
     !!leg.trade_record_id || leg.post_realized_pnl != null || !!leg.post_real_close_time || !!leg.post_simulated_close_time
   )).map(add => {
@@ -646,7 +654,7 @@ export function resolveCampaignAddQuantitySteps(input: CampaignAddSizingInput): 
       else if (beforeCoins != null) beforeCoins += Math.max(0, ledger.coins - closed);
     }
     return {
-      legId: add.id, openTime: t ?? Number.NaN, beforeCoins,
+      legId: add.id, openTime: t ?? Number.NaN, initialCoins: openingCoins(add.direction), beforeCoins,
       addCoins: positive(execution.entryPrice) && positive(add.pre_position_size) ? add.pre_position_size / execution.entryPrice : null,
     };
   }).sort((a, b) => a.openTime - b.openTime || sequence(input.legs.find(leg => leg.id === a.legId)!) - sequence(input.legs.find(leg => leg.id === b.legId)!));

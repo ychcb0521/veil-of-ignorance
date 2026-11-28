@@ -57,7 +57,7 @@ import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
 import { formatForeignReplayOrdersNote } from '@/lib/campaignReverseOrderLines';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
-import { buildCampaignLegGeometricFactors, buildCampaignLegTheoreticalFactors, formatLegGeometricFactor } from '@/lib/campaignLegGeometricFactor';
+import { formatPositionAfterAdd, buildCampaignLegGeometricFactors, buildCampaignLegTheoreticalFactors, formatLegGeometricFactor } from '@/lib/campaignLegGeometricFactor';
 import { buildCampaignMirrorReductionFactors } from '@/lib/campaignMirrorReductionFactor';
 
 type ExportInput = {
@@ -238,6 +238,7 @@ const COLUMNS = [
   // 与页面一样只有这一列占比，且按战役主方向取一侧：主多看多单、主空看空单（表头的列名由 drawLegsTable 按那一侧写，见 SHARE_COLUMN_INDEX）
   { title: LEG_POSITION_SHARE_COLUMN_TITLES.long, width: 88 },
   { title: '1+α', width: 112 },
+  { title: '即时几何仓位', width: 120 },
   { title: '1+α（理论）', width: 112 },
   // 170：红叉下面把 Plan B 正确上限的币量与 U 名义仓位都写清。
   { title: '加仓校验', width: 170 },
@@ -892,6 +893,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       legShareCell(position, shareSide),
       [{ text: showGeometricFactor
         ? formatLegGeometricFactor(legGeometricFactors.get(leg.id)) : '', color: '#475569', bold: true }],
+      [{ text: showGeometricFactor && leg.leg_role?.startsWith('main_add_') ? formatPositionAfterAdd(legGeometricFactors.get(leg.id)) : '', color: '#475569', bold: true }],
       [{ text: showGeometricFactor ? formatLegGeometricFactor(leg.leg_role === 'mirror_tp' ? legGeometricFactors.get(leg.id) : theoreticalFactors.get(leg.id)) : '', color: '#475569', bold: true }],
       // 加仓校验：与页面同构——合规只是一枚淡灰小对号，过大则写明正确币量上限及 U 名义仓位；非加仓行留空
       ((): CampaignLegsExportCellLine[] => {
@@ -1015,6 +1017,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           [{ text: '' }],
           [{ text: '' }],
           [{ text: '' }],
+          [{ text: '' }],
       ];
       return {
         legId: `${leg.id}-phase-${phase.index}`,
@@ -1073,6 +1076,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     // Per-add factors are multiplied in the overview, not summed in the footer.
     [{ text: '' }],
     [{ text: '' }],
+    EMPTY_CELL,
     // 加仓校验
     [{ text: '' }],
     // 磨损：合计 = L_磨损（R），下行括号里是金额

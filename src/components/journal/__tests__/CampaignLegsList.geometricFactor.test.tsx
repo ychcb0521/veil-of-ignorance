@@ -45,8 +45,11 @@ describe('Legs per-add geometric factor', () => {
     expect(header).not.toHaveTextContent('仓位的几何复利');
     expect(within(header).getByRole('button', { name: '仓位的几何复利说明' })).toBeInTheDocument();
     expect(header.previousElementSibling).toBe(screen.getByRole('button', { name: /^按多单占比排序/ }));
-    expect(header.nextElementSibling).toHaveTextContent('1+α（理论）');
-    expect(header.nextElementSibling?.nextElementSibling).toHaveTextContent('加仓校验');
+    expect(header.nextElementSibling).toHaveTextContent('即时几何仓位');
+    expect(header.nextElementSibling?.nextElementSibling).toHaveTextContent('1+α（理论）');
+    expect(screen.getByTestId('leg-position-after-add-add1')).toHaveTextContent('3.04×');
+    expect(screen.getByTestId('leg-position-after-add-add2')).toHaveTextContent('4.57×');
+    expect(header.nextElementSibling?.nextElementSibling?.nextElementSibling).toHaveTextContent('加仓校验');
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
     expect(screen.getByTestId('leg-geometric-factor-add2')).toHaveTextContent('1.50×');
     expect(screen.getByTestId('leg-geometric-factor-main')).toBeEmptyDOMElement();
@@ -60,9 +63,9 @@ describe('Legs per-add geometric factor', () => {
     expect(png.find(row => row.legId === 'add1')!.cells[10][0].text).toBe('6.09×');
     expect(png.find(row => row.legId === 'add2')!.cells[10][0].text).toBe('1.50×');
     expect(png.find(row => row.legId === 'mirror')!.cells[10][0].text).toBe('0.50×');
-    expect(png.find(row => row.legId === 'mirror')!.cells[11][0].text).toBe('0.50×');
-    expect(png.every(row => row.cells.length === 16)).toBe(true);
-    expect(screen.getByTestId('legs-total-row').children).toHaveLength(16);
+    expect(png.find(row => row.legId === 'mirror')!.cells[12][0].text).toBe('0.50×');
+    expect(png.every(row => row.cells.length === 17)).toBe(true);
+    expect(screen.getByTestId('legs-total-row').children).toHaveLength(17);
     fireEvent.click(screen.getByRole('button', { name: /^按多单占比排序/ }));
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
   });
@@ -160,7 +163,7 @@ describe('Legs per-add geometric factor', () => {
     expect(metrics.positionGeometricMultiple).toBeCloseTo(0.5 * 6.09 * 1.5);
     expect(metrics.positionGeometricMultipleTheoretical).toBeCloseTo(0.5 * 8 * (1 + (130 - (1000 + 50.9 * 120) / 60.9) / 10));
     const png = buildCampaignLegsExportRows({ ...data, reverseHedgeOrders: orders });
-    expect(png.find(row => row.legId === 'add1')!.cells[11][0].text).toBe('8.00×');
+    expect(png.find(row => row.legId === 'add1')!.cells[12][0].text).toBe('8.00×');
   });
   it('an add without actual-fill evidence never invents a geometric factor', () => {
     const data = example();
